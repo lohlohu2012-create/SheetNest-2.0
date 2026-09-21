@@ -12,6 +12,10 @@ Native desktop software for nesting and laser-cutting preparation of metal sheet
 - Bounded/adaptive feasibility candidate search for large parts
 - Sheet margin and inter-part gap
 - Multiple instances and rotations
+- Per-part quantities for mixed DXF jobs
+- Stable instanceId/unitId tracking
+- Per-instance placement diagnostics with failure stage
+- Built-in benchmark: 1-iteration baseline vs configured optimized search
 - Nesting result visualization
 - Draggable sheet layouts in the workspace
 - DXF layout export
