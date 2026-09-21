@@ -296,14 +296,14 @@ std::vector<Candidate> candidatesFor(
         // Continuous NFP feasibility boundary: candidate positions are
         // generated along the entire admissible boundary, not only at NFP
         // vertices. Final collision/clearance checks remain authoritative.
-        const placementMinX = margin - pb.minX;
-        const placementMinY = margin - pb.minY;
-        const placementMaxX = sheetSize.width - margin - pb.maxX;
-        const placementMaxY = sheetSize.height - margin - pb.maxY;
+        const double placementMinX = margin - pb.minX;
+        const double placementMinY = margin - pb.minY;
+        const double placementMaxX = sheetSize.width - margin - pb.maxX;
+        const double placementMaxY = sheetSize.height - margin - pb.maxY;
 
         if (placementMaxX >= placementMinX &&
             placementMaxY >= placementMinY) {
-            const region = nfp::feasibilityRegion(
+            const auto region = nfp::feasibilityRegion(
                 placed.outer,
                 part,
                 rotation,
@@ -314,7 +314,7 @@ std::vector<Candidate> candidatesFor(
                 g
             );
 
-            const boundarySpacing = std::max(
+            const double boundarySpacing = std::max(
                 2.0,
                 std::min(12.0, g > 0.0 ? g * 2.0 : 6.0)
             );
