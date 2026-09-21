@@ -31,12 +31,14 @@ struct Segment {
     Polygon points;
     Point start{};
     Point end{};
+    std::string layer;
     bool used{false};
 };
 
 struct Loop {
     Polygon polygon;
     std::string source;
+    std::string layer;
     double area{};
 };
 
@@ -146,6 +148,17 @@ double groupValue(const Entity& e, int code, double fallback = 0.0) {
 int groupInt(const Entity& e, int code, int fallback = 0) {
     for (const auto& g : e.groups) {
         if (g.code == code) return integer(g.value);
+    }
+    return fallback;
+}
+
+std::string groupString(
+    const Entity& e,
+    int code,
+    const std::string& fallback = {}
+) {
+    for (const auto& g : e.groups) {
+        if (g.code == code) return g.value;
     }
     return fallback;
 }
@@ -335,7 +348,8 @@ std::vector<DxfContour> classifyLoops(std::vector<Loop> loops) {
         result.push_back({
             std::move(outer),
             {},
-            loops[i].source + "-" + std::to_string(result.size() + 1)
+            loops[i].source + "-" + std::to_string(result.size() + 1),
+            loops[i].layer
         });
     }
 
@@ -392,8 +406,10 @@ std::vector<Loop> connectSegments(
             std::size_t next = segments.size();
             bool reversed = false;
 
+            const auto& currentSegment = segments[startIndex];
             for (std::size_t i = 0; i < segments.size(); ++i) {
                 if (segments[i].used) continue;
+                if (segments[i].layer != currentSegment.layer) continue;
                 if (samePoint(segments[i].start, current)) {
                     next = i;
                     reversed = false;
@@ -425,7 +441,12 @@ std::vector<Loop> connectSegments(
         }
 
         if (closed && polygon.size() >= 3) {
-            loops.push_back({std::move(polygon), "LINE/ARC", signedArea(polygon)});
+            loops.push_back({
+                std::move(polygon),
+                "LINE/ARC",
+                segments[startIndex].layer,
+                signedArea(polygon)
+            });
         } else {
             diagnostics.push_back({
                 DxfSeverity::Warning,
@@ -453,7 +474,7 @@ std::vector<Segment> collectSegments(
             const auto a = groupPoint(e, 10, 20);
             const auto b = groupPoint(e, 11, 21);
             if (!samePoint(a, b)) {
-                segments.push_back({{a, b}, a, b, false});
+                segments.push_back({{a, b}, a, b, groupString(e, 8, "0"), false});
             }
             ++i;
             continue;
@@ -478,7 +499,7 @@ std::vector<Segment> collectSegments(
             );
 
             if (arc.size() >= 2) {
-                segments.push_back({arc, arc.front(), arc.back(), false});
+                segments.push_back({arc, arc.front(), arc.back(), groupString(e, 8, "0"), false});
             }
             ++i;
             continue;
@@ -488,7 +509,12 @@ std::vector<Segment> collectSegments(
             auto p = circle(groupPoint(e, 10, 20), groupValue(e, 40), tolerance);
             if (p.size() >= 3) {
                 const double area = signedArea(p);
-                directLoops.push_back({std::move(p), "CIRCLE", area});
+                directLoops.push_back({
+                    std::move(p),
+                    "CIRCLE",
+                    groupString(e, 8, "0"),
+                    area
+                });
             }
             ++i;
             continue;
@@ -499,7 +525,12 @@ std::vector<Segment> collectSegments(
             auto p = lwPolyline(e, closed, tolerance);
             if (closed && p.size() >= 3) {
                 const double area = signedArea(p);
-                directLoops.push_back({std::move(p), "LWPOLYLINE", area});
+                directLoops.push_back({
+                    std::move(p),
+                    "LWPOLYLINE",
+                    groupString(e, 8, "0"),
+                    area
+                });
             } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
@@ -532,7 +563,12 @@ std::vector<Segment> collectSegments(
 
             if (closed && p.size() >= 3) {
                 const double area = signedArea(p);
-                directLoops.push_back({std::move(p), "POLYLINE", area});
+                directLoops.push_back({
+                    std::move(p),
+                    "POLYLINE",
+                    groupString(e, 8, "0"),
+                    area
+                });
             } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
