@@ -7,12 +7,19 @@
 
 namespace sheetnest {
 struct Part { std::string id; Shape shape; };
-struct Instance { std::string id; Part part; };
+struct Instance { std::string id; Part part; std::string unitId{}; };
 struct Sheet { double width{}, height{}, marginMm{}; };
-struct Placement { std::string id; double x{}, y{}; int rotation{}; };
+struct Placement { std::string id; double x{}, y{}; int rotation{}; std::string unitId{}; };
+struct PlacementDiagnostic {
+  std::string instanceId;
+  std::string unitId;
+  std::string stage;
+  std::string message;
+};
 struct Result {
   std::vector<std::vector<Placement>> sheets;
   std::vector<std::string> unplaced;
+  std::vector<PlacementDiagnostic> diagnostics;
   double utilization{};
   double usedAreaMm2{};
   std::size_t iterations{};
