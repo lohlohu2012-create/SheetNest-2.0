@@ -22,6 +22,8 @@ struct Result {
   std::vector<PlacementDiagnostic> diagnostics;
   double utilization{};
   double usedAreaMm2{};
+  double sheetWidthMm{};
+  double sheetHeightMm{};
   std::size_t iterations{};
   bool complete() const { return unplaced.empty(); }
 };
