@@ -443,9 +443,21 @@ bool placeOnSheet(
     int bestRotation = 0;
     std::vector<PlacedShape> bestShapes;
 
+    const double margin = std::max(0.0, sheet.edgeMarginMm);
+
     for (int rotation : rotations) {
         const auto rotated = rotate(instance.part.outer, rotation);
         const auto rotatedBounds = bounds(rotated);
+
+        // Reject impossible rotations before building NFPs or candidate
+        // segments. This is especially valuable when many rotations are
+        // requested or the part is close to the sheet size.
+        if (rotatedBounds.width() + 2.0 * margin >
+                sheet.width + kEps ||
+            rotatedBounds.height() + 2.0 * margin >
+                sheet.height + kEps) {
+            continue;
+        }
 
         for (const auto& candidate : candidatesFor(
                  instance.part.outer,
@@ -481,7 +493,6 @@ bool placeOnSheet(
             }
         }
 
-        (void)rotatedBounds;
     }
 
     if (!found) return false;
