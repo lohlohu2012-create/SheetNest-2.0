@@ -19,6 +19,7 @@ struct Part {
 struct Instance {
     std::string id;
     Part part;
+    std::string unitId;
 };
 
 struct Sheet {
