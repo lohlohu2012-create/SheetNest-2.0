@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFile>
 #include <QSplitter>
 #include <QSpinBox>
@@ -372,8 +373,8 @@ void MainWindow::connectUi() {
     connect(thicknessSpin_,
             qOverload<double>(&QDoubleSpinBox::valueChanged),
             this,
-            [this](double) {
-        Q_UNUSED(double);
+            [this](double value) {
+        Q_UNUSED(value);
         updateTechnologyPreview();
     });
 
@@ -650,8 +651,7 @@ void MainWindow::exportDxf() {
         "Сохранить раскладку DXF",
         currentFile_.isEmpty()
             ? "sheetnest-layout.dxf"
-            : currentFile_.section('/', -1)
-                .replace(".dxf", "_layout.dxf"),
+            : QFileInfo(currentFile_).completeBaseName() + "_layout.dxf",
         "DXF files (*.dxf)"
     );
 
