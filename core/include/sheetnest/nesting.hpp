@@ -23,6 +23,7 @@ struct Options {
   double gapMm{2};
   double candidateGridMm{5};
   std::uint64_t seed{0};
+  std::size_t parallelism{0}; // 0 = auto-detect CPU parallelism
 };
 Result nest(const std::vector<Instance>&, const Sheet&, const Options&);
 }
