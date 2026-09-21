@@ -14,6 +14,12 @@ int main() {
   assert(pointInShape({10,10},plate));
   assert(!pointInShape({50,50},plate));
 
+  Shape insertInsideHole{
+    Polygon{{40,40},{60,40},{60,60},{40,60}},{}
+  };
+  assert(!shapesIntersect(plate,insertInsideHole,0.0));
+  assert(shapesIntersect(plate,insertInsideHole,6.0));
+
   const std::string dxf =
     "0\nSECTION\n2\nENTITIES\n"
     "0\nLWPOLYLINE\n70\n1\n"
