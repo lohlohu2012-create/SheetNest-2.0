@@ -30,8 +30,19 @@ int main() {
 
   Part part{"P",plate};
   std::vector<Instance> parts{{"P1",part},{"P2",part},{"P3",part}};
-  auto result=nest(parts,Sheet{210,100,0},Options{});
-  assert(result.unplaced.empty());
-  assert(result.sheets.size()>=1 && result.sheets.size()<=3);
+
+  Options opt;
+  opt.iterations=8;
+  opt.parallelism=2;
+  opt.seed=12345;
+  auto resultA=nest(parts,Sheet{210,100,0},opt);
+  auto resultB=nest(parts,Sheet{210,100,0},opt);
+
+  assert(resultA.unplaced.empty());
+  assert(resultA.sheets.size()>=1 && resultA.sheets.size()<=3);
+  assert(resultA.sheets.size()==resultB.sheets.size());
+  assert(resultA.unplaced.size()==resultB.unplaced.size());
+  assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
+
   std::cout<<"SheetNest core tests: OK\n";
 }
