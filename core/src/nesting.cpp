@@ -231,12 +231,14 @@ bool fitsSheet(
 
 std::vector<Candidate> candidatesFor(
     const Polygon& part,
+    int rotation,
     const SheetState& sheet,
     const Sheet& sheetSize,
     double gap,
     double margin
 ) {
-    const auto pb = bounds(part);
+    const Polygon rotatedPart = rotate(part, rotation);
+    const auto pb = bounds(rotatedPart);
     const double minX = margin - pb.minX;
     const double minY = margin - pb.minY;
 
@@ -270,7 +272,7 @@ std::vector<Candidate> candidatesFor(
 
         // Vertex-to-vertex candidates expose concave interlocking positions
         // that bounding-box stepping cannot see.
-        for (const auto& pv : part) {
+        for (const auto& pv : rotatedPart) {
             for (const auto& qv : ring) {
                 result.push_back({
                     qv.x - pv.x,
@@ -293,7 +295,7 @@ std::vector<Candidate> candidatesFor(
 
         // NFP/Minkowski candidate set for true-shape contact positions.
         // Final collision + clearance validation below remains authoritative.
-        for (const auto& vertex : nfp::noFitVertices(placed.outer, part)) {
+        for (const auto& vertex : nfp::noFitVertices(placed.outer, part, rotation, gap)) {
             result.push_back({vertex.x, vertex.y, vertex.y, vertex.x});
             if (g > 0.0) {
                 result.push_back({
@@ -367,7 +369,8 @@ bool placeOnSheet(
         const auto rotatedBounds = bounds(rotated);
 
         for (const auto& candidate : candidatesFor(
-                 rotated,
+                 instance.part.outer,
+                 rotation,
                  state,
                  sheet,
                  options.gapMm,
