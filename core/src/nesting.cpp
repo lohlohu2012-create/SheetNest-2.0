@@ -91,8 +91,39 @@ double pointSegmentDistance(Point p, Point a, Point b) {
     return std::hypot(p.x - qx, p.y - qy);
 }
 
+double orientation(Point a, Point b, Point c) {
+    const double v = (b.x - a.x) * (c.y - a.y) -
+                     (b.y - a.y) * (c.x - a.x);
+    return v;
+}
+
+bool onSegment(Point p, Point a, Point b) {
+    return std::abs(orientation(a, b, p)) <= 1e-9 &&
+           p.x >= std::min(a.x, b.x) - 1e-9 &&
+           p.x <= std::max(a.x, b.x) + 1e-9 &&
+           p.y >= std::min(a.y, b.y) - 1e-9 &&
+           p.y <= std::max(a.y, b.y) + 1e-9;
+}
+
+bool segmentsIntersect(Point a, Point b, Point c, Point d) {
+    const double o1 = orientation(a, b, c);
+    const double o2 = orientation(a, b, d);
+    const double o3 = orientation(c, d, a);
+    const double o4 = orientation(c, d, b);
+
+    if (((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0)) &&
+        ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0))) {
+        return true;
+    }
+
+    return (std::abs(o1) <= 1e-9 && onSegment(c, a, b)) ||
+           (std::abs(o2) <= 1e-9 && onSegment(d, a, b)) ||
+           (std::abs(o3) <= 1e-9 && onSegment(a, c, d)) ||
+           (std::abs(o4) <= 1e-9 && onSegment(b, c, d));
+}
+
 double segmentDistance(Point a, Point b, Point c, Point d) {
-    if (polygonsIntersect({a, b}, {c, d})) return 0.0;
+    if (segmentsIntersect(a, b, c, d)) return 0.0;
 
     return std::min({
         pointSegmentDistance(a, c, d),
@@ -344,12 +375,6 @@ Result runAttempt(
         const auto& instance = instances[order[position]];
 
         bool placed = false;
-        std::vector<std::pair<std::size_t, int>> sheetOrder;
-
-        for (std::size_t s = 0; s < states.size(); ++s) {
-            sheetOrder.push_back({s, 0});
-        }
-
         std::vector<int> rotations = options.rotations;
         if (rotations.empty()) rotations.push_back(0);
         if (position > 0) std::shuffle(rotations.begin(), rotations.end(), rng);
@@ -412,7 +437,10 @@ Result nest(
     const Options& options
 ) {
     Result best;
-    best.unplaced = {};
+    best.unplaced.reserve(instances.size());
+    for (const auto& instance : instances) {
+        best.unplaced.push_back(instance.id);
+    }
     best.utilization = -1.0;
 
     if (sheet.width <= 0.0 || sheet.height <= 0.0) {
