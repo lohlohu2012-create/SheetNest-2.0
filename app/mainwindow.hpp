@@ -96,6 +96,9 @@ private:
     QLabel* resultLabel_{};
     QProgressBar* progress_{};
     QPlainTextEdit* log_{};
+    QTableWidget* partTable_{};
+    QTableWidget* diagnosticsTable_{};
+    QTableWidget* benchmarkTable_{};
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
