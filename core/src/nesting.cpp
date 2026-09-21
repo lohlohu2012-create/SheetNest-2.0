@@ -1,4 +1,5 @@
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/nfp.hpp"
 #include <algorithm>
 #include <cmath>
 #include <future>
@@ -65,6 +66,26 @@ static void addContactCandidates(std::vector<Candidate>& c,const Shape& moving,c
         const double off=std::max(0.0,gap);
         for(double sign:{-1.0,1.0})
           addCandidate(c,q.x-mp.x+sign*n.x*off,q.y-mp.y+sign*n.y*off,rot,s,moving);
+      }
+    }
+
+    // NFP boundary points are high-value contact candidates. Exact collision
+    // validation remains authoritative, so conservative non-convex NFPs are safe
+    // as candidate hints rather than collision decisions.
+    const auto nfp=buildNfp(fixed,moving);
+    if(nfp.valid) {
+      for(size_t k=0;k<nfp.boundary.size();++k) {
+        const Point a=nfp.boundary[k],b=nfp.boundary[(k+1)%nfp.boundary.size()];
+        addCandidate(c,a.x,a.y,rot,s,moving);
+        const Point mid{(a.x+b.x)*0.5,(a.y+b.y)*0.5};
+        addCandidate(c,mid.x,mid.y,rot,s,moving);
+        const double dx=b.x-a.x,dy=b.y-a.y,len=std::hypot(dx,dy);
+        if(len>1e-12) {
+          const Point n{dy/len,-dx/len};
+          const double off=std::max(0.05,gap);
+          for(double sign:{-1.0,1.0})
+            addCandidate(c,mid.x+n.x*off*sign,mid.y+n.y*off*sign,rot,s,moving);
+        }
       }
     }
   }
