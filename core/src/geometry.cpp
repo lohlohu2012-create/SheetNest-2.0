@@ -88,17 +88,26 @@ bool polygonsIntersect(const Polygon& a,const Polygon& b) {
 }
 bool shapesIntersect(const Shape& a,const Shape& b,double gap) {
   if (a.outer.size()<3||b.outer.size()<3) return false;
-  const std::vector<const Polygon*> ar = [&]{std::vector<const Polygon*> r{&a.outer}; for (auto& h:a.holes) r.push_back(&h); return r;}();
-  const std::vector<const Polygon*> br = [&]{std::vector<const Polygon*> r{&b.outer}; for (auto& h:b.holes) r.push_back(&h); return r;}();
-  for (auto pa:ar) for (auto pb:br) {
-    if (polygonsIntersect(*pa,*pb)) {
-      if (pa==&a.outer && pb!=&b.outer && pointInPolygon(a.outer[0],*pb)) continue;
-      if (pb==&b.outer && pa!=&a.outer && pointInPolygon(b.outer[0],*pa)) continue;
-      return true;
-    }
-    if (gap>0 && polygonBoundaryDistance(*pa,*pb)<gap) return true;
-  }
-  return pointInShape(a.outer[0],b)||pointInShape(b.outer[0],a);
+
+  // Material overlap is defined by the two outer solids. Holes are empty
+  // regions, so a part fully contained in another part's hole is allowed.
+  if (polygonsIntersect(a.outer,b.outer)) return true;
+  if (pointInShape(a.outer[0],b)||pointInShape(b.outer[0],a)) return true;
+
+  if (gap<=0) return false;
+
+  // Technological gap is enforced against every cutting boundary, including
+  // hole boundaries. This preserves interlocking while preventing tool-path
+  // lines from becoming too close.
+  std::vector<const Polygon*> ar{&a.outer};
+  std::vector<const Polygon*> br{&b.outer};
+  for (const auto& h:a.holes) ar.push_back(&h);
+  for (const auto& h:b.holes) br.push_back(&h);
+
+  for (const auto* pa:ar) for (const auto* pb:br)
+    if (polygonBoundaryDistance(*pa,*pb)<gap) return true;
+
+  return false;
 }
 Polygon rotate(const Polygon& p,double r) {
   const double c=std::cos(r), s=std::sin(r); Polygon q; q.reserve(p.size());
