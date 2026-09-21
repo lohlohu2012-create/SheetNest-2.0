@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <cstdio>
 using namespace sheetnest;
 
 int main() {
@@ -81,6 +82,16 @@ int main() {
   assert(outOfRange.has_value());
   assert(outOfRange->outOfRange);
   assert(!outOfRange->interpolated);
+
+  const std::string techPath="/tmp/sheetnest_technology_test.csv";
+  assert(tech.saveCsv(techPath));
+  LaserTechnologyDatabase reloaded;
+  assert(reloaded.loadCsv(techPath));
+  const auto reloadedPoint=reloaded.lookup("Test Steel",2.0,"O2",3.0);
+  assert(reloadedPoint.has_value());
+  assert(reloadedPoint->interpolated);
+  assert(std::abs(reloadedPoint->speedMMin-6.0)<1e-9);
+  std::remove(techPath.c_str());
 
   const auto exported=exportNestDxf(parts,resultA);
   assert(exported.exportedPlacements==3);
