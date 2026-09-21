@@ -1,0 +1,60 @@
+#include "sheetnest/benchmark.hpp"
+
+#include <chrono>
+
+namespace sheetnest {
+namespace {
+
+BenchmarkCase runCase(
+    const std::string& name,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options
+) {
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = nest(instances, sheet, options);
+    const auto finished = std::chrono::steady_clock::now();
+
+    BenchmarkCase benchmark;
+    benchmark.name = name;
+    benchmark.milliseconds =
+        std::chrono::duration<double, std::milli>(
+            finished - started
+        ).count();
+    benchmark.sheets = result.sheets.size();
+    benchmark.skipped = result.unplaced.size();
+    benchmark.placed = instances.size() - benchmark.skipped;
+    benchmark.utilization = result.utilization;
+    return benchmark;
+}
+
+} // namespace
+
+BenchmarkResult benchmarkNest(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& optimizedOptions
+) {
+    Options baseline = optimizedOptions;
+
+    // Baseline intentionally represents a minimal-search configuration:
+    // one deterministic pass with the same geometry, gap, sheet and rotations.
+    baseline.iterations = 1;
+
+    BenchmarkResult result;
+    result.baseline = runCase(
+        "Базовый поиск (1 итерация)",
+        instances,
+        sheet,
+        baseline
+    );
+    result.optimized = runCase(
+        "Оптимизированный поиск",
+        instances,
+        sheet,
+        optimizedOptions
+    );
+    return result;
+}
+
+} // namespace sheetnest
