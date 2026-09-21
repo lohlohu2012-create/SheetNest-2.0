@@ -61,6 +61,7 @@ int main() {
   assert(resultA.sheets.size()>=1 && resultA.sheets.size()<=3);
   assert(resultA.sheets.size()==resultB.sheets.size());
   assert(resultA.unplaced.size()==resultB.unplaced.size());
+  if(!resultA.unplaced.empty()) assert(!resultA.diagnostics.empty());
   assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
 
   // A feasible target sheet count must never be replaced by a partial layout
