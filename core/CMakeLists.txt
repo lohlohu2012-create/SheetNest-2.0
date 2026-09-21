@@ -5,5 +5,6 @@ add_library(sheetnest_core
   src/cutting.cpp
   src/cutting_path.cpp
   src/dxf.cpp
+  src/dxf_export.cpp
 )
 target_include_directories(sheetnest_core PUBLIC include)
