@@ -1,4 +1,5 @@
 #include "mainwindow.hpp"
+#include "sheetnest/cutting_path.hpp"
 #include "nesting_view.hpp"
 #include <QtConcurrent/QtConcurrentRun>
 #include <QApplication>
@@ -7,6 +8,7 @@
 #include <QAction>
 #include <QDialog>
 #include <QDir>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
