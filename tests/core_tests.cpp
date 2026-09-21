@@ -2,6 +2,7 @@
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
+#include "sheetnest/dxf_export.hpp"
 #include <cassert>
 #include <cmath>
 #include <iostream>
