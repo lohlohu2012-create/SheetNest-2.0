@@ -30,6 +30,7 @@ private:
   void refreshTechnologyChoices();
   void refreshTechnologySelection();
   void showResult();
+  void setEnabledForCalculation(bool enabled);
   void updateSummary(const sheetnest::Result& result);
   QString ensureTechnologyFile();
   std::vector<sheetnest::Polygon> buildCutContours() const;
