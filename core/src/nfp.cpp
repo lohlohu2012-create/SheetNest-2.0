@@ -767,13 +767,17 @@ bool clipSegmentToRect(
     double maxX,
     double maxY
 ) {
-    const double dx = b.x - a.x;
-    const double dy = b.y - a.y;
+    const Point originalA = a;
+    const Point originalB = b;
+    const double dx = originalB.x - originalA.x;
+    const double dy = originalB.y - originalA.y;
+
     double t0 = 0.0;
     double t1 = 1.0;
 
     auto clip = [&](double p, double q) {
         if (std::abs(p) <= kEps) return q >= 0.0;
+
         const double r = q / p;
         if (p < 0.0) {
             if (r > t1) return false;
@@ -785,18 +789,20 @@ bool clipSegmentToRect(
         return true;
     };
 
-    if (!clip(-dx, a.x - minX)) return false;
-    if (!clip( dx, maxX - a.x)) return false;
-    if (!clip(-dy, a.y - minY)) return false;
-    if (!clip( dy, maxY - a.y)) return false;
+    if (!clip(-dx, originalA.x - minX)) return false;
+    if (!clip( dx, maxX - originalA.x)) return false;
+    if (!clip(-dy, originalA.y - minY)) return false;
+    if (!clip( dy, maxY - originalA.y)) return false;
+
+    if (t1 < t0) return false;
 
     a = {
-        a.x + dx * t0,
-        a.y + dy * t0
+        originalA.x + dx * t0,
+        originalA.y + dy * t0
     };
     b = {
-        a.x + (b.x - a.x) * ((t1 - t0) / std::max(kEps, 1.0 - t0)),
-        a.y + (b.y - a.y) * ((t1 - t0) / std::max(kEps, 1.0 - t0))
+        originalA.x + dx * t1,
+        originalA.y + dy * t1
     };
 
     return segmentLength(a, b) > kPointEps;
