@@ -23,6 +23,7 @@ struct DxfContour {
     Polygon outer;
     std::vector<Polygon> holes;
     std::string sourceId;
+    std::string layer;
 };
 
 struct DxfDocument {
