@@ -382,7 +382,6 @@ Result runAttempt(
     for (std::size_t position = 0; position < order.size(); ++position) {
         const auto& instance = instances[order[position]];
 
-        bool placed = false;
         std::vector<int> rotations = options.rotations;
         if (rotations.empty()) rotations.push_back(0);
         if (position > 0) std::shuffle(rotations.begin(), rotations.end(), rng);
