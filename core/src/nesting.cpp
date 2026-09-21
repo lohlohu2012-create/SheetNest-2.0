@@ -209,6 +209,8 @@ static Result runPass(const std::vector<Instance>& parts,const Sheet& s,const Op
   r.iterations=1;
   r.unplaced=std::move(unplaced);
   r.usedAreaMm2=used;
+  r.sheetWidthMm=s.width;
+  r.sheetHeightMm=s.height;
 
   for(const auto& id:r.unplaced) {
     auto it=std::find_if(parts.begin(),parts.end(),[&](const Instance& x){return x.id==id;});
