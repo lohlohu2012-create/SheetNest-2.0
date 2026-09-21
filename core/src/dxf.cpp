@@ -859,7 +859,18 @@ bool parseEntityArc(
     }
 
     double sweepDegrees = endDegrees - startDegrees;
-    if (sweepDegrees <= 0.0) sweepDegrees += 360.0;
+    if (std::abs(sweepDegrees) <= 1e-9) {
+        diagnostic(
+            diagnostics,
+            DxfSeverity::Error,
+            "DXF/ARC",
+            "ARC имеет одинаковые start/end angles и не содержит дугу.",
+            &entity
+        );
+        ++malformed;
+        return false;
+    }
+    if (sweepDegrees < 0.0) sweepDegrees += 360.0;
 
     if (sweepDegrees <= kEps || sweepDegrees > 360.0 + 1e-6) {
         diagnostic(
