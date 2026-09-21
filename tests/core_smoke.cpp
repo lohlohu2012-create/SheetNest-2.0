@@ -12,6 +12,113 @@ using namespace sheetnest;
 
 namespace {
 
+const char* kLayerSeparatedDxf = R"DXF(
+0
+SECTION
+2
+ENTITIES
+0
+LINE
+8
+A
+10
+0
+20
+0
+11
+10
+21
+0
+0
+LINE
+8
+A
+10
+10
+20
+0
+11
+10
+21
+10
+0
+LINE
+8
+A
+10
+10
+20
+10
+11
+0
+21
+10
+0
+LINE
+8
+A
+10
+0
+20
+10
+11
+0
+21
+0
+0
+LINE
+8
+B
+10
+10
+20
+10
+11
+20
+21
+10
+0
+LINE
+8
+B
+10
+20
+20
+10
+11
+20
+21
+20
+0
+LINE
+8
+B
+10
+20
+20
+20
+11
+10
+21
+20
+0
+LINE
+8
+B
+10
+10
+20
+20
+11
+10
+21
+10
+0
+ENDSEC
+0
+EOF
+)DXF";
+
 const char* kRectangleWithHoleDxf = R"DXF(
 0
 SECTION
@@ -144,6 +251,20 @@ void testDxfHoleRecovery() {
     assert(doc.contours.front().holes.size() == 1);
 }
 
+void testLayerSeparation() {
+    const auto doc = importDxf(kLayerSeparatedDxf, 0.1);
+    assert(doc.closedLoopsFound == 2);
+    assert(doc.contours.size() == 2);
+
+    bool sawA = false;
+    bool sawB = false;
+    for (const auto& contour : doc.contours) {
+        if (contour.layer == "A") sawA = true;
+        if (contour.layer == "B") sawB = true;
+    }
+    assert(sawA && sawB);
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -194,6 +315,7 @@ void testInterlockIntoHole() {
 int main() {
     testGeometry();
     testDxfHoleRecovery();
+    testLayerSeparation();
     testMinimumSheets();
     testInterlockIntoHole();
     std::cout << "SheetNest core smoke tests passed\n";
