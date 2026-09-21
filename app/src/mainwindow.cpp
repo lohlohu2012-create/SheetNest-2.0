@@ -28,6 +28,8 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QStandardPaths>
+#include <QStringList>
+#include <QAbstractItemView>
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
@@ -47,17 +49,18 @@ QString fmt(double v,int digits=2) { return QString::number(v,'f',digits); }
 
 MainWindow::MainWindow(QWidget* parent):QMainWindow(parent) {
   techFilePath_=ensureTechnologyFile();
-  techDb_.loadCsv(techFilePath_.toStdString());
+  const bool techLoaded=techDb_.loadCsv(techFilePath_.toStdString());
   buildUi();
   refreshTechnologyChoices();
 
   connect(material_,&QComboBox::currentTextChanged,this,[this]{ refreshTechnologySelection(); });
   connect(gas_,&QComboBox::currentTextChanged,this,[this]{ refreshTechnologySelection(); });
   connect(thickness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this]{ refreshTechnologySelection(); });
+  connect(laserPower_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this]{ refreshTechnologySelection(); });
 
   setWindowTitle("SheetNest 2.0 — Metal Sheet Nesting");
   resize(1600,950);
-  statusBar()->showMessage("Готово");
+  statusBar()->showMessage(techLoaded?"Готово":"База технологий не загружена — доступен ручной режим.");
 }
 
 QString MainWindow::ensureTechnologyFile() {
@@ -230,7 +233,11 @@ void MainWindow::refreshTechnologyChoices() {
 }
 
 void MainWindow::refreshTechnologySelection() {
-  if(!material_||!gas_||!thickness_)return;
+  if(!material_||!gas_||!thickness_||!laserPower_||techDb_.points().empty()) {
+    if(technologyLabel_ && techDb_.points().empty())
+      technologyLabel_->setText("База технологий не загружена — скорость задаётся вручную.");
+    return;
+  }
   const auto tech=techDb_.lookup(material_->currentText().toStdString(),thickness_->value(),
                                  gas_->currentText().toStdString(),laserPower_->value());
   if(!tech) {
@@ -240,13 +247,15 @@ void MainWindow::refreshTechnologySelection() {
   cuttingSpeed_->setValue(tech->speedMMin);
   pierceSeconds_->setValue(tech->pierceSeconds);
   technologyLabel_->setText(
-    QString("%1–%2 м/мин; %3 сек/прокол%4")
+    QString("%1–%2 м/мин; %3 сек/прокол%4%5")
       .arg(fmt(tech->speedMinMMin)).arg(fmt(tech->speedMaxMMin))
       .arg(fmt(tech->pierceSeconds,3))
-      .arg(tech->interpolated?" · интерполяция":""));
+      .arg(tech->interpolated?" · интерполяция":"")
+      .arg(tech->outOfRange?" · ВНЕ ДИАПАЗОНА, проверьте вручную":""));
 }
 
 void MainWindow::openDxf() {
+  if(calculationRunning_) return;
   const QString path=QFileDialog::getOpenFileName(this,"Открыть DXF",{}, "DXF (*.dxf)");
   if(path.isEmpty())return;
 
@@ -282,10 +291,13 @@ void MainWindow::openDxf() {
 }
 
 void MainWindow::calculate() {
+  if(calculationRunning_) return;
   if(instances_.empty()) {
     QMessageBox::information(this,"SheetNest","Сначала загрузите DXF.");
     return;
   }
+
+  calculationRunning_=true;
 
   sheetnest::Options opt;
   opt.iterations=iterations_->value();
@@ -318,6 +330,7 @@ void MainWindow::calculate() {
 
     showResult();
     setEnabledForCalculation(true);
+    calculationRunning_=false;
   });
 }
 
@@ -338,7 +351,7 @@ void MainWindow::setEnabledForCalculation(bool enabled) {
   parallelism_->setEnabled(enabled);
 }
 
-std::vector<sheetnest::Polygon> MainWindow::buildCutContours() const {
+std::vector<sheetnest::Polygon> MainWindow::buildCutContours(std::size_t sheetIndex) const {
   std::vector<sheetnest::Polygon> contours;
   std::unordered_map<std::string,const sheetnest::Instance*> byId;
   for(const auto& i:instances_)byId[i.id]=&i;
@@ -350,8 +363,8 @@ std::vector<sheetnest::Polygon> MainWindow::buildCutContours() const {
     return p;
   };
 
-  for(const auto& sheet:lastResult_.sheets) {
-    for(const auto& placement:sheet) {
+  if(sheetIndex>=lastResult_.sheets.size()) return contours;
+  for(const auto& placement:lastResult_.sheets[sheetIndex]) {
       auto it=byId.find(placement.id);
       if(it==byId.end())continue;
       auto shape=sheetnest::normalized(sheetnest::rotate(it->second->part.shape,placement.rotation));
@@ -367,7 +380,6 @@ void MainWindow::showResult() {
   view_->setResult(lastResult_,instances_);
   updateSummary(lastResult_);
 
-  const auto contours=buildCutContours();
   const sheetnest::CuttingParameters cp{
     laserPower_->value(),
     material_->currentText().toStdString(),
@@ -377,15 +389,28 @@ void MainWindow::showResult() {
     pierceSeconds_->value()
   };
   const sheetnest::PathOptions po{rapidSpeed_->value(),pierceSeconds_->value()};
-  const auto path=sheetnest::planCuttingPath(contours,cp,po);
-  const auto estimate=sheetnest::estimateCuttingPath(path,cp,po);
+
+  double totalCutLength=0.0;
+  double totalRapidLength=0.0;
+  double totalMinutes=0.0;
+  int totalPierces=0;
+
+  for(std::size_t si=0;si<lastResult_.sheets.size();++si) {
+    const auto contours=buildCutContours(si);
+    const auto path=sheetnest::planCuttingPath(contours,cp,po);
+    const auto estimate=sheetnest::estimateCuttingPath(path,cp,po);
+    totalCutLength+=estimate.contourLengthMm;
+    totalRapidLength+=path.totalRapidLengthMm;
+    totalPierces+=estimate.pierces;
+    totalMinutes+=estimate.totalMinutes;
+  }
 
   summaryLabel_->setText(summaryLabel_->text()
     + QString("\n\nДлина реза: %1 мм\nПроколов: %2\nRapid: %3 мм\nВремя резки: %4 мин")
-        .arg(fmt(estimate.contourLengthMm,1))
-        .arg(estimate.pierces)
-        .arg(fmt(path.totalRapidLengthMm,1))
-        .arg(fmt(estimate.totalMinutes,2)));
+        .arg(fmt(totalCutLength,1))
+        .arg(totalPierces)
+        .arg(fmt(totalRapidLength,1))
+        .arg(fmt(totalMinutes,2)));
 }
 
 void MainWindow::updateSummary(const sheetnest::Result& result) {
@@ -409,6 +434,7 @@ void MainWindow::updateSummary(const sheetnest::Result& result) {
 }
 
 void MainWindow::exportDxf() {
+  if(calculationRunning_) return;
   if(lastResult_.sheets.empty()) {
     QMessageBox::information(this,"Экспорт","Сначала выполните nesting.");
     return;
@@ -421,7 +447,20 @@ void MainWindow::exportDxf() {
     statusBar()->showMessage("DXF экспортирован.");
 }
 
+bool MainWindow::saveTechnologyDatabase() {
+  if(techDb_.saveCsv(techFilePath_.toStdString())) return true;
+
+  const QString fallbackDir=QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+  if(fallbackDir.isEmpty()) return false;
+  QDir().mkpath(fallbackDir);
+  const QString fallback=fallbackDir+"/laser_bodor_3kw.csv";
+  if(!techDb_.saveCsv(fallback.toStdString())) return false;
+  techFilePath_=fallback;
+  return true;
+}
+
 void MainWindow::openTechnologyEditor() {
+  if(calculationRunning_) return;
   QDialog dialog(this);
   dialog.setWindowTitle("Технология лазера 3 кВт");
   dialog.resize(1050,650);
@@ -435,21 +474,24 @@ void MainWindow::openTechnologyEditor() {
   layout->addWidget(info);
 
   auto* table=new QTableWidget(&dialog);
-  table->setColumnCount(8);
-  table->setHorizontalHeaderLabels({"Материал","Толщина","Газ","Мин","Макс","Скорость","Прокол","Источник"});
+  table->setColumnCount(10);
+  table->setHorizontalHeaderLabels({"Мощность","Материал","Толщина","Газ","Мин","Макс","Скорость","Прокол","Источник","Примечание"});
   table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  table->setEditTriggers(QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed|QAbstractItemView::SelectedClicked);
   table->setRowCount(int(techDb_.points().size()));
 
   for(int r=0;r<int(techDb_.points().size());++r) {
     const auto& p=techDb_.points()[r];
-    table->setItem(r,0,new QTableWidgetItem(QString::fromStdString(p.material)));
-    table->setItem(r,1,new QTableWidgetItem(QString::number(p.thicknessMm)));
-    table->setItem(r,2,new QTableWidgetItem(QString::fromStdString(p.gas)));
-    table->setItem(r,3,new QTableWidgetItem(QString::number(p.speedMinMMin)));
-    table->setItem(r,4,new QTableWidgetItem(QString::number(p.speedMaxMMin)));
-    table->setItem(r,5,new QTableWidgetItem(QString::number(p.speedMMin)));
-    table->setItem(r,6,new QTableWidgetItem(QString::number(p.pierceSeconds)));
-    table->setItem(r,7,new QTableWidgetItem(QString::fromStdString(p.source)));
+    table->setItem(r,0,new QTableWidgetItem(QString::number(p.laserPowerKw)));
+    table->setItem(r,1,new QTableWidgetItem(QString::fromStdString(p.material)));
+    table->setItem(r,2,new QTableWidgetItem(QString::number(p.thicknessMm)));
+    table->setItem(r,3,new QTableWidgetItem(QString::fromStdString(p.gas)));
+    table->setItem(r,4,new QTableWidgetItem(QString::number(p.speedMinMMin)));
+    table->setItem(r,5,new QTableWidgetItem(QString::number(p.speedMaxMMin)));
+    table->setItem(r,6,new QTableWidgetItem(QString::number(p.speedMMin)));
+    table->setItem(r,7,new QTableWidgetItem(QString::number(p.pierceSeconds)));
+    table->setItem(r,8,new QTableWidgetItem(QString::fromStdString(p.source)));
+    table->setItem(r,9,new QTableWidgetItem(QString::fromStdString(p.note)));
   }
   layout->addWidget(table,1);
 
@@ -461,21 +503,54 @@ void MainWindow::openTechnologyEditor() {
 
   connect(cancel,&QPushButton::clicked,&dialog,&QDialog::reject);
   connect(save,&QPushButton::clicked,&dialog,[this,&dialog,table]{
-    auto points=techDb_.points();
-    for(int r=0;r<table->rowCount()&&r<int(points.size());++r) {
-      points[r].speedMMin=table->item(r,5)->text().toDouble();
-      points[r].pierceSeconds=table->item(r,6)->text().toDouble();
+    std::vector<sheetnest::LaserTechnologyPoint> points;
+    points.reserve(table->rowCount());
+
+    for(int r=0;r<table->rowCount();++r) {
+      auto cell=[&](int col){ return table->item(r,col)?table->item(r,col)->text().trimmed():QString{}; };
+      bool okPower=false,okThickness=false,okMin=false,okMax=false,okSpeed=false,okPierce=false;
+
+      const double power=cell(0).toDouble(&okPower);
+      const QString material=cell(1);
+      const double thickness=cell(2).toDouble(&okThickness);
+      const QString gas=cell(3);
+      const double speedMin=cell(4).toDouble(&okMin);
+      const double speedMax=cell(5).toDouble(&okMax);
+      const double speed=cell(6).toDouble(&okSpeed);
+      const double pierce=cell(7).toDouble(&okPierce);
+
+      if(!okPower||!okThickness||!okMin||!okMax||!okSpeed||!okPierce||
+         power<=0||thickness<=0||speedMin<=0||speedMax<speedMin||speed<=0||pierce<=0||
+         material.isEmpty()||gas.isEmpty()) {
+        QMessageBox::warning(&dialog,"Технология",
+          QString("Некорректная строка %1. Проверьте мощность, материал, толщину, газ, скорости и прокол.")
+            .arg(r+1));
+        return;
+      }
+
+      sheetnest::LaserTechnologyPoint p;
+      p.laserPowerKw=power;
+      p.material=material.toStdString();
+      p.thicknessMm=thickness;
+      p.gas=gas.toStdString();
+      p.speedMinMMin=speedMin;
+      p.speedMaxMMin=speedMax;
+      p.speedMMin=speed;
+      p.pierceSeconds=pierce;
+      p.source=cell(8).toStdString();
+      p.note=cell(9).toStdString();
+      points.push_back(std::move(p));
     }
+
     techDb_.setPoints(std::move(points));
-    if(!techDb_.saveCsv(techFilePath_.toStdString())) {
-      QMessageBox::warning(&dialog,"Технология","Не удалось сохранить CSV.");
+    if(!saveTechnologyDatabase()) {
+      QMessageBox::warning(&dialog,"Технология","Не удалось сохранить CSV ни рядом с программой, ни в пользовательский профиль.");
       return;
     }
-    refreshTechnologySelection();
+    refreshTechnologyChoices();
     dialog.accept();
   });
 
   dialog.exec();
 }
 
-int main(int argc,char** argv);
