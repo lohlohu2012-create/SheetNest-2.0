@@ -1,5 +1,6 @@
 add_library(sheetnest_core
   src/geometry.cpp
+  src/nfp.cpp
   src/nesting.cpp
   src/cutting.cpp
   src/cutting_path.cpp
