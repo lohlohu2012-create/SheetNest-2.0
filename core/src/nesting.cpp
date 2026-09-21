@@ -501,7 +501,7 @@ Result nest(
                std::max(bb.width(), bb.height());
     });
 
-    const std::size_t iterations = std::max<std::size_t>(1, std::min(options.iterations, 128));
+    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(options.iterations, 128u));
     std::mt19937 rng(options.seed);
 
     for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
