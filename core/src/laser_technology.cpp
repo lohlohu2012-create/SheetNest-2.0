@@ -38,10 +38,10 @@ static std::string csvQuote(const std::string& value) {
   std::string escaped;
   escaped.reserve(value.size()+8);
   for(char c:value) {
-    if(c=='"') escaped += """";
+    if(c=='"') escaped += "\"\"";
     else escaped += c;
   }
-  return """ + escaped + """;
+  return "\"" + escaped + "\"";
 }
 }
 
