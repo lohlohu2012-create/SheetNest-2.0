@@ -718,6 +718,17 @@ void testInterlockIntoHole() {
 
     assert(result.unplaced.empty());
     assert(result.sheets.size() == 1);
+
+    bool foundInsert = false;
+    for (const auto& placement : result.sheets.front()) {
+        if (placement.id != "insert-1") continue;
+        foundInsert = true;
+        assert(placement.x >= 20.0 - 1e-6);
+        assert(placement.y >= 20.0 - 1e-6);
+        assert(placement.x + 50.0 <= 80.0 + 1e-6);
+        assert(placement.y + 50.0 <= 80.0 + 1e-6);
+    }
+    assert(foundInsert);
 }
 
 } // namespace
