@@ -365,13 +365,12 @@ std::vector<sheetnest::Polygon> MainWindow::buildCutContours(std::size_t sheetIn
 
   if(sheetIndex>=lastResult_.sheets.size()) return contours;
   for(const auto& placement:lastResult_.sheets[sheetIndex]) {
-      auto it=byId.find(placement.id);
-      if(it==byId.end())continue;
-      auto shape=sheetnest::normalized(sheetnest::rotate(it->second->part.shape,placement.rotation));
-      shape=sheetnest::translate(shape,placement.x,placement.y);
-      contours.push_back(oriented(shape.outer,true));
-      for(auto hole:shape.holes)contours.push_back(oriented(std::move(hole),false));
-    }
+    auto it=byId.find(placement.id);
+    if(it==byId.end())continue;
+    auto shape=sheetnest::normalized(sheetnest::rotate(it->second->part.shape,placement.rotation));
+    shape=sheetnest::translate(shape,placement.x,placement.y);
+    contours.push_back(oriented(shape.outer,true));
+    for(auto hole:shape.holes)contours.push_back(oriented(std::move(hole),false));
   }
   return contours;
 }
