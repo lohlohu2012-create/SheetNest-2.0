@@ -3,6 +3,7 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/dxf_export.hpp"
+#include "sheetnest/laser_technology.hpp"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -64,6 +65,17 @@ int main() {
   assert(resultA.unplaced.size()==resultB.unplaced.size());
   if(!resultA.unplaced.empty()) assert(!resultA.diagnostics.empty());
   assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
+
+  LaserTechnologyDatabase tech;
+  tech.setPoints({
+    LaserTechnologyPoint{3.0,"Test Steel",1.0,"O2",8.0,10.0,9.0,0.20,"test",""},
+    LaserTechnologyPoint{3.0,"Test Steel",3.0,"O2",2.0,4.0,3.0,0.40,"test",""}
+  });
+  const auto techPoint=tech.lookup("Test Steel",2.0,"O2",3.0);
+  assert(techPoint.has_value());
+  assert(techPoint->interpolated);
+  assert(std::abs(techPoint->speedMMin-6.0)<1e-9);
+  assert(std::abs(techPoint->pierceSeconds-0.30)<1e-9);
 
   const auto exported=exportNestDxf(parts,resultA);
   assert(exported.exportedPlacements==3);
