@@ -63,5 +63,21 @@ int main() {
   assert(resultA.unplaced.size()==resultB.unplaced.size());
   assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
 
+  // A feasible target sheet count must never be replaced by a partial layout
+  // simply because the partial layout uses fewer sheets.
+  Options constrained;
+  constrained.iterations=12;
+  constrained.parallelism=2;
+  constrained.sheetReductionPasses=3;
+  constrained.seed=9876;
+  auto compact=nest(
+    std::vector<Instance>{{"A",Part{"A",Shape{Polygon{{0,0},{40,0},{40,40},{0,40}}, {}}}},
+                          {"B",Part{"B",Shape{Polygon{{0,0},{40,0},{40,40},{0,40}}, {}}}},
+                          {"C",Part{"C",Shape{Polygon{{0,0},{40,0},{40,40},{0,40}}, {}}}},
+                          {"D",Part{"D",Shape{Polygon{{0,0},{40,0},{40,40},{0,40}}, {}}}}},
+    Sheet{90,90,0},constrained);
+  assert(compact.unplaced.empty());
+  assert(compact.sheets.size()==1);
+
   std::cout<<"SheetNest core tests: OK\n";
 }
