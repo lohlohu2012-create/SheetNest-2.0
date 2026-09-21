@@ -4,7 +4,7 @@
 #include "sheetnest/laser_technology.hpp"
 #include "sheetnest/nesting.hpp"
 #include <QMainWindow>
-#include <QPointer>
+#include <QString>
 #include <QTimer>
 #include <QFutureWatcher>
 #include <vector>
@@ -33,7 +33,8 @@ private:
   void setEnabledForCalculation(bool enabled);
   void updateSummary(const sheetnest::Result& result);
   QString ensureTechnologyFile();
-  std::vector<sheetnest::Polygon> buildCutContours() const;
+  std::vector<sheetnest::Polygon> buildCutContours(std::size_t sheetIndex) const;
+  bool saveTechnologyDatabase();
 
   NestingView* view_{};
   QComboBox* material_{};
@@ -61,4 +62,5 @@ private:
   sheetnest::LaserTechnologyDatabase techDb_;
   QString techFilePath_;
   QString currentFile_;
+  bool calculationRunning_{false};
 };
