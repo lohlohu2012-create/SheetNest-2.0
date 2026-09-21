@@ -1,4 +1,6 @@
 #include "sheetnest/dxf.hpp"
+#include "sheetnest/dxf_export.hpp"
+#include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
 
@@ -594,6 +596,55 @@ void testReadableValidationErrors() {
     assert(hasUnsupported);
 }
 
+void testDxfModelPipeline() {
+    const auto doc = importDxf(kMultiplePartsDxf, 0.05);
+    assert(doc.valid());
+
+    const auto parts = partsFromDxf(doc);
+    assert(parts.size() == 2);
+    assert(!parts[0].sourceId.empty() || !parts[1].sourceId.empty());
+
+    const auto instances = instancesFromDxf(doc, 2);
+    assert(instances.size() == 4);
+    assert(instances[0].id != instances[1].id);
+}
+
+void testDxfExportRoundTrip() {
+    const auto doc = importDxf(kRectangleWithHoleDxf, 0.05);
+    assert(doc.valid());
+
+    const auto instances = instancesFromDxf(doc, 1);
+    assert(instances.size() == 1);
+
+    Sheet sheet{200, 200, 5};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 4;
+    options.gapMm = 2.0;
+
+    const auto result = nest(instances, sheet, options);
+    assert(result.unplaced.empty());
+    assert(result.sheets.size() == 1);
+
+    DxfExportOptions exportOptions;
+    exportOptions.includeSheetOutlines = false;
+
+    const auto exported = exportNestDxf(
+        result,
+        instances,
+        sheet,
+        exportOptions
+    );
+
+    assert(exported.find("LWPOLYLINE") != std::string::npos);
+    assert(exported.find("_HOLE") != std::string::npos);
+
+    const auto roundTrip = importDxf(exported, 0.05);
+    assert(roundTrip.valid());
+    assert(roundTrip.contours.size() == 1);
+    assert(roundTrip.contours.front().holes.size() == 1);
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -650,6 +701,8 @@ int main() {
     testLegacyPolyline();
     testMultipleParts();
     testOpenPolylineJoining();
+    testDxfModelPipeline();
+    testDxfExportRoundTrip();
     testReadableValidationErrors();
     testMinimumSheets();
     testInterlockIntoHole();
