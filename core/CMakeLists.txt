@@ -6,5 +6,6 @@ add_library(sheetnest_core
   src/cutting_path.cpp
   src/dxf.cpp
   src/dxf_export.cpp
+  src/laser_technology.cpp
 )
 target_include_directories(sheetnest_core PUBLIC include)

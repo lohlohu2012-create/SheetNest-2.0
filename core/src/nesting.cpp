@@ -79,7 +79,7 @@ static void addContactCandidates(std::vector<Candidate>& c,const Shape& moving,c
     // NFP boundary points are high-value contact candidates. Exact collision
     // validation remains authoritative, so conservative non-convex NFPs are safe
     // as candidate hints rather than collision decisions.
-    const auto nfp=buildNfp(fixed,moving);
+    const auto nfp=buildNfp(fixed,moving.outer);
     if(nfp.valid) {
       for(size_t k=0;k<nfp.boundary.size();++k) {
         const Point a=nfp.boundary[k],b=nfp.boundary[(k+1)%nfp.boundary.size()];

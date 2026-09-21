@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/sheetnest">
+    <file alias="laser_bodor_3kw.csv">../../resources/laser_bodor_3kw.csv</file>
+  </qresource>
+</RCC>

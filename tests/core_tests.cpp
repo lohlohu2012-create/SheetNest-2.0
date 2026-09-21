@@ -3,9 +3,11 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/dxf_export.hpp"
+#include "sheetnest/laser_technology.hpp"
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <cstdio>
 using namespace sheetnest;
 
 int main() {
@@ -18,10 +20,10 @@ int main() {
 
   const Polygon fixed{{0,0},{100,0},{100,100},{0,100}};
   const Polygon moving{{0,0},{20,0},{20,10},{0,10}};
-  const nfp=buildNfp(fixed,moving);
+  const auto nfp=buildNfp(fixed,moving);
   assert(nfp.valid);
   assert(nfp.quality==NfpQuality::ExactConvex);
-  const nb=bounds(nfp.boundary);
+  const auto nb=bounds(nfp.boundary);
   assert(std::abs(nb.minX+20.0)<1e-9);
   assert(std::abs(nb.maxX-100.0)<1e-9);
   assert(std::abs(nb.minY+10.0)<1e-9);
@@ -64,6 +66,32 @@ int main() {
   assert(resultA.unplaced.size()==resultB.unplaced.size());
   if(!resultA.unplaced.empty()) assert(!resultA.diagnostics.empty());
   assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
+
+  LaserTechnologyDatabase tech;
+  tech.setPoints({
+    LaserTechnologyPoint{3.0,"Test Steel",1.0,"O2",8.0,10.0,9.0,0.20,"test",""},
+    LaserTechnologyPoint{3.0,"Test Steel",3.0,"O2",2.0,4.0,3.0,0.40,"test",""}
+  });
+  const auto techPoint=tech.lookup("Test Steel",2.0,"O2",3.0);
+  assert(techPoint.has_value());
+  assert(techPoint->interpolated);
+  assert(std::abs(techPoint->speedMMin-6.0)<1e-9);
+  assert(std::abs(techPoint->pierceSeconds-0.30)<1e-9);
+
+  const auto outOfRange=tech.lookup("Test Steel",10.0,"O2",3.0);
+  assert(outOfRange.has_value());
+  assert(outOfRange->outOfRange);
+  assert(!outOfRange->interpolated);
+
+  const std::string techPath="/tmp/sheetnest_technology_test.csv";
+  assert(tech.saveCsv(techPath));
+  LaserTechnologyDatabase reloaded;
+  assert(reloaded.loadCsv(techPath));
+  const auto reloadedPoint=reloaded.lookup("Test Steel",2.0,"O2",3.0);
+  assert(reloadedPoint.has_value());
+  assert(reloadedPoint->interpolated);
+  assert(std::abs(reloadedPoint->speedMMin-6.0)<1e-9);
+  std::remove(techPath.c_str());
 
   const auto exported=exportNestDxf(parts,resultA);
   assert(exported.exportedPlacements==3);

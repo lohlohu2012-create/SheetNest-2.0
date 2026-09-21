@@ -1,4 +1,4 @@
-name: SheetNest Core CI
+name: SheetNest Core and GUI CI
 
 on:
   push:
@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHEETNEST_BUILD_GUI=ON
       - name: Build
         run: cmake --build build --parallel
       - name: Test
