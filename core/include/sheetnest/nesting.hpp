@@ -10,10 +10,10 @@ namespace sheetnest {
 
 struct Part {
     std::string id;
-    std::string sourceId;
-    std::string layer;
     Polygon outer;
     std::vector<Polygon> holes;
+    std::string sourceId;
+    std::string layer;
 };
 
 struct Instance {
