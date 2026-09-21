@@ -8,6 +8,7 @@
 #include "sheetnest/nesting.hpp"
 
 class QComboBox;
+class QCheckBox;
 class QDoubleSpinBox;
 class QPlainTextEdit;
 class QLabel;
