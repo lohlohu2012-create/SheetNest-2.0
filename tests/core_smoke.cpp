@@ -685,6 +685,50 @@ void testDxfExportRoundTrip() {
     assert(roundTrip.contours.front().holes.size() == 1);
 }
 
+void testNfpUnionAndCache() {
+    nfp::clearCache();
+
+    Polygon a = rectangle(20, 20);
+    Polygon b = rectangle(10, 10);
+
+    const auto first = nfp::noFitPolygons(a, b, 0, 2.0);
+    const auto afterFirst = nfp::cacheStats();
+    assert(!first.empty());
+    assert(afterFirst.misses == 1);
+    assert(afterFirst.entries == 1);
+
+    const auto second = nfp::noFitPolygons(
+        translate(a, 1000, 1000),
+        translate(b, 2000, 3000),
+        0,
+        2.0
+    );
+    const auto afterSecond = nfp::cacheStats();
+
+    assert(!second.empty());
+    assert(afterSecond.hits == 1);
+    assert(afterSecond.misses == 1);
+    assert(afterSecond.entries == 1);
+}
+
+void testConcaveUnionNfp() {
+    nfp::clearCache();
+
+    Polygon fixed{
+        {0,0},{40,0},{40,10},{20,10},{20,30},{0,30}
+    };
+    Polygon moving = rectangle(8, 8);
+
+    const auto unionNfp = nfp::noFitPolygons(fixed, moving, 90, 1.5);
+    assert(!unionNfp.empty());
+
+    double totalAbsArea = 0.0;
+    for (const auto& polygon : unionNfp) {
+        totalAbsArea += std::abs(polygonArea(polygon));
+    }
+    assert(totalAbsArea > 0.0);
+}
+
 void testNfpMinkowski() {
     const Polygon fixed = rectangle(20, 10);
     const Polygon moving = rectangle(5, 4);
@@ -785,6 +829,8 @@ int main() {
     testDxfModelPipeline();
     testDxfExportRoundTrip();
     testNfpMinkowski();
+    testNfpUnionAndCache();
+    testConcaveUnionNfp();
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
