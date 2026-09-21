@@ -65,6 +65,13 @@ int main() {
   if(!resultA.unplaced.empty()) assert(!resultA.diagnostics.empty());
   assert(std::abs(resultA.utilization-resultB.utilization)<1e-12);
 
+  const auto exported=exportNestDxf(parts,resultA);
+  assert(exported.exportedPlacements==3);
+  assert(exported.diagnostics.empty());
+  const auto roundtrip=importDxf(exported.text,0.25);
+  assert(roundtrip.entityCount>=3);
+  assert(!roundtrip.contours.empty());
+
   // A feasible target sheet count must never be replaced by a partial layout
   // simply because the partial layout uses fewer sheets.
   Options constrained;
