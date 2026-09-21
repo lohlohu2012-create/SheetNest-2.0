@@ -1,0 +1,3 @@
+add_executable(sheetnest_geometry_tests geometry_tests.cpp)
+target_link_libraries(sheetnest_geometry_tests PRIVATE sheetnest_core)
+add_test(NAME geometry COMMAND sheetnest_geometry_tests)
