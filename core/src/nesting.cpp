@@ -270,22 +270,72 @@ std::vector<Candidate> candidatesFor(
             }
         }
 
-        // Vertex-to-vertex candidates expose concave interlocking positions
-        // that bounding-box stepping cannot see.
-        for (const auto& pv : rotatedPart) {
-            for (const auto& qv : ring) {
+        // Vertex-to-vertex candidates remain as a fallback for tight
+        // concave interlocking, but cap the quadratic pair explosion on
+        // high-resolution/large DXF contours. The NFP boundary is now the
+        // primary true-shape candidate source.
+        constexpr std::size_t kMaxVertexPairs = 384;
+        const std::size_t pairCount =
+            std::min(
+                kMaxVertexPairs,
+                rotatedPart.size() * ring.size()
+            );
+
+        if (pairCount == 0) return;
+
+        const std::size_t partStride = std::max<std::size_t>(
+            1,
+            rotatedPart.size() /
+                std::max<std::size_t>(
+                    1,
+                    static_cast<std::size_t>(
+                        std::sqrt(
+                            static_cast<double>(pairCount)
+                        )
+                    )
+                )
+        );
+        const std::size_t ringStride = std::max<std::size_t>(
+            1,
+            ring.size() /
+                std::max<std::size_t>(
+                    1,
+                    static_cast<std::size_t>(
+                        std::sqrt(
+                            static_cast<double>(pairCount)
+                        )
+                    )
+                )
+        );
+
+        std::size_t emitted = 0;
+        for (std::size_t pi = 0;
+             pi < rotatedPart.size() && emitted < kMaxVertexPairs;
+             pi += partStride) {
+            const auto& pv = rotatedPart[pi];
+
+            for (std::size_t qi = 0;
+                 qi < ring.size() && emitted < kMaxVertexPairs;
+                 qi += ringStride) {
+                const auto& qv = ring[qi];
+
                 result.push_back({
                     qv.x - pv.x,
                     qv.y - pv.y,
                     qv.y - pv.y,
                     qv.x - pv.x
                 });
+                ++emitted;
+
+                if (emitted >= kMaxVertexPairs) break;
+
                 result.push_back({
                     qv.x - pv.x + g,
                     qv.y - pv.y + g,
                     qv.y - pv.y + g,
                     qv.x - pv.x + g
                 });
+                ++emitted;
             }
         }
     };
@@ -314,13 +364,37 @@ std::vector<Candidate> candidatesFor(
                 g
             );
 
-            const double boundarySpacing = std::max(
-                2.0,
-                std::min(12.0, g > 0.0 ? g * 2.0 : 6.0)
+            const double characteristicSize = std::sqrt(
+                std::max(1.0, std::abs(polygonArea(part)))
             );
 
+            // Large details do not benefit from dense uniform sampling of
+            // every long NFP edge. Keep a bounded candidate budget and make
+            // the spacing coarser as part size grows. Endpoints and analytic
+            // objective-best points remain available even when the budget is
+            // tight, while interior samples preserve concave/interlocking
+            // opportunities.
+            const double boundarySpacing = std::clamp(
+                std::max(4.0, characteristicSize * 0.08),
+                4.0,
+                20.0
+            );
+
+            const std::size_t boundaryBudget =
+                part.size() > 256
+                    ? 72
+                    : (part.size() > 128 ? 96 : 128);
+
+            nfp::FeasibilityRegion obstacleRegion = region;
+            obstacleRegion.sheetBoundary.clear();
+
             for (const auto& point :
-                 nfp::pointsOnFeasibilityBoundary(region, boundarySpacing)) {
+                 nfp::pointsOnFeasibilityBoundary(
+                     obstacleRegion,
+                     boundarySpacing,
+                     boundaryBudget,
+                     false
+                 )) {
                 result.push_back({
                     point.x,
                     point.y,
