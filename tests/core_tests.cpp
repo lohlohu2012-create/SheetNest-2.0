@@ -77,6 +77,11 @@ int main() {
   assert(std::abs(techPoint->speedMMin-6.0)<1e-9);
   assert(std::abs(techPoint->pierceSeconds-0.30)<1e-9);
 
+  const auto outOfRange=tech.lookup("Test Steel",10.0,"O2",3.0);
+  assert(outOfRange.has_value());
+  assert(outOfRange->outOfRange);
+  assert(!outOfRange->interpolated);
+
   const auto exported=exportNestDxf(parts,resultA);
   assert(exported.exportedPlacements==3);
   assert(exported.diagnostics.empty());
