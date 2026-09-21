@@ -415,13 +415,14 @@ Result runAttempt(
             }
 
             const auto candidateShape = state.shapes.back();
-            const auto envelope = combinedBounds(
-                std::vector<PlacedShape>(
-                    state.shapes.begin(),
-                    state.shapes.end() - 1
-                ),
-                candidateShape
-            );
+            Bounds envelope = bounds(candidateShape.outer);
+            for (std::size_t i = 0; i + 1 < state.shapes.size(); ++i) {
+                const auto b = bounds(state.shapes[i].outer);
+                envelope.minX = std::min(envelope.minX, b.minX);
+                envelope.minY = std::min(envelope.minY, b.minY);
+                envelope.maxX = std::max(envelope.maxX, b.maxX);
+                envelope.maxY = std::max(envelope.maxY, b.maxY);
+            }
             const double area = envelope.width() * envelope.height();
 
             if (!foundExisting ||
