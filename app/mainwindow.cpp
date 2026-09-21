@@ -413,11 +413,12 @@ void MainWindow::connectUi() {
         exportDxf();
     });
 
-    connect(quantitySpin_,
-            qOverload<int>(&QSpinBox::valueChanged),
-            this,
-            [this](int) {
+    connect(partTable_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem*) {
         refreshInstances();
+    });
+
+    connect(benchmarkButton_, &QPushButton::clicked, this, [this] {
+        benchmark();
     });
 
     connect(materialCombo_,
@@ -442,6 +443,7 @@ void MainWindow::connectUi() {
             const auto output = watcher_->result();
             result_ = output.result;
             technology_ = output.technology;
+            populateDiagnostics();
 
             view_->showResult(
                 result_,
@@ -516,6 +518,32 @@ void MainWindow::connectUi() {
 
         setBusy(false);
     });
+
+    connect(
+        benchmarkWatcher_,
+        &QFutureWatcher<sheetnest::BenchmarkResult>::finished,
+        this,
+        [this] {
+            try {
+                const auto benchmarkResult = benchmarkWatcher_->result();
+                populateBenchmark(benchmarkResult);
+                appendLog(
+                    QString("Benchmark: базовый %1 мс / %2 листов; оптимизированный %3 мс / %4 листов.")
+                        .arg(benchmarkResult.baseline.milliseconds, 0, 'f', 1)
+                        .arg(static_cast<int>(benchmarkResult.baseline.sheets))
+                        .arg(benchmarkResult.optimized.milliseconds, 0, 'f', 1)
+                        .arg(static_cast<int>(benchmarkResult.optimized.sheets))
+                );
+            } catch (const std::exception& error) {
+                QMessageBox::critical(
+                    this,
+                    "Ошибка benchmark",
+                    QString::fromUtf8(error.what())
+                );
+            }
+            setBusy(false);
+        }
+    );
 }
 
 void MainWindow::importDxf() {
@@ -543,7 +571,9 @@ void MainWindow::importDxf() {
                            static_cast<std::size_t>(data.size()));
 
     document_ = importDxf(text, 0.25);
+    parts_ = partsFromDxf(document_);
     currentFile_ = fileName;
+    populatePartTable();
 
     fileLabel_->setText(
         QString("%1
@@ -570,6 +600,9 @@ void MainWindow::importDxf() {
     }
 
     if (document_.contours.empty()) {
+        parts_.clear();
+        if (partTable_) partTable_->setRowCount(0);
+        instances_.clear();
         partCountLabel_->setText("Деталей: 0");
         calculateButton_->setEnabled(false);
         QMessageBox::warning(
@@ -585,21 +618,165 @@ void MainWindow::importDxf() {
 }
 
 void MainWindow::refreshInstances() {
-    if (document_.contours.empty()) {
+    if (parts_.empty()) {
         instances_.clear();
         partCountLabel_->setText("Деталей: 0");
         return;
     }
 
+    std::vector<std::size_t> quantities(parts_.size(), 1);
+
+    for (std::size_t i = 0; i < parts_.size(); ++i) {
+        if (!partTable_ ||
+            i >= static_cast<std::size_t>(partTable_->rowCount())) {
+            continue;
+        }
+
+        const auto* item = partTable_->item(
+            static_cast<int>(i),
+            3
+        );
+
+        bool ok = false;
+        const int value = item ? item->text().toInt(&ok) : 1;
+        quantities[i] = ok
+            ? static_cast<std::size_t>(std::max(0, value))
+            : 1;
+    }
+
     instances_ = instancesFromDxf(
         document_,
-        static_cast<std::size_t>(quantitySpin_->value())
+        quantities
     );
 
     partCountLabel_->setText(
         QString("Деталей: %1")
             .arg(static_cast<int>(instances_.size()))
     );
+}
+
+void MainWindow::populatePartTable() {
+    if (!partTable_) return;
+
+    QSignalBlocker blocker(partTable_);
+    partTable_->setRowCount(static_cast<int>(parts_.size()));
+
+    for (std::size_t i = 0; i < parts_.size(); ++i) {
+        const auto& part = parts_[i];
+
+        partTable_->setItem(
+            static_cast<int>(i), 0,
+            new QTableWidgetItem(
+                QString::fromStdString(part.id)
+            )
+        );
+        partTable_->setItem(
+            static_cast<int>(i), 1,
+            new QTableWidgetItem(
+                QString::fromStdString(part.layer)
+            )
+        );
+        partTable_->setItem(
+            static_cast<int>(i), 2,
+            new QTableWidgetItem(
+                QString::fromStdString(part.sourceId)
+            )
+        );
+
+        auto* quantity = new QTableWidgetItem("1");
+        quantity->setTextAlignment(Qt::AlignCenter);
+        partTable_->setItem(
+            static_cast<int>(i), 3,
+            quantity
+        );
+    }
+
+    refreshInstances();
+}
+
+void MainWindow::populateDiagnostics() {
+    if (!diagnosticsTable_) return;
+
+    const auto diagnostics = diagnoseNest(
+        instances_,
+        result_
+    );
+
+    diagnosticsTable_->setRowCount(
+        static_cast<int>(diagnostics.size())
+    );
+
+    auto statusText = [](InstanceDiagnosticStatus status) {
+        switch (status) {
+        case InstanceDiagnosticStatus::Placed:
+            return QString("РАЗМЕЩЕНО");
+        case InstanceDiagnosticStatus::Unplaced:
+            return QString("НЕ РАЗМЕЩЕНО");
+        case InstanceDiagnosticStatus::Unknown:
+            return QString("UNKNOWN");
+        }
+        return QString("UNKNOWN");
+    };
+
+    for (std::size_t i = 0; i < diagnostics.size(); ++i) {
+        const auto& d = diagnostics[i];
+
+        const QString values[] = {
+            QString::fromStdString(d.instanceId),
+            QString::fromStdString(d.unitId),
+            QString::fromStdString(d.sourceId),
+            QString::fromStdString(d.layer),
+            statusText(d.status) + " / " +
+                QString::fromStdString(d.stage),
+            QString::fromStdString(d.message)
+        };
+
+        for (int column = 0; column < 6; ++column) {
+            diagnosticsTable_->setItem(
+                static_cast<int>(i),
+                column,
+                new QTableWidgetItem(values[column])
+            );
+        }
+    }
+
+    diagnosticsTable_->resizeColumnsToContents();
+}
+
+void MainWindow::populateBenchmark(
+    const BenchmarkResult& benchmarkResult
+) {
+    if (!benchmarkTable_) return;
+
+    benchmarkTable_->setRowCount(2);
+
+    const BenchmarkCase rows[] = {
+        benchmarkResult.baseline,
+        benchmarkResult.optimized
+    };
+
+    for (int row = 0; row < 2; ++row) {
+        const auto& b = rows[row];
+
+        const QString values[] = {
+            QString::fromStdString(b.name),
+            QString::number(b.milliseconds, 'f', 1),
+            QString::number(static_cast<qulonglong>(b.sheets)),
+            QString::number(static_cast<qulonglong>(b.placed)),
+            QString::number(static_cast<qulonglong>(b.skipped)),
+            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2)
+        };
+
+        for (int column = 0; column < 6; ++column) {
+            benchmarkTable_->setItem(
+                row,
+                column,
+                new QTableWidgetItem(values[column])
+            );
+        }
+    }
+
+    benchmarkTable_->resizeColumnsToContents();
 }
 
 void MainWindow::calculate() {
@@ -677,6 +854,62 @@ void MainWindow::calculate() {
     );
 }
 
+void MainWindow::benchmark() {
+    if (instances_.empty()) {
+        QMessageBox::information(
+            this,
+            "Benchmark",
+            "Сначала загрузите DXF и задайте количество деталей."
+        );
+        return;
+    }
+
+    std::vector<int> rotations;
+    if (rotation0_->isChecked()) rotations.push_back(0);
+    if (rotation90_->isChecked()) rotations.push_back(90);
+    if (rotation180_->isChecked()) rotations.push_back(180);
+    if (rotation270_->isChecked()) rotations.push_back(270);
+
+    if (rotations.empty()) {
+        QMessageBox::warning(
+            this,
+            "Benchmark",
+            "Выберите хотя бы один угол."
+        );
+        return;
+    }
+
+    sheet_ = {
+        sheetWidthSpin_->value(),
+        sheetHeightSpin_->value(),
+        marginSpin_->value()
+    };
+
+    options_.rotations = rotations;
+    options_.iterations =
+        static_cast<std::size_t>(iterationsSpin_->value());
+    options_.gapMm = gapSpin_->value();
+
+    const auto instancesCopy = instances_;
+    const auto sheetCopy = sheet_;
+    const auto optionsCopy = options_;
+
+    setBusy(true);
+    appendLog("Запущен benchmark: базовый поиск vs оптимизированный...");
+
+    benchmarkWatcher_->setFuture(
+        QtConcurrent::run(
+            [this, instancesCopy, sheetCopy, optionsCopy]() {
+                return performBenchmark(
+                    instancesCopy,
+                    sheetCopy,
+                    optionsCopy
+                );
+            }
+        )
+    );
+}
+
 CalculationOutput MainWindow::performCalculation(
     std::vector<Instance> instances,
     Sheet sheet,
@@ -695,7 +928,23 @@ CalculationOutput MainWindow::performCalculation(
         instances,
         technology
     );
+    output.diagnostics = diagnoseNest(
+        instances,
+        output.result
+    );
     return output;
+}
+
+sheetnest::BenchmarkResult MainWindow::performBenchmark(
+    std::vector<Instance> instances,
+    Sheet sheet,
+    Options options
+) const {
+    return benchmarkNest(
+        instances,
+        sheet,
+        options
+    );
 }
 
 void MainWindow::exportDxf() {
