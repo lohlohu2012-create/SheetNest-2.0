@@ -34,7 +34,11 @@ DxfExportResult exportNestDxf(const std::vector<Instance>& parts,const Result& r
   ss<<"0\nSECTION\n2\nENTITIES\n";
 
   std::size_t sheetIndex=0;
+  const double pitchX=result.sheetWidthMm>0?result.sheetWidthMm+100.0:10000.0;
+  const double pitchY=result.sheetHeightMm>0?result.sheetHeightMm+100.0:0.0;
   for(const auto& sheet:result.sheets) {
+    const double sheetOffsetX=static_cast<double>(sheetIndex)*pitchX;
+    const double sheetOffsetY=0.0;
     ++sheetIndex;
     for(const auto& placement:sheet) {
       auto it=byId.find(placement.id);
@@ -43,7 +47,7 @@ DxfExportResult exportNestDxf(const std::vector<Instance>& parts,const Result& r
         continue;
       }
       const Shape shape=normalized(rotate(it->second->part.shape,placement.rotation));
-      const Shape placed=translate(shape,placement.x,placement.y);
+      Shape placed=translate(shape,placement.x+sheetOffsetX,placement.y+sheetOffsetY);
       const std::string layer="SHEET_"+std::to_string(sheetIndex);
       writePolyline(ss,placed.outer,layer);
       for(const auto& hole:placed.holes)writePolyline(ss,hole,layer+"_HOLES");
