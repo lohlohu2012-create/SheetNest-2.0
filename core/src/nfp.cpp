@@ -755,6 +755,116 @@ std::vector<Polygon> noFitPolygons(
     return restored;
 }
 
+double segmentLength(Point a, Point b) {
+    return std::hypot(b.x - a.x, b.y - a.y);
+}
+
+bool clipSegmentToRect(
+    Point& a,
+    Point& b,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY
+) {
+    const double dx = b.x - a.x;
+    const double dy = b.y - a.y;
+    double t0 = 0.0;
+    double t1 = 1.0;
+
+    auto clip = [&](double p, double q) {
+        if (std::abs(p) <= kEps) return q >= 0.0;
+        const double r = q / p;
+        if (p < 0.0) {
+            if (r > t1) return false;
+            if (r > t0) t0 = r;
+        } else {
+            if (r < t0) return false;
+            if (r < t1) t1 = r;
+        }
+        return true;
+    };
+
+    if (!clip(-dx, a.x - minX)) return false;
+    if (!clip( dx, maxX - a.x)) return false;
+    if (!clip(-dy, a.y - minY)) return false;
+    if (!clip( dy, maxY - a.y)) return false;
+
+    a = {
+        a.x + dx * t0,
+        a.y + dy * t0
+    };
+    b = {
+        a.x + (b.x - a.x) * ((t1 - t0) / std::max(kEps, 1.0 - t0)),
+        a.y + (b.y - a.y) * ((t1 - t0) / std::max(kEps, 1.0 - t0))
+    };
+
+    return segmentLength(a, b) > kPointEps;
+}
+
+Point outwardOffsetDirection(
+    Point a,
+    Point b,
+    double area
+) {
+    const double dx = b.x - a.x;
+    const double dy = b.y - a.y;
+    const double length = std::hypot(dx, dy);
+    if (length <= kEps) return {};
+
+    if (area >= 0.0) {
+        return {dy / length, -dx / length};
+    }
+    return {-dy / length, dx / length};
+}
+
+std::vector<FeasibilitySegment> offsetBoundary(
+    const Polygon& polygon,
+    double offset,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY
+) {
+    std::vector<FeasibilitySegment> result;
+    if (polygon.size() < 2) return result;
+
+    const double area = signedArea(polygon);
+    const double safeOffset = std::max(1e-7, offset);
+
+    for (std::size_t i = 0; i < polygon.size(); ++i) {
+        const Point p0 = polygon[i];
+        const Point p1 = polygon[(i + 1) % polygon.size()];
+        const Point normal = outwardOffsetDirection(p0, p1, area);
+
+        Point a{
+            p0.x + normal.x * safeOffset,
+            p0.y + normal.y * safeOffset
+        };
+        Point b{
+            p1.x + normal.x * safeOffset,
+            p1.y + normal.y * safeOffset
+        };
+
+        if (!clipSegmentToRect(
+                a,
+                b,
+                minX,
+                minY,
+                maxX,
+                maxY
+            )) {
+            continue;
+        }
+
+        if (segmentLength(a, b) > kPointEps) {
+            result.push_back({a, b});
+        }
+    }
+
+    return result;
+}
+
 std::vector<Point> noFitVertices(
     const Polygon& fixed,
     const Polygon& moving,
@@ -821,6 +931,145 @@ std::vector<Point> noFitVertices(
     );
 
     return vertices;
+}
+
+
+FeasibilityRegion feasibilityRegion(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY,
+    double clearanceMm
+) {
+    FeasibilityRegion region;
+
+    if (maxX <= minX || maxY <= minY ||
+        fixed.size() < 3 || moving.size() < 3) {
+        return region;
+    }
+
+    // NFP is the forbidden translation region. Its exterior boundary,
+    // offset outward by the required technological gap, is the continuous
+    // contact boundary of the feasible region.
+    const auto forbidden = noFitPolygons(
+        fixed,
+        moving,
+        rotation,
+        0.0
+    );
+
+    const double safeGap = std::max(1e-7, clearanceMm);
+
+    for (const auto& polygon : forbidden) {
+        const auto segments = offsetBoundary(
+            polygon,
+            safeGap,
+            minX,
+            minY,
+            maxX,
+            maxY
+        );
+        region.boundary.insert(
+            region.boundary.end(),
+            segments.begin(),
+            segments.end()
+        );
+    }
+
+    const Polygon sheet{
+        {minX, minY},
+        {maxX, minY},
+        {maxX, maxY},
+        {minX, maxY}
+    };
+
+    for (std::size_t i = 0; i < sheet.size(); ++i) {
+        region.sheetBoundary.push_back({
+            sheet[i],
+            sheet[(i + 1) % sheet.size()]
+        });
+    }
+
+    return region;
+}
+
+std::vector<Point> pointsOnFeasibilityBoundary(
+    const FeasibilityRegion& region,
+    double spacingMm
+) {
+    std::vector<Point> points;
+
+    const double spacing = std::max(0.01, spacingMm);
+
+    auto addSegment = [&](const FeasibilitySegment& segment) {
+        const double length = segmentLength(segment.a, segment.b);
+        if (length <= kPointEps) return;
+
+        const std::size_t count = std::max<std::size_t>(
+            2,
+            static_cast<std::size_t>(std::ceil(length / spacing)) + 1
+        );
+
+        for (std::size_t i = 0; i < count; ++i) {
+            const double t =
+                static_cast<double>(i) /
+                static_cast<double>(count - 1);
+
+            points.push_back({
+                segment.a.x +
+                    (segment.b.x - segment.a.x) * t,
+                segment.a.y +
+                    (segment.b.y - segment.a.y) * t
+            });
+        }
+
+        // Exact projection candidates avoid making the continuous boundary
+        // dependent on the sampling grid when the objective prefers a low
+        // or left-most point on an otherwise long feasible edge.
+        const double dx = segment.b.x - segment.a.x;
+        const double dy = segment.b.y - segment.a.y;
+        const double len2 = dx * dx + dy * dy;
+
+        if (len2 > kEps) {
+            const double tX = std::clamp(
+                -segment.a.x * dx / len2,
+                0.0,
+                1.0
+            );
+            const double tY = std::clamp(
+                -segment.a.y * dy / len2,
+                0.0,
+                1.0
+            );
+
+            for (const double t : {tX, tY, 0.5}) {
+                points.push_back({
+                    segment.a.x + dx * t,
+                    segment.a.y + dy * t
+                });
+            }
+        }
+    };
+
+    for (const auto& segment : region.boundary) addSegment(segment);
+    for (const auto& segment : region.sheetBoundary) addSegment(segment);
+
+    std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) {
+        if (std::abs(a.x - b.x) > kPointEps) return a.x < b.x;
+        return a.y < b.y;
+    });
+
+    points.erase(
+        std::unique(points.begin(), points.end(), [](const Point& a, const Point& b) {
+            return samePoint(a, b);
+        }),
+        points.end()
+    );
+
+    return points;
 }
 
 void clearCache() {
