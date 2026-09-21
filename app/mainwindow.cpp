@@ -23,6 +23,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTabWidget>
+#include <QSignalBlocker>
 #include <QAbstractItemView>
 #include <QtConcurrent>
 
@@ -1042,6 +1043,7 @@ void MainWindow::appendLog(const QString& text) {
 void MainWindow::setBusy(bool busy) {
     importButton_->setEnabled(!busy);
     calculateButton_->setEnabled(!busy && !instances_.empty());
+    benchmarkButton_->setEnabled(!busy && !instances_.empty());
     exportButton_->setEnabled(!busy && !result_.sheets.empty());
 
     progress_->setRange(0, busy ? 0 : 1);
