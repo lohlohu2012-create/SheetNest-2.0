@@ -1,4 +1,5 @@
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/nfp.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -264,6 +265,39 @@ std::vector<Candidate> candidatesFor(
 
     for (const auto& placed : sheet.shapes) {
         addRingCandidates(placed.outer);
+
+        // NFP/Minkowski candidate set for true-shape contact positions.
+        // Final collision + clearance validation below remains authoritative.
+        for (const auto& vertex : nfp::noFitVertices(placed.outer, part)) {
+            result.push_back({vertex.x, vertex.y, vertex.y, vertex.x});
+            if (g > 0.0) {
+                result.push_back({
+                    vertex.x + g,
+                    vertex.y,
+                    vertex.y,
+                    vertex.x + g
+                });
+                result.push_back({
+                    vertex.x - g,
+                    vertex.y,
+                    vertex.y,
+                    vertex.x - g
+                });
+                result.push_back({
+                    vertex.x,
+                    vertex.y + g,
+                    vertex.y + g,
+                    vertex.x
+                });
+                result.push_back({
+                    vertex.x,
+                    vertex.y - g,
+                    vertex.y - g,
+                    vertex.x
+                });
+            }
+        }
+
         for (const auto& hole : placed.holes) {
             // Holes are usable voids. Generate candidates against their
             // boundaries so smaller parts can interlock inside them.
