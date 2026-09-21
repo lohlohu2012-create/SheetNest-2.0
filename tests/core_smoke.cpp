@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <algorithm>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -729,6 +730,162 @@ void testConcaveUnionNfp() {
     assert(totalAbsArea > 0.0);
 }
 
+double testPointSegmentDistance(Point p, Point a, Point b) {
+    const double vx = b.x - a.x;
+    const double vy = b.y - a.y;
+    const double len2 = vx * vx + vy * vy;
+    if (len2 <= 1e-12) return std::hypot(p.x - a.x, p.y - a.y);
+
+    double t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2;
+    t = std::clamp(t, 0.0, 1.0);
+
+    const Point q{
+        a.x + t * vx,
+        a.y + t * vy
+    };
+    return std::hypot(p.x - q.x, p.y - q.y);
+}
+
+double testPolygonBoundaryDistance(const Polygon& a, const Polygon& b) {
+    double best = std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const Point a0 = a[i];
+        const Point a1 = a[(i + 1) % a.size()];
+
+        for (std::size_t j = 0; j < b.size(); ++j) {
+            const Point b0 = b[j];
+            const Point b1 = b[(j + 1) % b.size()];
+
+            best = std::min(best, testPointSegmentDistance(a0, b0, b1));
+            best = std::min(best, testPointSegmentDistance(a1, b0, b1));
+            best = std::min(best, testPointSegmentDistance(b0, a0, a1));
+            best = std::min(best, testPointSegmentDistance(b1, a0, a1));
+        }
+    }
+    return best;
+}
+
+void testContinuousConcaveFeasibilityRegion() {
+    Polygon fixed{
+        {0,0},{50,0},{50,12},{24,12},{24,34},{0,34}
+    };
+    Polygon moving = rectangle(8, 8);
+
+    const auto region = nfp::feasibilityRegion(
+        fixed,
+        moving,
+        0,
+        -30.0,
+        -30.0,
+        60.0,
+        50.0,
+        1.0
+    );
+
+    assert(!region.boundary.empty());
+
+    bool foundLongEdge = false;
+    bool foundInteriorBoundaryPoint = false;
+
+    for (const auto& segment : region.boundary) {
+        const double length =
+            std::hypot(
+                segment.b.x - segment.a.x,
+                segment.b.y - segment.a.y
+            );
+
+        if (length < 6.0) continue;
+        foundLongEdge = true;
+
+        const Point interior{
+            segment.a.x * 0.37 + segment.b.x * 0.63,
+            segment.a.y * 0.37 + segment.b.y * 0.63
+        };
+
+        const auto sampled =
+            nfp::pointsOnFeasibilityBoundary(region, 1000.0);
+
+        for (const auto& point : sampled) {
+            const double distance =
+                testPointSegmentDistance(
+                    point,
+                    segment.a,
+                    segment.b
+                );
+
+            if (distance <= 1e-6 &&
+                !(
+                    (std::hypot(point.x - segment.a.x, point.y - segment.a.y) < 1e-5) ||
+                    (std::hypot(point.x - segment.b.x, point.y - segment.b.y) < 1e-5)
+                )) {
+                foundInteriorBoundaryPoint = true;
+                break;
+            }
+        }
+
+        (void)interior;
+        if (foundInteriorBoundaryPoint) break;
+    }
+
+    assert(foundLongEdge);
+    assert(foundInteriorBoundaryPoint);
+}
+
+void testFeasibilityGap() {
+    Polygon fixed = rectangle(20, 20);
+    Polygon moving = rectangle(10, 10);
+    const double gap = 2.0;
+
+    const auto region = nfp::feasibilityRegion(
+        fixed,
+        moving,
+        0,
+        -30.0,
+        -30.0,
+        40.0,
+        40.0,
+        gap
+    );
+
+    assert(!region.boundary.empty());
+
+    bool foundExpectedGap = false;
+
+    for (const auto& segment : region.boundary) {
+        const double length =
+            std::hypot(
+                segment.b.x - segment.a.x,
+                segment.b.y - segment.a.y
+            );
+
+        if (length < 5.0) continue;
+
+        const Point point{
+            (segment.a.x + segment.b.x) * 0.5,
+            (segment.a.y + segment.b.y) * 0.5
+        };
+
+        const Polygon translatedMoving = translate(
+            moving,
+            point.x,
+            point.y
+        );
+
+        const double distance = testPolygonBoundaryDistance(
+            translatedMoving,
+            fixed
+        );
+
+        if (distance >= gap - 1e-5) {
+            foundExpectedGap = true;
+            break;
+        }
+    }
+
+    assert(foundExpectedGap);
+}
+
 void testNfpMinkowski() {
     const Polygon fixed = rectangle(20, 10);
     const Polygon moving = rectangle(5, 4);
@@ -829,6 +986,8 @@ int main() {
     testDxfModelPipeline();
     testDxfExportRoundTrip();
     testNfpMinkowski();
+    testContinuousConcaveFeasibilityRegion();
+    testFeasibilityGap();
     testNfpUnionAndCache();
     testConcaveUnionNfp();
     testConcaveNfpCandidates();
