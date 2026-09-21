@@ -1,0 +1,44 @@
+name: windows-build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHEETNEST_BUILD_GUI=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test core
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install application
+        run: cmake --install build --config Release --prefix dist
+
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -C Release -B dist
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SheetNest-Windows-x64
+          path: dist/*.zip
