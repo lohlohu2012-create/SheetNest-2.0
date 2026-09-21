@@ -161,7 +161,32 @@ double minBoundaryDistance(const PlacedShape& a, const PlacedShape& b) {
 }
 
 bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
-    if (polygonsIntersect(a.outer, b.outer)) return true;
+    // Outer/outer containment by itself is not material overlap: the smaller
+    // shape may legitimately lie inside a hole of the other part.
+    if (polygonsIntersect(a.outer, b.outer)) {
+        bool boundaryCrossesMaterial = false;
+
+        // An outer boundary crossing the other outer boundary is always a
+        // material conflict. Outer/hole crossings are also conflicts because
+        // material enters the void while the other material occupies that area.
+        if (boundaryDistance(a.outer, b.outer) <= kEps) {
+            boundaryCrossesMaterial = true;
+        }
+        for (const auto& hole : b.holes) {
+            if (boundaryDistance(a.outer, hole) <= kEps) {
+                boundaryCrossesMaterial = true;
+                break;
+            }
+        }
+        for (const auto& hole : a.holes) {
+            if (boundaryDistance(hole, b.outer) <= kEps) {
+                boundaryCrossesMaterial = true;
+                break;
+            }
+        }
+
+        if (boundaryCrossesMaterial) return true;
+    }
 
     for (const auto& p : a.outer) {
         if (pointInMaterial(b, p)) return true;
