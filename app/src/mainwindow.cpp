@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QAction>
 #include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -27,6 +28,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QStandardPaths>
+#include <unordered_map>
 #include <algorithm>
 #include <cmath>
 #include <memory>
