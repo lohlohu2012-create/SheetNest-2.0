@@ -1,6 +1,7 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/nfp.hpp"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -13,6 +14,18 @@ int main() {
   assert(std::abs(polygonArea(outer)-10000.0)<1e-9);
   assert(pointInShape({10,10},plate));
   assert(!pointInShape({50,50},plate));
+
+  const fixed{{0,0},{100,0},{100,100},{0,100}};
+  const moving{{0,0},{20,0},{20,10},{0,10}};
+  const nfp=buildNfp(fixed,moving);
+  assert(nfp.valid);
+  assert(nfp.quality==NfpQuality::ExactConvex);
+  const nb=bounds(nfp.boundary);
+  assert(std::abs(nb.minX+20.0)<1e-9);
+  assert(std::abs(nb.maxX-100.0)<1e-9);
+  assert(std::abs(nb.minY+10.0)<1e-9);
+  assert(std::abs(nb.maxY-100.0)<1e-9);
+  assert(pointInPolygon({100,10},nfp.boundary));
 
   Shape insertInsideHole{
     Polygon{{40,40},{60,40},{60,60},{40,60}},{}
