@@ -18,6 +18,7 @@ struct LaserTechnologyPoint {
   std::string source;
   std::string note;
   bool interpolated{};
+  bool outOfRange{};
 };
 
 class LaserTechnologyDatabase {
