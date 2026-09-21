@@ -642,6 +642,17 @@ std::vector<Vertex> readPolylineVertices(
         }
     }
 
+    if (result.size() < vertices.size()) {
+        diagnostic(
+            diagnostics,
+            DxfSeverity::Error,
+            "DXF/" + entity.type,
+            "После проверки POLYLINE осталось недостаточно валидных VERTEX. Сущность отклонена.",
+            &entity
+        );
+        result.clear();
+    }
+
     return result;
 }
 
@@ -1025,9 +1036,11 @@ bool parseEntityLwPolyline(
             diagnostics,
             DxfSeverity::Error,
             "DXF/LWPOLYLINE",
-            "Одна или несколько вершин LWPOLYLINE имеют некорректные 10/20 координаты или bulge.",
+            "Одна или несколько вершин LWPOLYLINE имеют некорректные 10/20 координаты или bulge. Сущность отклонена.",
             &entity
         );
+        ++malformed;
+        return false;
     }
 
     const bool closed = (groupInt(entity, 70) & 1) != 0;
