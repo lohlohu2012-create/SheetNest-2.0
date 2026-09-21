@@ -1,6 +1,5 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
-#include "sheetnest/nfp.hpp"
 #include <algorithm>
 #include <cmath>
 #include <future>
