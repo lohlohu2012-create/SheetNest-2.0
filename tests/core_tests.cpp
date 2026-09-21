@@ -20,10 +20,10 @@ int main() {
 
   const Polygon fixed{{0,0},{100,0},{100,100},{0,100}};
   const Polygon moving{{0,0},{20,0},{20,10},{0,10}};
-  const nfp=buildNfp(fixed,moving);
+  const auto nfp=buildNfp(fixed,moving);
   assert(nfp.valid);
   assert(nfp.quality==NfpQuality::ExactConvex);
-  const nb=bounds(nfp.boundary);
+  const auto nb=bounds(nfp.boundary);
   assert(std::abs(nb.minX+20.0)<1e-9);
   assert(std::abs(nb.maxX-100.0)<1e-9);
   assert(std::abs(nb.minY+10.0)<1e-9);
