@@ -220,8 +220,8 @@ std::vector<Candidate> candidatesFor(
 
     const double g = std::max(0.0, gap);
 
-    for (const auto& placed : sheet.shapes) {
-        const auto b = bounds(placed.outer);
+    auto addRingCandidates = [&](const Polygon& ring) {
+        const auto b = bounds(ring);
 
         const double xs[] = {
             b.minX - pb.maxX - g,
@@ -245,7 +245,7 @@ std::vector<Candidate> candidatesFor(
         // Vertex-to-vertex candidates expose concave interlocking positions
         // that bounding-box stepping cannot see.
         for (const auto& pv : part) {
-            for (const auto& qv : placed.outer) {
+            for (const auto& qv : ring) {
                 result.push_back({
                     qv.x - pv.x,
                     qv.y - pv.y,
@@ -260,8 +260,16 @@ std::vector<Candidate> candidatesFor(
                 });
             }
         }
-    }
+    };
 
+    for (const auto& placed : sheet.shapes) {
+        addRingCandidates(placed.outer);
+        for (const auto& hole : placed.holes) {
+            // Holes are usable voids. Generate candidates against their
+            // boundaries so smaller parts can interlock inside them.
+            addRingCandidates(hole);
+        }
+    }
     std::sort(result.begin(), result.end(), [](const Candidate& a, const Candidate& b) {
         return std::tie(a.scoreY, a.scoreX) < std::tie(b.scoreY, b.scoreX);
     });
@@ -379,9 +387,16 @@ Result runAttempt(
         if (rotations.empty()) rotations.push_back(0);
         if (position > 0) std::shuffle(rotations.begin(), rotations.end(), rng);
 
-        // Try existing sheets before opening a new one. This encodes the
-        // primary objective: minimize the sheet count.
-        for (std::size_t s = 0; s < states.size() && !placed; ++s) {
+        // Evaluate every existing sheet instead of taking the first one
+        // that accepts the part. This preserves the primary sheet-count
+        // objective while making better use of already opened sheets.
+        std::size_t bestSheet = states.size();
+        SheetState bestState;
+        double bestEnvelopeArea = std::numeric_limits<double>::infinity();
+        double bestEnvelopeY = std::numeric_limits<double>::infinity();
+        double bestEnvelopeX = std::numeric_limits<double>::infinity();
+
+        for (std::size_t s = 0; s < states.size(); ++s) {
             auto trialRotations = rotations;
             if (s > 0) std::rotate(
                 trialRotations.begin(),
@@ -389,16 +404,39 @@ Result runAttempt(
                 trialRotations.end()
             );
 
-            placed = placeOnSheet(
-                instance,
-                sheet,
-                options,
-                states[s],
-                trialRotations
-            );
+            SheetState trial = states[s];
+            if (!placeOnSheet(instance, sheet, options, trial, trialRotations)) {
+                continue;
+            }
+
+            if (trial.shapes.empty()) continue;
+            Bounds envelope = bounds(trial.shapes.front().outer);
+            for (std::size_t i = 1; i < trial.shapes.size(); ++i) {
+                const auto b = bounds(trial.shapes[i].outer);
+                envelope.minX = std::min(envelope.minX, b.minX);
+                envelope.minY = std::min(envelope.minY, b.minY);
+                envelope.maxX = std::max(envelope.maxX, b.maxX);
+                envelope.maxY = std::max(envelope.maxY, b.maxY);
+            }
+
+            const double area = envelope.width() * envelope.height();
+            if (area + kEps < bestEnvelopeArea ||
+                (std::abs(area - bestEnvelopeArea) <= kEps &&
+                 std::tie(envelope.maxY, envelope.maxX) <
+                     std::tie(bestEnvelopeY, bestEnvelopeX))) {
+                bestSheet = s;
+                bestState = std::move(trial);
+                bestEnvelopeArea = area;
+                bestEnvelopeY = envelope.maxY;
+                bestEnvelopeX = envelope.maxX;
+            }
         }
 
-        if (!placed) {
+        bool placed = false;
+        if (bestSheet < states.size()) {
+            states[bestSheet] = std::move(bestState);
+            placed = true;
+        } else {
             SheetState state;
             placed = placeOnSheet(
                 instance,
