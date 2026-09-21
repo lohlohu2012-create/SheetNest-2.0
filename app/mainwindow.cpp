@@ -20,6 +20,10 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QVBoxLayout>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QTabWidget>
+#include <QAbstractItemView>
 #include <QtConcurrent>
 
 #include <algorithm>
@@ -142,7 +146,8 @@ QDoubleSpinBox* makeDouble(
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
-      watcher_(new QFutureWatcher<CalculationOutput>(this))
+      watcher_(new QFutureWatcher<CalculationOutput>(this)),
+      benchmarkWatcher_(new QFutureWatcher<sheetnest::BenchmarkResult>(this))
 {
     buildUi();
     connectUi();
@@ -191,19 +196,40 @@ void MainWindow::buildUi() {
     sheetForm->addRow("Зазор, мм", gapSpin_);
     controlLayout->addWidget(sheetGroup);
 
-    auto* partsGroup = new QGroupBox("Детали");
-    auto* partsForm = new QFormLayout(partsGroup);
+    auto* partsGroup = new QGroupBox("Детали и количество");
+    auto* partsLayout = new QVBoxLayout(partsGroup);
 
-    quantitySpin_ = new QSpinBox;
-    quantitySpin_->setRange(1, 10000);
-    quantitySpin_->setValue(1);
+    partTable_ = new QTableWidget(0, 4);
+    partTable_->setHorizontalHeaderLabels({
+        "Деталь", "Слой", "Source ID", "Количество"
+    });
+    partTable_->horizontalHeader()->setStretchLastSection(true);
+    partTable_->horizontalHeader()->setSectionResizeMode(
+        0, QHeaderView::Stretch
+    );
+    partTable_->horizontalHeader()->setSectionResizeMode(
+        1, QHeaderView::ResizeToContents
+    );
+    partTable_->horizontalHeader()->setSectionResizeMode(
+        2, QHeaderView::Stretch
+    );
+    partTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows
+    );
+    partTable_->setEditTriggers(
+        QAbstractItemView::DoubleClicked |
+        QAbstractItemView::EditKeyPressed |
+        QAbstractItemView::SelectedClicked
+    );
+    partTable_->setMinimumHeight(150);
+    partsLayout->addWidget(partTable_);
+
+    auto* settingsForm = new QFormLayout;
 
     iterationsSpin_ = new QSpinBox;
     iterationsSpin_->setRange(1, 128);
     iterationsSpin_->setValue(24);
-
-    partsForm->addRow("Количество на деталь", quantitySpin_);
-    partsForm->addRow("Итерации оптимизации", iterationsSpin_);
+    settingsForm->addRow("Итерации оптимизации", iterationsSpin_);
 
     auto* rotationWidget = new QWidget;
     auto* rotationLayout = new QGridLayout(rotationWidget);
@@ -223,10 +249,11 @@ void MainWindow::buildUi() {
     rotationLayout->addWidget(rotation180_, 1, 0);
     rotationLayout->addWidget(rotation270_, 1, 1);
 
-    partsForm->addRow("Повороты", rotationWidget);
+    settingsForm->addRow("Повороты", rotationWidget);
     partCountLabel_ = new QLabel("Деталей: 0");
-    partsForm->addRow(partCountLabel_);
+    settingsForm->addRow(partCountLabel_);
 
+    partsLayout->addLayout(settingsForm);
     controlLayout->addWidget(partsGroup);
 
     auto* technologyGroup = new QGroupBox("Лазер 3 кВт Bodor");
@@ -258,6 +285,10 @@ void MainWindow::buildUi() {
     controlLayout->addWidget(progress_);
 
     controlLayout->addWidget(calculateButton_);
+
+    benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
+    controlLayout->addWidget(benchmarkButton_);
+
     controlLayout->addWidget(exportButton_);
 
     log_ = new QPlainTextEdit;
@@ -267,8 +298,34 @@ void MainWindow::buildUi() {
     controlLayout->addWidget(log_, 1);
 
     view_ = new NestView;
+
+    diagnosticsTable_ = new QTableWidget(0, 6);
+    diagnosticsTable_->setHorizontalHeaderLabels({
+        "instanceId", "unitId", "Source ID", "Слой", "Этап", "Сообщение"
+    });
+    diagnosticsTable_->horizontalHeader()->setStretchLastSection(true);
+    diagnosticsTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows
+    );
+    diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    benchmarkTable_ = new QTableWidget(0, 6);
+    benchmarkTable_->setHorizontalHeaderLabels({
+        "Режим", "Время, мс", "Листов", "Размещено", "Пропущено", "Использование"
+    });
+    benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
+    benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    benchmarkTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows
+    );
+
+    auto* rightTabs = new QTabWidget;
+    rightTabs->addTab(view_, "Раскладка");
+    rightTabs->addTab(diagnosticsTable_, "Диагностика");
+    rightTabs->addTab(benchmarkTable_, "Benchmark");
+
     splitter->addWidget(controlPanel);
-    splitter->addWidget(view_);
+    splitter->addWidget(rightTabs);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
     splitter->setSizes({420, 1080});
