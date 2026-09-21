@@ -3,8 +3,11 @@
 #include <QMainWindow>
 #include <QFutureWatcher>
 
+#include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting.hpp"
+#include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf.hpp"
+#include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
 
 class QComboBox;
@@ -15,6 +18,8 @@ class QLabel;
 class QProgressBar;
 class QSpinBox;
 class QPushButton;
+class QTableWidget;
+class QTabWidget;
 
 class NestView;
 
@@ -22,6 +27,7 @@ struct CalculationOutput {
     sheetnest::Result result;
     sheetnest::CuttingEstimate cutting;
     sheetnest::CuttingParameters technology;
+    std::vector<sheetnest::InstanceDiagnostic> diagnostics;
 };
 
 Q_DECLARE_METATYPE(CalculationOutput)
@@ -36,7 +42,11 @@ private:
     void connectUi();
     void importDxf();
     void calculate();
+    void benchmark();
     void exportDxf();
+    void populatePartTable();
+    void populateDiagnostics();
+    void populateBenchmark(const sheetnest::BenchmarkResult& benchmarkResult);
     void updateTechnologyPreview();
     void refreshInstances();
     void appendLog(const QString& text);
@@ -49,9 +59,16 @@ private:
         sheetnest::CuttingParameters technology
     ) const;
 
+    sheetnest::BenchmarkResult performBenchmark(
+        std::vector<sheetnest::Instance> instances,
+        sheetnest::Sheet sheet,
+        sheetnest::Options options
+    ) const;
+
     QString materialName(sheetnest::Material material) const;
 
     sheetnest::DxfDocument document_;
+    std::vector<sheetnest::Part> parts_;
     std::vector<sheetnest::Instance> instances_;
     sheetnest::Result result_;
     sheetnest::Sheet sheet_;
@@ -66,7 +83,6 @@ private:
     QDoubleSpinBox* sheetHeightSpin_{};
     QDoubleSpinBox* marginSpin_{};
     QDoubleSpinBox* gapSpin_{};
-    QSpinBox* quantitySpin_{};
     QSpinBox* iterationsSpin_{};
 
     QCheckBox* rotation0_{};
@@ -83,7 +99,9 @@ private:
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
+    QPushButton* benchmarkButton_{};
     QPushButton* exportButton_{};
 
     QFutureWatcher<CalculationOutput>* watcher_{};
+    QFutureWatcher<sheetnest::BenchmarkResult>* benchmarkWatcher_{};
 };
