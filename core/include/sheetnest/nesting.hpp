@@ -16,6 +16,7 @@ struct Result {
   double utilization{};
   double usedAreaMm2{};
   std::size_t iterations{};
+  bool complete() const { return unplaced.empty(); }
 };
 struct Options {
   std::vector<int> rotations{0,90,180,270};
@@ -24,6 +25,7 @@ struct Options {
   double candidateGridMm{5};
   std::uint64_t seed{0};
   std::size_t parallelism{0}; // 0 = auto-detect CPU parallelism
+  std::size_t sheetReductionPasses{4}; // attempts per target sheet count
 };
 Result nest(const std::vector<Instance>&, const Sheet&, const Options&);
 }
