@@ -13,6 +13,16 @@ struct CacheStats {
     std::size_t entries{};
 };
 
+struct FeasibilitySegment {
+    Point a{};
+    Point b{};
+};
+
+struct FeasibilityRegion {
+    std::vector<FeasibilitySegment> boundary;
+    std::vector<FeasibilitySegment> sheetBoundary;
+};
+
 std::vector<Polygon> convexDecompose(const Polygon& polygon);
 
 Polygon minkowskiConvexSum(
@@ -35,6 +45,22 @@ std::vector<Point> noFitVertices(
     const Polygon& moving,
     int rotation = 0,
     double clearanceMm = 0.0
+);
+
+FeasibilityRegion feasibilityRegion(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY,
+    double clearanceMm = 0.0
+);
+
+std::vector<Point> pointsOnFeasibilityBoundary(
+    const FeasibilityRegion& region,
+    double spacingMm
 );
 
 void clearCache();
