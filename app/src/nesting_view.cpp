@@ -77,7 +77,7 @@ void NestingView::setResult(const sheetnest::Result& result,const std::vector<sh
 
       sheetnest::Shape shape=sheetnest::normalized(
         sheetnest::rotate(it->second->part.shape,placement.rotation));
-      shape=sheetnest::translate(shape,placement.x,placement.y);
+      shape=sheetnest::translate(shape,placement.x+ox,placement.y+oy);
       QPainterPath p=toPath(shape);
 
       auto* item=scene_.addPath(p,QPen(QColor("#56d3c2"),1.0),
