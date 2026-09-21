@@ -15,8 +15,8 @@ int main() {
   assert(pointInShape({10,10},plate));
   assert(!pointInShape({50,50},plate));
 
-  const fixed{{0,0},{100,0},{100,100},{0,100}};
-  const moving{{0,0},{20,0},{20,10},{0,10}};
+  const Polygon fixed{{0,0},{100,0},{100,100},{0,100}};
+  const Polygon moving{{0,0},{20,0},{20,10},{0,10}};
   const nfp=buildNfp(fixed,moving);
   assert(nfp.valid);
   assert(nfp.quality==NfpQuality::ExactConvex);
