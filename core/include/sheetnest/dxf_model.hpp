@@ -17,4 +17,9 @@ std::vector<Instance> instancesFromDxf(
     std::size_t quantityPerPart = 1
 );
 
+std::vector<Instance> instancesFromDxf(
+    const DxfDocument& document,
+    const std::vector<std::size_t>& quantities
+);
+
 } // namespace sheetnest
