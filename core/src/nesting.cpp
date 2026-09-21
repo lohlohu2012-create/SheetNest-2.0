@@ -23,6 +23,13 @@ static bool fitsSheet(const Shape& shape,const Sheet& s) {
   return b.minX>=s.marginMm-1e-9 && b.minY>=s.marginMm-1e-9 &&
          b.maxX<=s.width-s.marginMm+1e-9 && b.maxY<=s.height-s.marginMm+1e-9;
 }
+static bool fitsAnyRotation(const Instance& i,const Sheet& s,const Options& o) {
+  for(int rot:o.rotations) {
+    const Shape g=normalized(rotate(i.part.shape,rot));
+    if(fitsSheet(g,s)) return true;
+  }
+  return false;
+}
 static bool collides(const Shape& shape,const SheetState& sheet,double gap) {
   for (const auto& g:sheet.geoms) if (shapesIntersect(shape,g.shape,gap)) return true;
   return false;
@@ -149,7 +156,7 @@ static bool tryPlace(const Instance& i,const Sheet& s,const Options& o,std::vect
     }
   }
   if(bestSheet==sheets.size())return false;
-  sheets[bestSheet].placements.push_back({i.id,best.x,best.y,best.rotation});
+  sheets[bestSheet].placements.push_back({i.id,best.x,best.y,best.rotation,i.unitId});
   sheets[bestSheet].geoms.push_back({std::move(bestShape),sheets[bestSheet].placements.back()});
   return true;
 }
@@ -180,26 +187,48 @@ static Result runPass(const std::vector<Instance>& parts,const Sheet& s,const Op
   std::vector<std::string> unplaced;
   double used=0;
   for(size_t idx:order) {
-    if(tryPlace(parts[idx],s,o,sheets)) {
-      used+=area(parts[idx].part.shape);
+    const auto& instance=parts[idx];
+    if(tryPlace(instance,s,o,sheets)) {
+      used+=area(instance.part.shape);
       continue;
     }
+
     if(sheetLimit==0||sheets.size()<sheetLimit) {
       sheets.emplace_back();
-      if(tryPlace(parts[idx],s,o,sheets)) {
-        used+=area(parts[idx].part.shape);
+      if(tryPlace(instance,s,o,sheets)) {
+        used+=area(instance.part.shape);
       } else {
         sheets.pop_back();
-        unplaced.push_back(parts[idx].id);
+        unplaced.push_back(instance.id);
       }
     } else {
-      unplaced.push_back(parts[idx].id);
+      unplaced.push_back(instance.id);
     }
   }
   Result r;
   r.iterations=1;
   r.unplaced=std::move(unplaced);
   r.usedAreaMm2=used;
+
+  for(const auto& id:r.unplaced) {
+    auto it=std::find_if(parts.begin(),parts.end(),[&](const Instance& x){return x.id==id;});
+    if(it==parts.end()) continue;
+    const bool fits= fitsAnyRotation(*it,s,o);
+    PlacementDiagnostic d;
+    d.instanceId=it->id;
+    d.unitId=it->unitId;
+    if(sheetLimit>0&&sheets.size()>=sheetLimit) {
+      d.stage="SheetLimit";
+      d.message="Целевое количество листов не позволяет открыть новый лист.";
+    } else if(!fits) {
+      d.stage="SheetFit";
+      d.message="Деталь не помещается на лист с заданными кромкой и поворотами.";
+    } else {
+      d.stage="SearchExhausted";
+      d.message="Геометрически деталь помещается, но текущий поиск не нашёл допустимого положения.";
+    }
+    r.diagnostics.push_back(std::move(d));
+  }
   r.sheets.reserve(sheets.size());
   for(auto& st:sheets)r.sheets.push_back(std::move(st.placements));
   const double usableW=std::max(0.0,s.width-2*s.marginMm);
