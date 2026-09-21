@@ -93,22 +93,33 @@ DxfDocument importDxf(const std::string& text,double tol){
     i=j;
   }
 
-  std::vector<Polygon> closed;
+  struct ClosedContour { Polygon points; std::string sourceId; };
+  std::vector<ClosedContour> closed;
   for(auto& path:paths){
-    if(path.points.size()<3){doc.diagnostics.push_back({path.type,path.id,"Открытый или вырожденный контур: менее 3 точек.",false});continue;}
+    if(path.points.size()<3){
+      doc.diagnostics.push_back({path.type,path.id,"Открытый или вырожденный контур: менее 3 точек.",false});
+      continue;
+    }
     if(near(path.points.front(),path.points.back()))path.points.pop_back();
-    if(path.points.size()<3||std::abs(signedPolygonArea(path.points))<1e-9){doc.diagnostics.push_back({path.type,path.id,"Контур имеет нулевую/недостаточную площадь.",false});continue;}
-    closed.push_back(std::move(path.points)); ++doc.closedPathCount;
+    if(path.points.size()<3||std::abs(signedPolygonArea(path.points))<1e-9){
+      doc.diagnostics.push_back({path.type,path.id,"Контур имеет нулевую/недостаточную площадь.",false});
+      continue;
+    }
+    const std::string sourceId=path.id.empty()?path.type:path.id;
+    closed.push_back({std::move(path.points),sourceId});
+    ++doc.closedPathCount;
   }
   for(size_t i=0;i<closed.size();++i){
-    const auto& p=closed[i]; int depth=0;
-    for(size_t j=0;j<closed.size();++j)if(i!=j&&pointInPolygon(p[0],closed[j]))++depth;
+    const auto& p=closed[i].points; int depth=0;
+    for(size_t j=0;j<closed.size();++j)if(i!=j&&pointInPolygon(p[0],closed[j].points))++depth;
     if(depth%2)continue;
-    DxfContour c; c.outer=p; c.sourceId=std::to_string(i);
+    DxfContour c; c.outer=p; c.sourceId=closed[i].sourceId;
     for(size_t j=0;j<closed.size();++j){
       if(i==j)continue;
-      int d=0;for(size_t k=0;k<closed.size();++k)if(k!=j&&pointInPolygon(closed[j][0],closed[k]))++d;
-      if(d==depth+1&&pointInPolygon(closed[j][0],p))c.holes.push_back(closed[j]);
+      int d=0;
+      for(size_t k=0;k<closed.size();++k)
+        if(k!=j&&pointInPolygon(closed[j].points[0],closed[k].points))++d;
+      if(d==depth+1&&pointInPolygon(closed[j].points[0],p))c.holes.push_back(closed[j].points);
     }
     doc.contours.push_back(std::move(c));
   }
