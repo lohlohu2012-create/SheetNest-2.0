@@ -386,14 +386,16 @@ Result runAttempt(
         if (rotations.empty()) rotations.push_back(0);
         if (position > 0) std::shuffle(rotations.begin(), rotations.end(), rng);
 
-        // Evaluate every existing sheet instead of taking the first one
-        // that accepts the part. This preserves the primary sheet-count
-        // objective while making better use of already opened sheets.
+        // Evaluate every existing sheet, but roll back each trial instead
+        // of copying the whole SheetState. Only the winning newly-added shape
+        // is retained. This is materially cheaper for large nesting jobs.
         std::size_t bestSheet = states.size();
-        SheetState bestState;
+        PlacedShape bestShape;
+        Placement bestPlacement{};
         double bestEnvelopeArea = std::numeric_limits<double>::infinity();
         double bestEnvelopeY = std::numeric_limits<double>::infinity();
         double bestEnvelopeX = std::numeric_limits<double>::infinity();
+        bool foundExisting = false;
 
         for (std::size_t s = 0; s < states.size(); ++s) {
             auto trialRotations = rotations;
@@ -403,37 +405,50 @@ Result runAttempt(
                 trialRotations.end()
             );
 
-            SheetState trial = states[s];
-            if (!placeOnSheet(instance, sheet, options, trial, trialRotations)) {
+            auto& state = states[s];
+            const std::size_t oldShapeCount = state.shapes.size();
+            const std::size_t oldPlacementCount = state.placements.size();
+            const double oldPlacedArea = state.placedArea;
+
+            if (!placeOnSheet(instance, sheet, options, state, trialRotations)) {
                 continue;
             }
 
-            if (trial.shapes.empty()) continue;
-            Bounds envelope = bounds(trial.shapes.front().outer);
-            for (std::size_t i = 1; i < trial.shapes.size(); ++i) {
-                const auto b = bounds(trial.shapes[i].outer);
-                envelope.minX = std::min(envelope.minX, b.minX);
-                envelope.minY = std::min(envelope.minY, b.minY);
-                envelope.maxX = std::max(envelope.maxX, b.maxX);
-                envelope.maxY = std::max(envelope.maxY, b.maxY);
-            }
-
+            const auto candidateShape = state.shapes.back();
+            const auto envelope = combinedBounds(
+                std::vector<PlacedShape>(
+                    state.shapes.begin(),
+                    state.shapes.end() - 1
+                ),
+                candidateShape
+            );
             const double area = envelope.width() * envelope.height();
-            if (area + kEps < bestEnvelopeArea ||
+
+            if (!foundExisting ||
+                area + kEps < bestEnvelopeArea ||
                 (std::abs(area - bestEnvelopeArea) <= kEps &&
                  std::tie(envelope.maxY, envelope.maxX) <
                      std::tie(bestEnvelopeY, bestEnvelopeX))) {
+                foundExisting = true;
                 bestSheet = s;
-                bestState = std::move(trial);
+                bestShape = candidateShape;
+                bestPlacement = state.placements.back();
                 bestEnvelopeArea = area;
                 bestEnvelopeY = envelope.maxY;
                 bestEnvelopeX = envelope.maxX;
             }
+
+            state.shapes.resize(oldShapeCount);
+            state.placements.resize(oldPlacementCount);
+            state.placedArea = oldPlacedArea;
         }
 
         bool placed = false;
-        if (bestSheet < states.size()) {
-            states[bestSheet] = std::move(bestState);
+        if (foundExisting) {
+            auto& state = states[bestSheet];
+            state.shapes.push_back(std::move(bestShape));
+            state.placements.push_back(bestPlacement);
+            state.placedArea += materialArea(instance.part);
             placed = true;
         } else {
             SheetState state;
@@ -446,7 +461,6 @@ Result runAttempt(
             );
             if (placed) states.push_back(std::move(state));
         }
-
         if (!placed) result.unplaced.push_back(instance.id);
     }
 
