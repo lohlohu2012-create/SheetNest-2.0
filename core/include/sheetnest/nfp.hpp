@@ -60,7 +60,9 @@ FeasibilityRegion feasibilityRegion(
 
 std::vector<Point> pointsOnFeasibilityBoundary(
     const FeasibilityRegion& region,
-    double spacingMm
+    double spacingMm,
+    std::size_t maxPoints = 256,
+    bool includeSheetBoundary = true
 );
 
 void clearCache();
