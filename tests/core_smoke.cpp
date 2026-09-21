@@ -3,6 +3,7 @@
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/nfp.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -645,6 +646,35 @@ void testDxfExportRoundTrip() {
     assert(roundTrip.contours.front().holes.size() == 1);
 }
 
+void testNfpMinkowski() {
+    const Polygon fixed = rectangle(20, 10);
+    const Polygon moving = rectangle(5, 4);
+
+    const auto pieces = nfp::convexDecompose(fixed);
+    assert(pieces.size() == 2);
+
+    const auto vertices = nfp::noFitVertices(fixed, moving);
+    assert(vertices.size() >= 4);
+
+    bool sawNegativeX = false;
+    bool sawPositiveX = false;
+    for (const auto& p : vertices) {
+        if (p.x < -4.0) sawNegativeX = true;
+        if (p.x > 14.0) sawPositiveX = true;
+    }
+    assert(sawNegativeX && sawPositiveX);
+}
+
+void testConcaveNfpCandidates() {
+    Polygon concave{
+        {0,0},{40,0},{40,10},{20,10},{20,30},{0,30}
+    };
+    Polygon part = rectangle(8, 8);
+
+    const auto vertices = nfp::noFitVertices(concave, part);
+    assert(!vertices.empty());
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -703,6 +733,8 @@ int main() {
     testOpenPolylineJoining();
     testDxfModelPipeline();
     testDxfExportRoundTrip();
+    testNfpMinkowski();
+    testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
     testInterlockIntoHole();
