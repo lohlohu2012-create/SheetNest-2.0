@@ -1109,43 +1109,79 @@ std::vector<Point> pointsOnFeasibilityBoundary(
             std::vector<std::size_t> allocations(segments.size(), 0);
 
             if (totalLength > kPointEps) {
-                std::size_t allocated = 0;
+                std::size_t requestedTotal = 0;
+                std::vector<std::size_t> requested(segments.size(), 0);
+
                 for (std::size_t i = 0; i < segments.size(); ++i) {
-                    const auto count = static_cast<std::size_t>(
-                        std::floor(
-                            remaining *
-                            (segments[i].length / totalLength)
-                        )
-                    );
-                    allocations[i] = count;
-                    allocated += count;
+                    // Endpoints are already present. spacingMm controls only
+                    // the additional interior coverage requested on each
+                    // segment.
+                    const auto count =
+                        segments[i].length > spacing + kPointEps
+                            ? static_cast<std::size_t>(
+                                  std::floor(
+                                      segments[i].length / spacing
+                                  )
+                              ) - 1
+                            : 0;
+
+                    requested[i] = count;
+                    requestedTotal += count;
                 }
 
-                // Long segments receive the remainder first. The remainder
-                // is intentionally deterministic, so repeated nesting runs
-                // keep the same candidate sequence.
-                std::vector<std::size_t> order(segments.size());
-                for (std::size_t i = 0; i < segments.size(); ++i) {
-                    order[i] = i;
-                }
-
-                std::sort(
-                    order.begin(),
-                    order.end(),
-                    [&](std::size_t a, std::size_t b) {
-                        if (std::abs(
-                                segments[a].length - segments[b].length
-                            ) > kPointEps) {
-                            return segments[a].length > segments[b].length;
-                        }
-                        return a < b;
+                if (requestedTotal <= remaining) {
+                    allocations = requested;
+                } else {
+                    std::size_t allocated = 0;
+                    for (std::size_t i = 0; i < segments.size(); ++i) {
+                        const auto count = static_cast<std::size_t>(
+                            std::floor(
+                                remaining *
+                                (static_cast<double>(requested[i]) /
+                                 static_cast<double>(
+                                     std::max<std::size_t>(
+                                         1,
+                                         requestedTotal
+                                     )
+                                 ))
+                            )
+                        );
+                        allocations[i] = count;
+                        allocated += count;
                     }
-                );
 
-                for (const auto index : order) {
-                    if (allocated >= remaining) break;
-                    ++allocations[index];
-                    ++allocated;
+                    // Long/requested-dense segments receive the remainder
+                    // first. This keeps the candidate distribution
+                    // deterministic across repeated calculations.
+                    std::vector<std::size_t> order(segments.size());
+                    for (std::size_t i = 0; i < segments.size(); ++i) {
+                        order[i] = i;
+                    }
+
+                    std::sort(
+                        order.begin(),
+                        order.end(),
+                        [&](std::size_t a, std::size_t b) {
+                            if (requested[a] != requested[b]) {
+                                return requested[a] > requested[b];
+                            }
+                            if (std::abs(
+                                    segments[a].length -
+                                    segments[b].length
+                                ) > kPointEps) {
+                                return segments[a].length >
+                                       segments[b].length;
+                            }
+                            return a < b;
+                        }
+                    );
+
+                    for (const auto index : order) {
+                        if (allocated >= remaining) break;
+                        if (allocations[index] >= requested[index]) continue;
+                        ++allocations[index];
+                        ++allocated;
+                    }
                 }
             }
 
