@@ -154,13 +154,13 @@ static bool tryPlace(const Instance& i,const Sheet& s,const Options& o,std::vect
   return true;
 }
 static bool better(const Result&a,const Result&b) {
-  if(a.sheets.size()!=b.sheets.size())return a.sheets.size()<b.sheets.size();
   if(a.unplaced.size()!=b.unplaced.size())return a.unplaced.size()<b.unplaced.size();
+  if(a.sheets.size()!=b.sheets.size())return a.sheets.size()<b.sheets.size();
   if(std::abs(a.utilization-b.utilization)>1e-12)return a.utilization>b.utilization;
   return a.usedAreaMm2>b.usedAreaMm2;
 }
 static Result runPass(const std::vector<Instance>& parts,const Sheet& s,const Options& o,
-                      size_t pass,std::uint64_t baseSeed) {
+                      size_t pass,std::uint64_t baseSeed,std::size_t sheetLimit=0) {
   std::mt19937_64 rng(baseSeed^(0x9E3779B97F4A7C15ULL+pass*0xBF58476D1CE4E5B9ULL));
   std::vector<size_t> order(parts.size());
   for(size_t i=0;i<parts.size();++i)order[i]=i;
@@ -180,10 +180,21 @@ static Result runPass(const std::vector<Instance>& parts,const Sheet& s,const Op
   std::vector<std::string> unplaced;
   double used=0;
   for(size_t idx:order) {
-    if(tryPlace(parts[idx],s,o,sheets)) {used+=area(parts[idx].part.shape);continue;}
-    sheets.emplace_back();
-    if(tryPlace(parts[idx],s,o,sheets))used+=area(parts[idx].part.shape);
-    else {sheets.pop_back();unplaced.push_back(parts[idx].id);}
+    if(tryPlace(parts[idx],s,o,sheets)) {
+      used+=area(parts[idx].part.shape);
+      continue;
+    }
+    if(sheetLimit==0||sheets.size()<sheetLimit) {
+      sheets.emplace_back();
+      if(tryPlace(parts[idx],s,o,sheets)) {
+        used+=area(parts[idx].part.shape);
+      } else {
+        sheets.pop_back();
+        unplaced.push_back(parts[idx].id);
+      }
+    } else {
+      unplaced.push_back(parts[idx].id);
+    }
   }
   Result r;
   r.iterations=1;
@@ -200,26 +211,65 @@ static Result runPass(const std::vector<Instance>& parts,const Sheet& s,const Op
 Result nest(const std::vector<Instance>& parts,const Sheet& s,const Options& o) {
   Result best{};
   if(parts.empty())return best;
+
   const size_t restarts=std::max<size_t>(1,std::min<size_t>(o.iterations,256));
   const size_t detected=std::max<unsigned>(1,std::thread::hardware_concurrency());
   const size_t workers=std::max<size_t>(1,std::min(restarts,o.parallelism?o.parallelism:detected));
   const std::uint64_t baseSeed=o.seed?o.seed:std::random_device{}();
   bool have=false;
-  for(size_t first=0;first<restarts;first+=workers) {
-    const size_t batch=std::min(workers,restarts-first);
-    std::vector<std::future<Result>> futures;
-    futures.reserve(batch);
-    for(size_t p=first;p<first+batch;++p) {
-      futures.emplace_back(std::async(std::launch::async,[&parts,&s,&o,p,baseSeed]{
-        return runPass(parts,s,o,p,baseSeed);
-      }));
+
+  auto runBatches=[&](size_t count,size_t sheetLimit){
+    for(size_t first=0;first<count;first+=workers) {
+      const size_t batch=std::min(workers,count-first);
+      std::vector<std::future<Result>> futures;
+      futures.reserve(batch);
+      for(size_t p=first;p<first+batch;++p) {
+        futures.emplace_back(std::async(std::launch::async,[&parts,&s,&o,p,baseSeed,sheetLimit]{
+          return runPass(parts,s,o,p,baseSeed,sheetLimit);
+        }));
+      }
+      for(auto& future:futures) {
+        Result r=future.get();
+        if(!have||better(r,best)){best=std::move(r);have=true;}
+      }
+      if(best.complete()&&best.sheets.size()==1&&best.utilization>0.99)break;
     }
-    for(auto& future:futures) {
-      Result r=future.get();
-      if(!have||better(r,best)){best=std::move(r);have=true;}
+  };
+
+  // Phase 1: find a complete baseline with diverse randomized starts.
+  runBatches(restarts,0);
+
+  // Phase 2: once a complete layout exists, explicitly try to prove that
+  // one fewer sheet is sufficient. Stop at the first infeasible target.
+  if(best.complete()&&best.sheets.size()>1) {
+    const size_t originalSheets=best.sheets.size();
+    const size_t reductionPasses=std::max<size_t>(1,o.sheetReductionPasses);
+    for(size_t target=originalSheets-1;target>=1;--target) {
+      Result candidateBest{};
+      bool candidateHave=false;
+      for(size_t first=0;first<reductionPasses;first+=workers) {
+        const size_t batch=std::min(workers,reductionPasses-first);
+        std::vector<std::future<Result>> futures;
+        futures.reserve(batch);
+        for(size_t p=first;p<first+batch;++p) {
+          futures.emplace_back(std::async(std::launch::async,[&parts,&s,&o,p,baseSeed,target]{
+            return runPass(parts,s,o,p,baseSeed^0xD1B54A32D192ED03ULL,target);
+          }));
+        }
+        for(auto& future:futures) {
+          Result r=future.get();
+          if(!candidateHave||better(r,candidateBest)){candidateBest=std::move(r);candidateHave=true;}
+        }
+      }
+      if(candidateHave&&candidateBest.complete()&&candidateBest.sheets.size()<=target) {
+        best=std::move(candidateBest);
+        if(best.sheets.size()==1)break;
+      } else {
+        break;
+      }
     }
-    if(best.unplaced.empty()&&best.sheets.size()==1&&best.utilization>0.99)break;
   }
+
   best.iterations=restarts;
   return best;
 }
