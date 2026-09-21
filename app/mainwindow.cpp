@@ -175,6 +175,11 @@ void MainWindow::buildUi() {
 
     importButton_ = new QPushButton("Загрузить DXF");
     calculateButton_ = new QPushButton("Рассчитать раскрой");
+    calculateButton_->setEnabled(false);
+
+    benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
+    benchmarkButton_->setEnabled(false);
+
     exportButton_ = new QPushButton("Экспорт раскладки DXF");
     exportButton_->setEnabled(false);
 
@@ -665,23 +670,34 @@ void MainWindow::populatePartTable() {
     for (std::size_t i = 0; i < parts_.size(); ++i) {
         const auto& part = parts_[i];
 
+        auto* idItem = new QTableWidgetItem(
+            QString::fromStdString(part.id)
+        );
+        auto* layerItem = new QTableWidgetItem(
+            QString::fromStdString(part.layer)
+        );
+        auto* sourceItem = new QTableWidgetItem(
+            QString::fromStdString(part.sourceId)
+        );
+
+        idItem->setFlags(
+            idItem->flags() & ~Qt::ItemIsEditable
+        );
+        layerItem->setFlags(
+            layerItem->flags() & ~Qt::ItemIsEditable
+        );
+        sourceItem->setFlags(
+            sourceItem->flags() & ~Qt::ItemIsEditable
+        );
+
         partTable_->setItem(
-            static_cast<int>(i), 0,
-            new QTableWidgetItem(
-                QString::fromStdString(part.id)
-            )
+            static_cast<int>(i), 0, idItem
         );
         partTable_->setItem(
-            static_cast<int>(i), 1,
-            new QTableWidgetItem(
-                QString::fromStdString(part.layer)
-            )
+            static_cast<int>(i), 1, layerItem
         );
         partTable_->setItem(
-            static_cast<int>(i), 2,
-            new QTableWidgetItem(
-                QString::fromStdString(part.sourceId)
-            )
+            static_cast<int>(i), 2, sourceItem
         );
 
         auto* quantity = new QTableWidgetItem("1");
