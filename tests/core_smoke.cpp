@@ -350,6 +350,30 @@ ENDSEC
 EOF
 )DXF";
 
+const char* kDegenerateArcDxf = R"DXF(
+0
+SECTION
+2
+ENTITIES
+0
+ARC
+8
+BROKEN_ARC
+10
+0
+20
+0
+40
+10
+50
+45
+51
+45
+ENDSEC
+0
+EOF
+)DXF";
+
 const char* kInvalidDxf = R"DXF(
 0
 SECTION
@@ -579,6 +603,21 @@ void testOpenPolylineJoining() {
     assert(doc.contours.front().outer.size() >= 4);
 }
 
+void testDegenerateArc() {
+    const auto doc = importDxf(kDegenerateArcDxf, 0.05);
+    assert(!doc.valid());
+    assert(doc.hasErrors());
+
+    bool foundArcError = false;
+    for (const auto& diagnostic : doc.diagnostics) {
+        if (diagnostic.stage == "DXF/ARC") {
+            foundArcError = true;
+            break;
+        }
+    }
+    assert(foundArcError);
+}
+
 void testReadableValidationErrors() {
     const auto doc = importDxf(kInvalidDxf, 0.05);
     assert(!doc.valid());
@@ -742,6 +781,7 @@ int main() {
     testLegacyPolyline();
     testMultipleParts();
     testOpenPolylineJoining();
+    testDegenerateArc();
     testDxfModelPipeline();
     testDxfExportRoundTrip();
     testNfpMinkowski();
