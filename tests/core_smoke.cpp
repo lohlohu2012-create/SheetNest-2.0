@@ -832,6 +832,76 @@ void testContinuousConcaveFeasibilityRegion() {
     assert(foundInteriorBoundaryPoint);
 }
 
+void testFeasibilitySamplingBudget() {
+    Polygon fixed = rectangle(100, 40);
+    Polygon moving = rectangle(20, 10);
+
+    const auto region = nfp::feasibilityRegion(
+        fixed,
+        moving,
+        0,
+        -100.0,
+        -100.0,
+        140.0,
+        100.0,
+        1.0
+    );
+
+    assert(!region.boundary.empty());
+
+    const auto compact = nfp::pointsOnFeasibilityBoundary(
+        region,
+        0.5,
+        32,
+        false
+    );
+    const auto dense = nfp::pointsOnFeasibilityBoundary(
+        region,
+        0.5,
+        256,
+        false
+    );
+
+    assert(!compact.empty());
+    assert(compact.size() <= 32);
+    assert(dense.size() <= 256);
+    assert(dense.size() >= compact.size());
+
+    bool sawInterior = false;
+    for (const auto& segment : region.boundary) {
+        const double length = std::hypot(
+            segment.b.x - segment.a.x,
+            segment.b.y - segment.a.y
+        );
+        if (length < 15.0) continue;
+
+        for (const auto& point : compact) {
+            const double distance = testPointSegmentDistance(
+                point,
+                segment.a,
+                segment.b
+            );
+            const double da = std::hypot(
+                point.x - segment.a.x,
+                point.y - segment.a.y
+            );
+            const double db = std::hypot(
+                point.x - segment.b.x,
+                point.y - segment.b.y
+            );
+
+            if (distance <= 1e-6 && da > 1e-5 && db > 1e-5) {
+                sawInterior = true;
+                break;
+            }
+        }
+
+        if (sawInterior) break;
+    }
+
+    assert(sawInterior);
+}
+
 void testFeasibilityGap() {
     Polygon fixed = rectangle(20, 20);
     Polygon moving = rectangle(10, 10);
@@ -987,6 +1057,7 @@ int main() {
     testDxfExportRoundTrip();
     testNfpMinkowski();
     testContinuousConcaveFeasibilityRegion();
+    testFeasibilitySamplingBudget();
     testFeasibilityGap();
     testNfpUnionAndCache();
     testConcaveUnionNfp();
