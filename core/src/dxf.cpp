@@ -3,87 +3,71 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace sheetnest {
-
 namespace {
 
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kTwoPi = 2.0 * kPi;
-constexpr double kEps = 1e-7;
+constexpr double kEps = 1e-8;
 
-struct GroupCode {
+struct Group {
     int code{};
     std::string value;
 };
 
 struct Entity {
     std::string type;
-    std::vector<GroupCode> groups;
+    std::vector<Group> groups;
 };
 
 struct Segment {
     Polygon points;
     Point start{};
     Point end{};
-    std::string source;
     bool used{false};
 };
 
 struct Loop {
     Polygon polygon;
     std::string source;
-    double signedArea{};
+    double area{};
 };
 
-double toNumber(const std::string& value) {
-    try {
-        return std::stod(value);
-    } catch (...) {
-        return 0.0;
-    }
+double number(const std::string& v) {
+    try { return std::stod(v); } catch (...) { return 0.0; }
 }
 
-int toInt(const std::string& value) {
-    try {
-        return std::stoi(value);
-    } catch (...) {
-        return 0;
-    }
+int integer(const std::string& v) {
+    try { return std::stoi(v); } catch (...) { return 0; }
 }
 
-std::vector<GroupCode> readGroups(const std::string& text) {
-    std::istringstream stream(text);
+std::vector<Group> readGroups(const std::string& text) {
+    std::istringstream in(text);
+    std::vector<Group> groups;
     std::string codeLine;
     std::string valueLine;
-    std::vector<GroupCode> result;
 
-    while (std::getline(stream, codeLine) && std::getline(stream, valueLine)) {
-        if (!codeLine.empty() && codeLine.back() == '\r') {
-            codeLine.pop_back();
-        }
-        if (!valueLine.empty() && valueLine.back() == '\r') {
-            valueLine.pop_back();
-        }
-
+    while (std::getline(in, codeLine) && std::getline(in, valueLine)) {
+        if (!codeLine.empty() && codeLine.back() == '\r') codeLine.pop_back();
+        if (!valueLine.empty() && valueLine.back() == '\r') valueLine.pop_back();
         try {
-            result.push_back({std::stoi(codeLine), valueLine});
+            groups.push_back({std::stoi(codeLine), valueLine});
         } catch (...) {
-            // Ignore malformed pair; diagnostics are emitted by the caller.
+            // Ignore malformed pairs; the resulting missing entity is diagnosed.
         }
     }
-
-    return result;
+    return groups;
 }
 
-std::vector<Entity> readEntities(const std::string& text, std::size_t& entitiesRead) {
+std::vector<Entity> readEntities(const std::string& text, std::size_t& count) {
     const auto groups = readGroups(text);
     std::vector<Entity> entities;
-
     bool inEntities = false;
 
     for (std::size_t i = 0; i < groups.size();) {
@@ -93,16 +77,16 @@ std::vector<Entity> readEntities(const std::string& text, std::size_t& entitiesR
         }
 
         if (groups[i].value == "SECTION") {
+            std::string name;
             std::size_t j = i + 1;
-            std::string sectionName;
             while (j < groups.size() && groups[j].code != 0) {
                 if (groups[j].code == 2) {
-                    sectionName = groups[j].value;
+                    name = groups[j].value;
                     break;
                 }
                 ++j;
             }
-            inEntities = (sectionName == "ENTITIES");
+            inEntities = (name == "ENTITIES");
             i = j;
             continue;
         }
@@ -118,236 +102,153 @@ std::vector<Entity> readEntities(const std::string& text, std::size_t& entitiesR
             continue;
         }
 
-        Entity entity;
-        entity.type = groups[i].value;
-        ++entitiesRead;
+        Entity e;
+        e.type = groups[i].value;
+        ++count;
         ++i;
 
         while (i < groups.size() && groups[i].code != 0) {
-            entity.groups.push_back(groups[i]);
-            ++i;
+            e.groups.push_back(groups[i++]);
         }
-
-        entities.push_back(std::move(entity));
+        entities.push_back(std::move(e));
     }
 
     return entities;
 }
 
-double signedArea(const Polygon& polygon) {
-    if (polygon.size() < 3) {
-        return 0.0;
+double signedArea(const Polygon& p) {
+    if (p.size() < 3) return 0.0;
+    double a = 0.0;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        const auto& u = p[i];
+        const auto& v = p[(i + 1) % p.size()];
+        a += u.x * v.y - v.x * u.y;
     }
-
-    double area = 0.0;
-    for (std::size_t i = 0; i < polygon.size(); ++i) {
-        const auto& a = polygon[i];
-        const auto& b = polygon[(i + 1) % polygon.size()];
-        area += a.x * b.y - b.x * a.y;
-    }
-    return 0.5 * area;
+    return 0.5 * a;
 }
 
-bool samePoint(const Point& a, const Point& b, double tolerance = 1e-6) {
-    return std::hypot(a.x - b.x, a.y - b.y) <= tolerance;
+bool samePoint(const Point& a, const Point& b, double tol = 1e-6) {
+    return std::hypot(a.x - b.x, a.y - b.y) <= tol;
 }
 
-void appendUnique(Polygon& polygon, const Point& point) {
-    if (polygon.empty() || !samePoint(polygon.back(), point)) {
-        polygon.push_back(point);
-    }
+void appendUnique(Polygon& p, Point v) {
+    if (p.empty() || !samePoint(p.back(), v)) p.push_back(v);
 }
 
-Point groupPoint(const Entity& entity, int xCode, int yCode, Point fallback = {}) {
-    Point result = fallback;
-    bool haveX = false;
-    bool haveY = false;
-
-    for (const auto& group : entity.groups) {
-        if (group.code == xCode) {
-            result.x = toNumber(group.value);
-            haveX = true;
-        } else if (group.code == yCode) {
-            result.y = toNumber(group.value);
-            haveY = true;
-        }
-    }
-
-    if (!haveX || !haveY) {
-        return fallback;
-    }
-    return result;
-}
-
-double groupValue(const Entity& entity, int code, double fallback = 0.0) {
-    for (const auto& group : entity.groups) {
-        if (group.code == code) {
-            return toNumber(group.value);
-        }
+double groupValue(const Entity& e, int code, double fallback = 0.0) {
+    for (const auto& g : e.groups) {
+        if (g.code == code) return number(g.value);
     }
     return fallback;
 }
 
-int groupInt(const Entity& entity, int code, int fallback = 0) {
-    for (const auto& group : entity.groups) {
-        if (group.code == code) {
-            return toInt(group.value);
-        }
+int groupInt(const Entity& e, int code, int fallback = 0) {
+    for (const auto& g : e.groups) {
+        if (g.code == code) return integer(g.value);
     }
     return fallback;
+}
+
+Point groupPoint(const Entity& e, int xCode, int yCode, Point fallback = {}) {
+    Point p = fallback;
+    bool xFound = false;
+    bool yFound = false;
+    for (const auto& g : e.groups) {
+        if (g.code == xCode) {
+            p.x = number(g.value);
+            xFound = true;
+        } else if (g.code == yCode) {
+            p.y = number(g.value);
+            yFound = true;
+        }
+    }
+    return (xFound && yFound) ? p : fallback;
 }
 
 void appendArc(
-    Polygon& output,
+    Polygon& out,
     Point center,
     double radius,
-    double startAngle,
-    double sweepAngle,
+    double start,
+    double sweep,
     double tolerance
 ) {
-    if (radius <= kEps || std::abs(sweepAngle) <= kEps) {
-        return;
-    }
+    if (radius <= kEps || std::abs(sweep) <= kEps) return;
 
-    const double clampedTolerance =
-        std::max(0.01, std::min(std::abs(tolerance), radius * 0.5));
-
+    const double tol = std::max(0.01, std::min(std::abs(tolerance), radius * 0.5));
     double step = kTwoPi;
-    if (clampedTolerance < radius) {
-        const double c = std::clamp(1.0 - clampedTolerance / radius, -1.0, 1.0);
-        step = 2.0 * std::acos(c);
+    if (tol < radius) {
+        step = 2.0 * std::acos(std::clamp(1.0 - tol / radius, -1.0, 1.0));
     }
-
     step = std::max(step, kPi / 1800.0);
+
     const int segments = std::max(
         2,
-        static_cast<int>(std::ceil(std::abs(sweepAngle) / step))
+        static_cast<int>(std::ceil(std::abs(sweep) / step))
     );
 
     for (int i = 0; i <= segments; ++i) {
-        const double t =
-            startAngle + sweepAngle * static_cast<double>(i) / segments;
-        appendUnique(output, {
+        const double t = start + sweep * static_cast<double>(i) / segments;
+        appendUnique(out, {
             center.x + radius * std::cos(t),
             center.y + radius * std::sin(t)
         });
     }
 }
 
-Polygon makeCircle(Point center, double radius, double tolerance) {
-    Polygon result;
-    appendArc(result, center, radius, 0.0, kTwoPi, tolerance);
-    if (!result.empty() && samePoint(result.front(), result.back())) {
-        result.pop_back();
-    }
-    return result;
+Polygon circle(Point center, double radius, double tolerance) {
+    Polygon p;
+    appendArc(p, center, radius, 0.0, kTwoPi, tolerance);
+    if (!p.empty() && samePoint(p.front(), p.back())) p.pop_back();
+    return p;
 }
 
-Polygon makeBulgeSegment(
-    Point start,
-    Point end,
-    double bulge,
-    double tolerance
-) {
-    Polygon result;
-    appendUnique(result, start);
+Polygon bulgeEdge(Point a, Point b, double bulge, double tolerance) {
+    Polygon out;
+    appendUnique(out, a);
 
-    if (std::abs(bulge) <= kEps || samePoint(start, end)) {
-        appendUnique(result, end);
-        return result;
+    if (std::abs(bulge) <= kEps || samePoint(a, b)) {
+        appendUnique(out, b);
+        return out;
     }
 
-    const double chord = std::hypot(end.x - start.x, end.y - start.y);
-    if (chord <= kEps) {
-        appendUnique(result, end);
-        return result;
-    }
-
+    const double chord = std::hypot(b.x - a.x, b.y - a.y);
     const double sweep = 4.0 * std::atan(bulge);
-    const double halfSweep = std::abs(sweep) * 0.5;
-    const double sinHalf = std::sin(halfSweep);
-
-    if (std::abs(sinHalf) <= kEps) {
-        appendUnique(result, end);
-        return result;
+    const double half = std::abs(sweep) * 0.5;
+    const double sinHalf = std::sin(half);
+    if (chord <= kEps || std::abs(sinHalf) <= kEps) {
+        appendUnique(out, b);
+        return out;
     }
 
     const double radius = chord / (2.0 * sinHalf);
-    const double offset =
-        chord / (2.0 * std::tan(halfSweep));
-
-    const Point midpoint{
-        (start.x + end.x) * 0.5,
-        (start.y + end.y) * 0.5
-    };
-
-    const double dx = end.x - start.x;
-    const double dy = end.y - start.y;
-    const double invChord = 1.0 / chord;
-    const Point left{-dy * invChord, dx * invChord};
-
+    const double offset = chord / (2.0 * std::tan(half));
+    const Point mid{(a.x + b.x) * 0.5, (a.y + b.y) * 0.5};
+    const double inv = 1.0 / chord;
+    const Point left{-(b.y - a.y) * inv, (b.x - a.x) * inv};
     const double sign = sweep >= 0.0 ? 1.0 : -1.0;
     const Point center{
-        midpoint.x - sign * left.x * offset,
-        midpoint.y - sign * left.y * offset
+        mid.x - sign * left.x * offset,
+        mid.y - sign * left.y * offset
     };
+    const double start = std::atan2(a.y - center.y, a.x - center.x);
 
-    const double startAngle =
-        std::atan2(start.y - center.y, start.x - center.x);
-
-    appendArc(
-        result,
-        center,
-        radius,
-        startAngle,
-        sweep,
-        tolerance
-    );
-
-    if (!result.empty() && !samePoint(result.back(), end)) {
-        result.push_back(end);
-    }
-
-    return result;
+    appendArc(out, center, radius, start, sweep, tolerance);
+    appendUnique(out, b);
+    return out;
 }
 
-Polygon makeLwPolyline(const Entity& entity, bool& closed, double tolerance) {
-    struct Vertex {
-        Point point{};
-        double bulge{};
-    };
+struct Vertex {
+    Point point{};
+    double bulge{};
+};
 
-    std::vector<Vertex> vertices;
-    Vertex current{};
-    bool haveX = false;
-    bool haveY = false;
-
-    for (const auto& group : entity.groups) {
-        if (group.code == 10) {
-            if (haveX && haveY) {
-                vertices.push_back(current);
-            }
-            current = {};
-            current.point.x = toNumber(group.value);
-            haveX = true;
-            haveY = false;
-        } else if (group.code == 20 && haveX) {
-            current.point.y = toNumber(group.value);
-            haveY = true;
-        } else if (group.code == 42 && haveX) {
-            current.bulge = toNumber(group.value);
-        }
-    }
-
-    if (haveX && haveY) {
-        vertices.push_back(current);
-    }
-
-    closed = (groupInt(entity, 70) & 1) != 0;
-
-    if (vertices.size() < 2) {
-        return {};
-    }
+Polygon polylineGeometry(
+    const std::vector<Vertex>& vertices,
+    bool closed,
+    double tolerance
+) {
+    if (vertices.size() < 2) return {};
 
     Polygon result;
     const std::size_t edgeCount = closed ? vertices.size() : vertices.size() - 1;
@@ -355,96 +256,185 @@ Polygon makeLwPolyline(const Entity& entity, bool& closed, double tolerance) {
     for (std::size_t i = 0; i < edgeCount; ++i) {
         const auto& a = vertices[i];
         const auto& b = vertices[(i + 1) % vertices.size()];
-        const auto edge = makeBulgeSegment(a.point, b.point, a.bulge, tolerance);
-
-        for (std::size_t p = 0; p < edge.size(); ++p) {
-            if (i > 0 && p == 0) {
-                continue;
-            }
-            appendUnique(result, edge[p]);
+        const auto edge = bulgeEdge(a.point, b.point, a.bulge, tolerance);
+        for (std::size_t j = 0; j < edge.size(); ++j) {
+            if (i > 0 && j == 0) continue;
+            appendUnique(result, edge[j]);
         }
     }
 
     if (closed && !result.empty() && samePoint(result.front(), result.back())) {
         result.pop_back();
     }
-
     return result;
 }
 
-Polygon makeClassicPolyline(
-    const Entity& polyline,
-    const std::vector<Entity>& vertices,
-    bool& closed,
-    double tolerance
-) {
-    struct Vertex {
-        Point point{};
-        double bulge{};
-    };
+Polygon lwPolyline(const Entity& entity, bool& closed, double tolerance) {
+    std::vector<Vertex> vertices;
+    Vertex current{};
+    bool haveX = false;
+    bool haveY = false;
 
-    std::vector<Vertex> data;
-    for (const auto& entity : vertices) {
-        if (entity.type != "VERTEX") {
-            continue;
+    for (const auto& g : entity.groups) {
+        if (g.code == 10) {
+            if (haveX && haveY) vertices.push_back(current);
+            current = {};
+            current.point.x = number(g.value);
+            haveX = true;
+            haveY = false;
+        } else if (g.code == 20 && haveX) {
+            current.point.y = number(g.value);
+            haveY = true;
+        } else if (g.code == 42 && haveX) {
+            current.bulge = number(g.value);
         }
-        data.push_back({
-            groupPoint(entity, 10, 20),
-            groupValue(entity, 42, 0.0)
+    }
+    if (haveX && haveY) vertices.push_back(current);
+
+    closed = (groupInt(entity, 70) & 1) != 0;
+    return polylineGeometry(vertices, closed, tolerance);
+}
+
+bool contains(const Polygon& p, const Point& q) {
+    return pointInPolygon(q, p);
+}
+
+void normalize(Polygon& p, bool outer) {
+    const double a = signedArea(p);
+    if ((outer && a < 0.0) || (!outer && a > 0.0)) {
+        std::reverse(p.begin(), p.end());
+    }
+}
+
+std::vector<DxfContour> classifyLoops(std::vector<Loop> loops) {
+    std::vector<DxfContour> result;
+    if (loops.empty()) return result;
+
+    const std::size_t n = loops.size();
+    std::vector<int> depth(n, 0);
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const Point probe = loops[i].polygon.front();
+        for (std::size_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+            if (std::abs(loops[j].area) <= std::abs(loops[i].area)) continue;
+            if (contains(loops[j].polygon, probe)) ++depth[i];
+        }
+    }
+
+    std::vector<int> contourForLoop(n, -1);
+
+    for (std::size_t i = 0; i < n; ++i) {
+        if ((depth[i] & 1) != 0) continue;
+
+        auto outer = loops[i].polygon;
+        normalize(outer, true);
+
+        contourForLoop[i] = static_cast<int>(result.size());
+        result.push_back({
+            std::move(outer),
+            {},
+            loops[i].source + "-" + std::to_string(result.size() + 1)
         });
     }
 
-    closed = (groupInt(polyline, 70) & 1) != 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if ((depth[i] & 1) == 0) continue;
 
-    if (data.size() < 2) {
-        return {};
-    }
+        const Point probe = loops[i].polygon.front();
+        std::size_t parent = n;
+        double parentArea = std::numeric_limits<double>::infinity();
 
-    Polygon result;
-    const std::size_t edgeCount = closed ? data.size() : data.size() - 1;
+        for (std::size_t j = 0; j < n; ++j) {
+            if ((depth[j] & 1) != 0) continue;
+            if (std::abs(loops[j].area) <= std::abs(loops[i].area)) continue;
+            if (!contains(loops[j].polygon, probe)) continue;
 
-    for (std::size_t i = 0; i < edgeCount; ++i) {
-        const auto& a = data[i];
-        const auto& b = data[(i + 1) % data.size()];
-        const auto edge = makeBulgeSegment(a.point, b.point, a.bulge, tolerance);
-
-        for (std::size_t p = 0; p < edge.size(); ++p) {
-            if (i > 0 && p == 0) {
-                continue;
+            const double area = std::abs(loops[j].area);
+            if (area < parentArea) {
+                parentArea = area;
+                parent = j;
             }
-            appendUnique(result, edge[p]);
         }
-    }
 
-    if (closed && !result.empty() && samePoint(result.front(), result.back())) {
-        result.pop_back();
+        if (parent == n || contourForLoop[parent] < 0) continue;
+
+        auto hole = loops[i].polygon;
+        normalize(hole, false);
+        result[contourForLoop[parent]].holes.push_back(std::move(hole));
     }
 
     return result;
 }
 
-std::vector<Entity> consumeClassicPolyline(
-    const std::vector<Entity>& entities,
-    std::size_t& index,
-    bool& closed,
-    double tolerance
+std::vector<Loop> connectSegments(
+    std::vector<Segment> segments,
+    std::vector<DxfDiagnostic>& diagnostics
 ) {
-    const Entity& polyline = entities[index];
-    std::vector<Entity> vertices;
+    std::vector<Loop> loops;
 
-    ++index;
-    while (index < entities.size() && entities[index].type != "SEQEND") {
-        if (entities[index].type == "VERTEX") {
-            vertices.push_back(entities[index]);
+    for (std::size_t startIndex = 0; startIndex < segments.size(); ++startIndex) {
+        if (segments[startIndex].used) continue;
+
+        segments[startIndex].used = true;
+        Polygon polygon = segments[startIndex].points;
+        const Point initial = segments[startIndex].start;
+        Point current = segments[startIndex].end;
+        bool closed = false;
+
+        for (std::size_t guard = 0; guard <= segments.size(); ++guard) {
+            if (samePoint(current, initial)) {
+                closed = true;
+                break;
+            }
+
+            std::size_t next = segments.size();
+            bool reversed = false;
+
+            for (std::size_t i = 0; i < segments.size(); ++i) {
+                if (segments[i].used) continue;
+                if (samePoint(segments[i].start, current)) {
+                    next = i;
+                    reversed = false;
+                    break;
+                }
+                if (samePoint(segments[i].end, current)) {
+                    next = i;
+                    reversed = true;
+                    break;
+                }
+            }
+
+            if (next == segments.size()) break;
+
+            auto& s = segments[next];
+            s.used = true;
+
+            if (!reversed) {
+                for (std::size_t i = 1; i < s.points.size(); ++i) {
+                    appendUnique(polygon, s.points[i]);
+                }
+                current = s.end;
+            } else {
+                for (std::size_t i = s.points.size(); i-- > 1;) {
+                    appendUnique(polygon, s.points[i - 1]);
+                }
+                current = s.start;
+            }
         }
-        ++index;
+
+        if (closed && polygon.size() >= 3) {
+            loops.push_back({std::move(polygon), "LINE/ARC", signedArea(polygon)});
+        } else {
+            diagnostics.push_back({
+                DxfSeverity::Warning,
+                "DXF/CONNECT",
+                "Незамкнутая цепочка LINE/ARC пропущена."
+            });
+        }
     }
 
-    if (index < entities.size() && entities[index].type == "SEQEND") {
-        ++index;
-    }
-
-    return {Entity{"__POLYGON__", {}}}, makeClassicPolyline(polyline, vertices, closed, tolerance);
+    return loops;
 }
 
 std::vector<Segment> collectSegments(
@@ -456,33 +446,25 @@ std::vector<Segment> collectSegments(
     std::vector<Segment> segments;
 
     for (std::size_t i = 0; i < entities.size();) {
-        const auto& entity = entities[i];
+        const auto& e = entities[i];
 
-        if (entity.type == "LINE") {
-            const Point start = groupPoint(entity, 10, 20);
-            const Point end = groupPoint(entity, 11, 21);
-
-            if (!samePoint(start, end)) {
-                Segment s;
-                s.points = {start, end};
-                s.start = start;
-                s.end = end;
-                s.source = "LINE";
-                segments.push_back(std::move(s));
+        if (e.type == "LINE") {
+            const auto a = groupPoint(e, 10, 20);
+            const auto b = groupPoint(e, 11, 21);
+            if (!samePoint(a, b)) {
+                segments.push_back({{a, b}, a, b, false});
             }
             ++i;
             continue;
         }
 
-        if (entity.type == "ARC") {
-            const Point center = groupPoint(entity, 10, 20);
-            const double radius = groupValue(entity, 40);
-            const double startDeg = groupValue(entity, 50);
-            const double endDeg = groupValue(entity, 51);
+        if (e.type == "ARC") {
+            const auto center = groupPoint(e, 10, 20);
+            const double radius = groupValue(e, 40);
+            const double startDeg = groupValue(e, 50);
+            const double endDeg = groupValue(e, 51);
             double sweepDeg = endDeg - startDeg;
-            if (sweepDeg <= 0.0) {
-                sweepDeg += 360.0;
-            }
+            if (sweepDeg <= 0.0) sweepDeg += 360.0;
 
             Polygon arc;
             appendArc(
@@ -495,41 +477,27 @@ std::vector<Segment> collectSegments(
             );
 
             if (arc.size() >= 2) {
-                segments.push_back({
-                    arc,
-                    arc.front(),
-                    arc.back(),
-                    "ARC",
-                    false
-                });
+                segments.push_back({arc, arc.front(), arc.back(), false});
             }
             ++i;
             continue;
         }
 
-        if (entity.type == "CIRCLE") {
-            const auto polygon = makeCircle(
-                groupPoint(entity, 10, 20),
-                groupValue(entity, 40),
-                tolerance
-            );
-            if (polygon.size() >= 3) {
-                directLoops.push_back({polygon, "CIRCLE", signedArea(polygon)});
+        if (e.type == "CIRCLE") {
+            auto p = circle(groupPoint(e, 10, 20), groupValue(e, 40), tolerance);
+            if (p.size() >= 3) {
+                directLoops.push_back({std::move(p), "CIRCLE", signedArea(p)});
             }
             ++i;
             continue;
         }
 
-        if (entity.type == "LWPOLYLINE") {
+        if (e.type == "LWPOLYLINE") {
             bool closed = false;
-            const auto polygon = makeLwPolyline(entity, closed, tolerance);
-            if (closed && polygon.size() >= 3) {
-                directLoops.push_back({
-                    polygon,
-                    "LWPOLYLINE",
-                    signedArea(polygon)
-                });
-            } else if (!closed && polygon.size() >= 2) {
+            auto p = lwPolyline(e, closed, tolerance);
+            if (closed && p.size() >= 3) {
+                directLoops.push_back({std::move(p), "LWPOLYLINE", signedArea(p)});
+            } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
                     "DXF/LWPOLYLINE",
@@ -540,32 +508,28 @@ std::vector<Segment> collectSegments(
             continue;
         }
 
-        if (entity.type == "POLYLINE") {
+        if (e.type == "POLYLINE") {
+            std::vector<Vertex> vertices;
             bool closed = false;
-            std::vector<Entity> vertices;
 
             ++i;
             while (i < entities.size() && entities[i].type != "SEQEND") {
                 if (entities[i].type == "VERTEX") {
-                    vertices.push_back(entities[i]);
+                    vertices.push_back({
+                        groupPoint(entities[i], 10, 20),
+                        groupValue(entities[i], 42, 0.0)
+                    });
                 }
                 ++i;
             }
+            if (i < entities.size() && entities[i].type == "SEQEND") ++i;
 
-            if (i < entities.size() && entities[i].type == "SEQEND") {
-                ++i;
-            }
+            closed = (groupInt(e, 70) & 1) != 0;
+            auto p = polylineGeometry(vertices, closed, tolerance);
 
-            const auto polygon =
-                makeClassicPolyline(entity, vertices, closed, tolerance);
-
-            if (closed && polygon.size() >= 3) {
-                directLoops.push_back({
-                    polygon,
-                    "POLYLINE",
-                    signedArea(polygon)
-                });
-            } else if (!closed && polygon.size() >= 2) {
+            if (closed && p.size() >= 3) {
+                directLoops.push_back({std::move(p), "POLYLINE", signedArea(p)});
+            } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
                     "DXF/POLYLINE",
@@ -579,175 +543,6 @@ std::vector<Segment> collectSegments(
     }
 
     return segments;
-}
-
-bool pointInPolygonInclusive(const Point& point, const Polygon& polygon) {
-    return pointInPolygon(point, polygon);
-}
-
-void normalizeLoopOrientation(Polygon& polygon, bool outer) {
-    const double area = signedArea(polygon);
-    if ((outer && area < 0.0) || (!outer && area > 0.0)) {
-        std::reverse(polygon.begin(), polygon.end());
-    }
-}
-
-std::vector<DxfContour> buildContours(
-    std::vector<Loop> loops
-) {
-    std::vector<DxfContour> result;
-
-    if (loops.empty()) {
-        return result;
-    }
-
-    std::sort(
-        loops.begin(),
-        loops.end(),
-        [](const Loop& a, const Loop& b) {
-            return std::abs(a.signedArea) > std::abs(b.signedArea);
-        }
-    );
-
-    struct OuterRef {
-        std::size_t loopIndex{};
-        std::size_t contourIndex{};
-        double area{};
-    };
-
-    std::vector<OuterRef> outers;
-
-    for (std::size_t i = 0; i < loops.size(); ++i) {
-        const auto& loop = loops[i];
-        const Point probe = loop.polygon.front();
-
-        std::vector<OuterRef> parents;
-        for (const auto& outer : outers) {
-            if (pointInPolygonInclusive(
-                    probe,
-                    loops[outer.loopIndex].polygon)) {
-                parents.push_back(outer);
-            }
-        }
-
-        if (parents.empty()) {
-            auto polygon = loop.polygon;
-            normalizeLoopOrientation(polygon, true);
-            result.push_back({
-                std::move(polygon),
-                {},
-                loop.source + "-" + std::to_string(result.size() + 1)
-            });
-            outers.push_back({
-                i,
-                result.size() - 1,
-                std::abs(loop.signedArea)
-            });
-            continue;
-        }
-
-        // A loop enclosed by an outer loop is a hole. If another outer
-        // loop is nested inside that hole, it becomes a separate island.
-        const auto nearest = *std::min_element(
-            parents.begin(),
-            parents.end(),
-            [](const OuterRef& a, const OuterRef& b) {
-                return a.area < b.area;
-            }
-        );
-
-        auto hole = loop.polygon;
-        normalizeLoopOrientation(hole, false);
-        result[nearest.contourIndex].holes.push_back(std::move(hole));
-    }
-
-    return result;
-}
-
-std::vector<Loop> buildLineArcLoops(
-    std::vector<Segment> segments,
-    std::vector<DxfDiagnostic>& diagnostics
-) {
-    std::vector<Loop> loops;
-
-    for (std::size_t startIndex = 0; startIndex < segments.size(); ++startIndex) {
-        if (segments[startIndex].used) {
-            continue;
-        }
-
-        auto& first = segments[startIndex];
-        first.used = true;
-
-        Polygon polygon = first.points;
-        const Point initial = first.start;
-        Point current = first.end;
-
-        bool closed = false;
-        const std::size_t guardLimit = segments.size() + 1;
-
-        for (std::size_t guard = 0; guard < guardLimit; ++guard) {
-            if (samePoint(current, initial)) {
-                closed = true;
-                break;
-            }
-
-            std::size_t nextIndex = segments.size();
-            bool reverse = false;
-
-            for (std::size_t i = 0; i < segments.size(); ++i) {
-                if (segments[i].used) {
-                    continue;
-                }
-
-                if (samePoint(segments[i].start, current)) {
-                    nextIndex = i;
-                    reverse = false;
-                    break;
-                }
-
-                if (samePoint(segments[i].end, current)) {
-                    nextIndex = i;
-                    reverse = true;
-                    break;
-                }
-            }
-
-            if (nextIndex == segments.size()) {
-                break;
-            }
-
-            auto& next = segments[nextIndex];
-            next.used = true;
-
-            if (!reverse) {
-                for (std::size_t p = 1; p < next.points.size(); ++p) {
-                    appendUnique(polygon, next.points[p]);
-                }
-                current = next.end;
-            } else {
-                for (std::size_t p = next.points.size(); p-- > 1;) {
-                    appendUnique(polygon, next.points[p - 1]);
-                }
-                current = next.start;
-            }
-        }
-
-        if (closed && polygon.size() >= 3) {
-            loops.push_back({
-                polygon,
-                "LINE/ARC",
-                signedArea(polygon)
-            });
-        } else {
-            diagnostics.push_back({
-                DxfSeverity::Warning,
-                "DXF/CONNECT",
-                "Незамкнутая цепочка LINE/ARC пропущена."
-            });
-        }
-    }
-
-    return loops;
 }
 
 } // namespace
@@ -769,47 +564,47 @@ DxfDocument importDxf(const std::string& text, double arcToleranceMm) {
     }
 
     const auto entities = readEntities(text, document.entitiesRead);
-
     if (entities.empty()) {
         document.diagnostics.push_back({
             DxfSeverity::Error,
             "DXF/ENTITIES",
-            "В DXF не найден раздел ENTITIES с распознаваемыми объектами."
+            "В DXF не найден раздел ENTITIES с объектами."
         });
         return document;
     }
 
-    std::vector<Loop> directLoops;
+    std::vector<Loop> loops;
     auto segments = collectSegments(
         entities,
-        directLoops,
+        loops,
         document.diagnostics,
         std::max(0.01, arcToleranceMm)
     );
 
-    auto lineArcLoops =
-        buildLineArcLoops(std::move(segments), document.diagnostics);
-
-    directLoops.insert(
-        directLoops.end(),
-        std::make_move_iterator(lineArcLoops.begin()),
-        std::make_move_iterator(lineArcLoops.end())
+    auto connected = connectSegments(
+        std::move(segments),
+        document.diagnostics
+    );
+    loops.insert(
+        loops.end(),
+        std::make_move_iterator(connected.begin()),
+        std::make_move_iterator(connected.end())
     );
 
-    document.closedLoopsFound = directLoops.size();
-    document.contours = buildContours(std::move(directLoops));
+    document.closedLoopsFound = loops.size();
+    document.contours = classifyLoops(std::move(loops));
 
     if (document.contours.empty()) {
         document.diagnostics.push_back({
             DxfSeverity::Error,
             "DXF/GEOMETRY",
-            "Не найден ни один замкнутый геометрический контур."
+            "Не найден ни один валидный замкнутый контур. Проверьте замыкание LINE/ARC/POLYLINE."
         });
     } else {
         document.diagnostics.push_back({
             DxfSeverity::Info,
             "DXF/GEOMETRY",
-            "DXF успешно преобразован в замкнутые внешние контуры и отверстия."
+            "Геометрия преобразована в внешние контуры и отверстия."
         });
     }
 
