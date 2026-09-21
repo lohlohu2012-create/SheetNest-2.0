@@ -286,6 +286,67 @@ ENDSEC
 EOF
 )DXF";
 
+
+const char* kOpenPolylineJoinedDxf = R"DXF(
+0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+JOINED
+70
+0
+10
+0
+20
+0
+10
+10
+20
+0
+0
+LINE
+8
+JOINED
+10
+10
+20
+0
+11
+10
+21
+10
+0
+LINE
+8
+JOINED
+10
+10
+20
+10
+11
+0
+21
+10
+0
+LINE
+8
+JOINED
+10
+0
+20
+10
+11
+0
+21
+0
+ENDSEC
+0
+EOF
+)DXF";
+
 const char* kInvalidDxf = R"DXF(
 0
 SECTION
@@ -507,6 +568,14 @@ void testMultipleParts() {
     assert(sawPartA && sawPartB);
 }
 
+
+void testOpenPolylineJoining() {
+    const auto doc = importDxf(kOpenPolylineJoinedDxf, 0.05);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(doc.contours.front().outer.size() >= 4);
+}
+
 void testReadableValidationErrors() {
     const auto doc = importDxf(kInvalidDxf, 0.05);
     assert(!doc.valid());
@@ -580,6 +649,7 @@ int main() {
     testBulgePolyline();
     testLegacyPolyline();
     testMultipleParts();
+    testOpenPolylineJoining();
     testReadableValidationErrors();
     testMinimumSheets();
     testInterlockIntoHole();
