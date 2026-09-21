@@ -1004,79 +1004,217 @@ FeasibilityRegion feasibilityRegion(
 
 std::vector<Point> pointsOnFeasibilityBoundary(
     const FeasibilityRegion& region,
-    double spacingMm
+    double spacingMm,
+    std::size_t maxPoints,
+    bool includeSheetBoundary
 ) {
-    std::vector<Point> points;
+    struct SegmentWork {
+        FeasibilitySegment segment;
+        double length{};
+        double bestY{};
+        double bestX{};
+    };
 
     const double spacing = std::max(0.01, spacingMm);
+    const std::size_t budget = std::max<std::size_t>(4, maxPoints);
 
-    auto addSegment = [&](const FeasibilitySegment& segment) {
-        const double length = segmentLength(segment.a, segment.b);
-        if (length <= kPointEps) return;
+    std::vector<SegmentWork> segments;
+    segments.reserve(
+        region.boundary.size() +
+        (includeSheetBoundary ? region.sheetBoundary.size() : 0)
+    );
 
-        const std::size_t count = std::max<std::size_t>(
-            2,
-            static_cast<std::size_t>(std::ceil(length / spacing)) + 1
-        );
+    auto collect = [&](const std::vector<FeasibilitySegment>& source) {
+        for (const auto& segment : source) {
+            const double length = segmentLength(segment.a, segment.b);
+            if (length <= kPointEps) continue;
 
-        for (std::size_t i = 0; i < count; ++i) {
-            const double t =
-                static_cast<double>(i) /
-                static_cast<double>(count - 1);
+            const Point* first = &segment.a;
+            const Point* second = &segment.b;
 
-            points.push_back({
-                segment.a.x +
-                    (segment.b.x - segment.a.x) * t,
-                segment.a.y +
-                    (segment.b.y - segment.a.y) * t
-            });
-        }
-
-        // Exact projection candidates avoid making the continuous boundary
-        // dependent on the sampling grid when the objective prefers a low
-        // or left-most point on an otherwise long feasible edge.
-        const double dx = segment.b.x - segment.a.x;
-        const double dy = segment.b.y - segment.a.y;
-        const double len2 = dx * dx + dy * dy;
-
-        if (len2 > kEps) {
-            const double tX = std::clamp(
-                -segment.a.x * dx / len2,
-                0.0,
-                1.0
-            );
-            const double tY = std::clamp(
-                -segment.a.y * dy / len2,
-                0.0,
-                1.0
-            );
-
-            for (const double t : {tX, tY, 0.5}) {
-                points.push_back({
-                    segment.a.x + dx * t,
-                    segment.a.y + dy * t
-                });
+            if (std::tie(second->y, second->x) <
+                std::tie(first->y, first->x)) {
+                std::swap(first, second);
             }
+
+            segments.push_back({
+                segment,
+                length,
+                first->y,
+                first->x
+            });
         }
     };
 
-    for (const auto& segment : region.boundary) addSegment(segment);
-    for (const auto& segment : region.sheetBoundary) addSegment(segment);
+    collect(region.boundary);
+    if (includeSheetBoundary) collect(region.sheetBoundary);
 
-    std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) {
-        if (std::abs(a.x - b.x) > kPointEps) return a.x < b.x;
-        return a.y < b.y;
-    });
+    if (segments.empty()) return {};
+
+    std::vector<Point> points;
+    points.reserve(std::min<std::size_t>(budget, segments.size() * 3));
+
+    auto appendPoint = [&](Point p) {
+        points.push_back(p);
+    };
+
+    // Every segment gets at least one analytically best point. This avoids
+    // losing an entire long NFP edge just because a global sampling budget is
+    // tight. The point is chosen by the current lexicographic objective.
+    if (segments.size() >= budget) {
+        std::nth_element(
+            segments.begin(),
+            segments.begin() +
+                static_cast<std::ptrdiff_t>(
+                    std::min<std::size_t>(segments.size(), budget) - 1
+                ),
+            segments.end(),
+            [](const SegmentWork& a, const SegmentWork& b) {
+                return std::tie(a.bestY, a.bestX) <
+                       std::tie(b.bestY, b.bestX);
+            }
+        );
+        segments.resize(std::min<std::size_t>(segments.size(), budget));
+
+        for (const auto& work : segments) {
+            const Point a = work.segment.a;
+            const Point b = work.segment.b;
+
+            if (std::tie(b.y, b.x) < std::tie(a.y, a.x)) {
+                appendPoint(b);
+            } else {
+                appendPoint(a);
+            }
+        }
+    } else {
+        for (const auto& work : segments) {
+            const Point a = work.segment.a;
+            const Point b = work.segment.b;
+
+            if (std::tie(b.y, b.x) < std::tie(a.y, a.x)) {
+                appendPoint(b);
+            } else {
+                appendPoint(a);
+            }
+        }
+
+        if (points.size() < budget) {
+            const std::size_t remaining = budget - points.size();
+
+            double totalLength = 0.0;
+            for (const auto& work : segments) {
+                totalLength += work.length;
+            }
+
+            std::vector<std::size_t> allocations(segments.size(), 0);
+
+            if (totalLength > kPointEps) {
+                std::size_t allocated = 0;
+                for (std::size_t i = 0; i < segments.size(); ++i) {
+                    const auto count = static_cast<std::size_t>(
+                        std::floor(
+                            remaining *
+                            (segments[i].length / totalLength)
+                        )
+                    );
+                    allocations[i] = count;
+                    allocated += count;
+                }
+
+                // Long segments receive the remainder first. The remainder
+                // is intentionally deterministic, so repeated nesting runs
+                // keep the same candidate sequence.
+                std::vector<std::size_t> order(segments.size());
+                for (std::size_t i = 0; i < segments.size(); ++i) {
+                    order[i] = i;
+                }
+
+                std::sort(
+                    order.begin(),
+                    order.end(),
+                    [&](std::size_t a, std::size_t b) {
+                        if (std::abs(
+                                segments[a].length - segments[b].length
+                            ) > kPointEps) {
+                            return segments[a].length > segments[b].length;
+                        }
+                        return a < b;
+                    }
+                );
+
+                for (const auto index : order) {
+                    if (allocated >= remaining) break;
+                    ++allocations[index];
+                    ++allocated;
+                }
+            }
+
+            for (std::size_t i = 0; i < segments.size(); ++i) {
+                const auto count = allocations[i];
+                if (count == 0) continue;
+
+                const Point a = segments[i].segment.a;
+                const Point b = segments[i].segment.b;
+
+                // Count interior samples only. Endpoints were already added
+                // above, so every extra point contributes new coverage.
+                for (std::size_t k = 1; k <= count; ++k) {
+                    const double fraction =
+                        static_cast<double>(k) /
+                        static_cast<double>(count + 1);
+
+                    appendPoint({
+                        a.x + (b.x - a.x) * fraction,
+                        a.y + (b.y - a.y) * fraction
+                    });
+                }
+            }
+        }
+    }
+
+    // A very coarse requested spacing should still expose the midpoint of a
+    // segment. This is important when both endpoints fail collision checks
+    // against other already-placed parts while an interior portion is valid.
+    if (points.size() < budget) {
+        for (const auto& work : segments) {
+            if (work.length + kPointEps < spacing) continue;
+            if (points.size() >= budget) break;
+
+            points.push_back({
+                (work.segment.a.x + work.segment.b.x) * 0.5,
+                (work.segment.a.y + work.segment.b.y) * 0.5
+            });
+        }
+    }
+
+    std::sort(
+        points.begin(),
+        points.end(),
+        [](const Point& a, const Point& b) {
+            if (std::abs(a.y - b.y) > kPointEps) return a.y < b.y;
+            return a.x < b.x;
+        }
+    );
 
     points.erase(
-        std::unique(points.begin(), points.end(), [](const Point& a, const Point& b) {
-            return samePoint(a, b);
-        }),
+        std::unique(
+            points.begin(),
+            points.end(),
+            [](const Point& a, const Point& b) {
+                return samePoint(a, b);
+            }
+        ),
         points.end()
     );
 
+    if (points.size() > budget) {
+        points.resize(budget);
+    }
+
+    (void)spacing;
     return points;
 }
+
 
 void clearCache() {
     CacheStore& store = cacheStore();
