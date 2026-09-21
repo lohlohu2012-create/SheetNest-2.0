@@ -293,34 +293,39 @@ std::vector<Candidate> candidatesFor(
     for (const auto& placed : sheet.shapes) {
         addRingCandidates(placed.outer);
 
-        // NFP/Minkowski candidate set for true-shape contact positions.
-        // Final collision + clearance validation below remains authoritative.
-        for (const auto& vertex : nfp::noFitVertices(placed.outer, part, rotation, gap)) {
-            result.push_back({vertex.x, vertex.y, vertex.y, vertex.x});
-            if (g > 0.0) {
+        // Continuous NFP feasibility boundary: candidate positions are
+        // generated along the entire admissible boundary, not only at NFP
+        // vertices. Final collision/clearance checks remain authoritative.
+        const placementMinX = margin - pb.minX;
+        const placementMinY = margin - pb.minY;
+        const placementMaxX = sheetSize.width - margin - pb.maxX;
+        const placementMaxY = sheetSize.height - margin - pb.maxY;
+
+        if (placementMaxX >= placementMinX &&
+            placementMaxY >= placementMinY) {
+            const region = nfp::feasibilityRegion(
+                placed.outer,
+                part,
+                rotation,
+                placementMinX,
+                placementMinY,
+                placementMaxX,
+                placementMaxY,
+                g
+            );
+
+            const boundarySpacing = std::max(
+                2.0,
+                std::min(12.0, g > 0.0 ? g * 2.0 : 6.0)
+            );
+
+            for (const auto& point :
+                 nfp::pointsOnFeasibilityBoundary(region, boundarySpacing)) {
                 result.push_back({
-                    vertex.x + g,
-                    vertex.y,
-                    vertex.y,
-                    vertex.x + g
-                });
-                result.push_back({
-                    vertex.x - g,
-                    vertex.y,
-                    vertex.y,
-                    vertex.x - g
-                });
-                result.push_back({
-                    vertex.x,
-                    vertex.y + g,
-                    vertex.y + g,
-                    vertex.x
-                });
-                result.push_back({
-                    vertex.x,
-                    vertex.y - g,
-                    vertex.y - g,
-                    vertex.x
+                    point.x,
+                    point.y,
+                    point.y,
+                    point.x
                 });
             }
         }
