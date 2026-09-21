@@ -91,7 +91,13 @@ bool shapesIntersect(const Shape& a,const Shape& b,double gap) {
 
   // Material overlap is defined by the two outer solids. Holes are empty
   // regions, so a part fully contained in another part's hole is allowed.
-  if (polygonsIntersect(a.outer,b.outer)) return true;
+  // For the first test we intentionally use only outer-boundary crossing;
+  // containment is checked separately against the full Shape.
+  for (size_t i=0;i<a.outer.size();++i)
+    for (size_t j=0;j<b.outer.size();++j)
+      if (segmentsIntersect(a.outer[i],a.outer[(i+1)%a.outer.size()],
+                            b.outer[j],b.outer[(j+1)%b.outer.size()]))
+        return true;
   if (pointInShape(a.outer[0],b)||pointInShape(b.outer[0],a)) return true;
 
   if (gap<=0) return false;
