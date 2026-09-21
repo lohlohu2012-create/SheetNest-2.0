@@ -1,5 +1,6 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
+#include "sheetnest/nfp.hpp"
 #include <algorithm>
 #include <cmath>
 #include <future>
@@ -41,7 +42,7 @@ static Point edgeProjection(Point p,Point a,Point b) {
   return {a.x+t*dx,a.y+t*dy};
 }
 static void addContactCandidates(std::vector<Candidate>& c,const Shape& moving,const Sheet& s,
-                                 const SheetState& state,int rot,double gap) {
+                                 const SheetState& state,int rot,double gap,double grid) {
   const auto mb=bounds(moving.outer);
   addCandidate(c,s.marginMm,s.marginMm,rot,s,moving);
   addCandidate(c,s.width-s.marginMm-mb.width(),s.marginMm,rot,s,moving);
@@ -89,7 +90,7 @@ static void addContactCandidates(std::vector<Candidate>& c,const Shape& moving,c
       }
     }
   }
-  const double grid=5.0;
+  grid=grid>0?grid:5.0;
   const double xmax=s.width-s.marginMm-mb.width(), ymax=s.height-s.marginMm-mb.height();
   const double xend=std::min(xmax,s.marginMm+grid*32.0);
   const double yend=std::min(ymax,s.marginMm+grid*32.0);
@@ -127,7 +128,7 @@ static bool tryPlace(const Instance& i,const Sheet& s,const Options& o,std::vect
     for(int rot:o.rotations) {
       Shape g=normalized(rotate(i.part.shape,rot));
       std::vector<Candidate> candidates;
-      addContactCandidates(candidates,g,s,sheets[si],rot,o.gapMm);
+      addContactCandidates(candidates,g,s,sheets[si],rot,o.gapMm,o.candidateGridMm);
       candidates=uniqueCandidates(std::move(candidates));
       for(const auto& c:candidates) {
         Shape placed=translate(g,c.x,c.y);
