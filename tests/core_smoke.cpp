@@ -1007,7 +1007,7 @@ void testInstanceDiagnostics() {
         {"missing-1", Part{"part", rectangle(10, 10), {}}}
     };
 
-    Sheet sheet{20, 20, 0};
+    Sheet sheet{15, 15, 0};
     Options options;
     options.rotations = {0};
     options.iterations = 1;
