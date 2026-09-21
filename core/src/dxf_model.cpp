@@ -32,20 +32,34 @@ std::vector<Instance> instancesFromDxf(
     std::size_t quantityPerPart
 ) {
     const auto parts = partsFromDxf(document);
+    std::vector<std::size_t> quantities(parts.size(), quantityPerPart);
+    return instancesFromDxf(document, quantities);
+}
+
+std::vector<Instance> instancesFromDxf(
+    const DxfDocument& document,
+    const std::vector<std::size_t>& quantities
+) {
+    const auto parts = partsFromDxf(document);
 
     std::vector<Instance> instances;
-    if (quantityPerPart == 0) return instances;
+    const std::size_t count = std::min(parts.size(), quantities.size());
 
-    instances.reserve(parts.size() * quantityPerPart);
+    for (std::size_t partIndex = 0; partIndex < count; ++partIndex) {
+        const auto& part = parts[partIndex];
+        const std::size_t quantity = quantities[partIndex];
 
-    for (const auto& part : parts) {
-        for (std::size_t copy = 0; copy < quantityPerPart; ++copy) {
+        for (std::size_t copy = 0; copy < quantity; ++copy) {
             Instance instance;
             instance.id =
                 part.id +
                 "#" +
                 std::to_string(copy + 1);
             instance.part = part;
+            instance.unitId =
+                part.id +
+                ":unit-" +
+                std::to_string(copy + 1);
             instances.push_back(std::move(instance));
         }
     }
