@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -486,7 +487,8 @@ std::vector<Segment> collectSegments(
         if (e.type == "CIRCLE") {
             auto p = circle(groupPoint(e, 10, 20), groupValue(e, 40), tolerance);
             if (p.size() >= 3) {
-                directLoops.push_back({std::move(p), "CIRCLE", signedArea(p)});
+                const double area = signedArea(p);
+                directLoops.push_back({std::move(p), "CIRCLE", area});
             }
             ++i;
             continue;
@@ -496,7 +498,8 @@ std::vector<Segment> collectSegments(
             bool closed = false;
             auto p = lwPolyline(e, closed, tolerance);
             if (closed && p.size() >= 3) {
-                directLoops.push_back({std::move(p), "LWPOLYLINE", signedArea(p)});
+                const double area = signedArea(p);
+                directLoops.push_back({std::move(p), "LWPOLYLINE", area});
             } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
@@ -528,7 +531,8 @@ std::vector<Segment> collectSegments(
             auto p = polylineGeometry(vertices, closed, tolerance);
 
             if (closed && p.size() >= 3) {
-                directLoops.push_back({std::move(p), "POLYLINE", signedArea(p)});
+                const double area = signedArea(p);
+                directLoops.push_back({std::move(p), "POLYLINE", area});
             } else if (p.size() >= 2) {
                 diagnostics.push_back({
                     DxfSeverity::Warning,
