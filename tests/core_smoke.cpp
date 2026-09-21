@@ -1,5 +1,7 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
+#include "sheetnest/benchmark.hpp"
+#include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
@@ -985,6 +987,96 @@ void testConcaveNfpCandidates() {
     assert(!vertices.empty());
 }
 
+void testPerPartQuantitiesAndUnitIds() {
+    const auto doc = importDxf(kMultiplePartsDxf, 0.05);
+    assert(doc.valid());
+
+    const std::vector<std::size_t> quantities{2, 3};
+    const auto instances = instancesFromDxf(doc, quantities);
+
+    assert(instances.size() == 5);
+    assert(instances[0].unitId == "PART_A:unit-1");
+    assert(instances[1].unitId == "PART_A:unit-2");
+    assert(instances[2].unitId == "PART_B:unit-1");
+    assert(instances[4].unitId == "PART_B:unit-3");
+}
+
+void testInstanceDiagnostics() {
+    std::vector<Instance> instances{
+        {"placed-1", Part{"part", rectangle(10, 10), {}}},
+        {"missing-1", Part{"part", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{20, 20, 0};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 1;
+    options.gapMm = 0;
+
+    const auto result = nest(instances, sheet, options);
+    const auto diagnostics = diagnoseNest(instances, result);
+
+    assert(diagnostics.size() == instances.size());
+
+    bool sawPlaced = false;
+    bool sawUnplaced = false;
+
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic.instanceId == "placed-1") {
+            sawPlaced =
+                diagnostic.status == InstanceDiagnosticStatus::Placed &&
+                diagnostic.stage == "nesting/placed";
+        }
+
+        if (diagnostic.instanceId == "missing-1") {
+            sawUnplaced =
+                diagnostic.status == InstanceDiagnosticStatus::Unplaced &&
+                diagnostic.stage == "nesting/no-valid-candidate" &&
+                !diagnostic.unitId.empty();
+        }
+    }
+
+    assert(sawPlaced);
+    assert(sawUnplaced);
+}
+
+void testNestingBenchmark() {
+    std::vector<Instance> instances;
+    for (int i = 0; i < 6; ++i) {
+        instances.push_back({
+            "bench-" + std::to_string(i),
+            Part{"bench", rectangle(20, 20), {}}
+        });
+    }
+
+    Sheet sheet{100, 100, 0};
+    Options options;
+    options.rotations = {0, 90, 180, 270};
+    options.iterations = 4;
+    options.gapMm = 1.0;
+
+    const auto benchmark = benchmarkNest(
+        instances,
+        sheet,
+        options
+    );
+
+    assert(benchmark.baseline.milliseconds >= 0.0);
+    assert(benchmark.optimized.milliseconds >= 0.0);
+    assert(benchmark.baseline.placed <= instances.size());
+    assert(benchmark.optimized.placed <= instances.size());
+    assert(
+        benchmark.baseline.placed +
+        benchmark.baseline.skipped ==
+        instances.size()
+    );
+    assert(
+        benchmark.optimized.placed +
+        benchmark.optimized.skipped ==
+        instances.size()
+    );
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -1054,6 +1146,7 @@ int main() {
     testOpenPolylineJoining();
     testDegenerateArc();
     testDxfModelPipeline();
+    testPerPartQuantitiesAndUnitIds();
     testDxfExportRoundTrip();
     testNfpMinkowski();
     testContinuousConcaveFeasibilityRegion();
@@ -1064,6 +1157,8 @@ int main() {
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
+    testInstanceDiagnostics();
+    testNestingBenchmark();
     testInterlockIntoHole();
     std::cout << "SheetNest core smoke tests passed\n";
     return 0;
