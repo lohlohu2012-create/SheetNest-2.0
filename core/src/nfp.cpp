@@ -1,6 +1,7 @@
 #include "sheetnest/nfp.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -482,7 +483,6 @@ std::vector<Polygon> assembleBoundaryLoops(
 
         const std::size_t startNode = segments[start].a;
         std::size_t currentSegment = start;
-        std::size_t currentNode = startNode;
         std::vector<Point> loop;
 
         for (std::size_t guard = 0; guard <= segments.size(); ++guard) {
@@ -533,8 +533,6 @@ std::vector<Polygon> assembleBoundaryLoops(
 
             if (best == segments.size()) break;
             currentSegment = best;
-            currentNode = segment.b;
-            (void)currentNode;
         }
 
         if (loop.size() >= 4 &&
@@ -579,8 +577,6 @@ std::vector<Polygon> computeUnionNfp(
 
     std::vector<Polygon> pairwise;
     pairwise.reserve(fixedPieces.size() * movingPieces.size());
-
-    const auto reflectedMoving = reflected(moving);
 
     for (const auto& fixedPiece : fixedPieces) {
         for (const auto& movingPiece : movingPieces) {
