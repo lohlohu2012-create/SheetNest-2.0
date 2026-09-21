@@ -1,6 +1,7 @@
 #pragma once
 #include "sheetnest/nesting.hpp"
 #include <QGraphicsView>
+#include <QGraphicsScene>
 #include <vector>
 
 class NestingView final : public QGraphicsView {
@@ -16,5 +17,4 @@ protected:
 
 private:
   QGraphicsScene scene_;
-  double pixelsPerMm_{0.35};
 };
