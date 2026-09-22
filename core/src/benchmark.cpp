@@ -40,6 +40,7 @@ BenchmarkCase runCase(
         result.unplaced.end()
     );
     benchmark.skippedInstanceIds = result.unplaced;
+    benchmark.instanceTelemetry = result.instanceTelemetry;
     benchmark.placedInstanceIds.reserve(instances.size() - benchmark.skipped);
     for (const auto& instance : instances) {
         if (skipped.find(instance.id) == skipped.end()) {
