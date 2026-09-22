@@ -353,6 +353,7 @@ void MainWindow::buildUi() {
 
     repairRoundCombo_ = new QComboBox;
     repairRoundCombo_->addItem("Итоговая раскладка", -1);
+    repairRoundCombo_->setEnabled(false);
 
     repairConflictLayer_ = new QCheckBox("Конфликты");
     repairExtractedLayer_ = new QCheckBox("Извлечённые");
@@ -615,9 +616,21 @@ void MainWindow::connectUi() {
                         static_cast<int>(round.roundIndex)
                     );
                 }
-                repairRoundCombo_->setEnabled(
-                    !validation_.adaptiveHistory.empty()
-                );
+                const hasHistory =
+                    !validation_.adaptiveHistory.empty();
+                repairRoundCombo_->setEnabled(hasHistory);
+                if (repairConflictLayer_) {
+                    repairConflictLayer_->setEnabled(hasHistory);
+                }
+                if (repairExtractedLayer_) {
+                    repairExtractedLayer_->setEnabled(hasHistory);
+                }
+                if (repairMovedLayer_) {
+                    repairMovedLayer_->setEnabled(hasHistory);
+                }
+                if (repairStationaryLayer_) {
+                    repairStationaryLayer_->setEnabled(hasHistory);
+                }
             }
 
             populateDiagnostics();
@@ -835,6 +848,16 @@ void MainWindow::refreshInstances() {
     hasBenchmarkResult_ = false;
     validation_ = {};
     validation_.valid = false;
+    if (repairRoundCombo_) {
+        QSignalBlocker blocker(repairRoundCombo_);
+        repairRoundCombo_->clear();
+        repairRoundCombo_->addItem("Итоговая раскладка", -1);
+        repairRoundCombo_->setEnabled(false);
+    }
+    if (repairConflictLayer_) repairConflictLayer_->setEnabled(false);
+    if (repairExtractedLayer_) repairExtractedLayer_->setEnabled(false);
+    if (repairMovedLayer_) repairMovedLayer_->setEnabled(false);
+    if (repairStationaryLayer_) repairStationaryLayer_->setEnabled(false);
     if (repairButton_) {
         repairButton_->setEnabled(false);
     }
@@ -1147,6 +1170,16 @@ void MainWindow::calculate() {
 
     validation_ = {};
     validation_.valid = false;
+    if (repairRoundCombo_) {
+        QSignalBlocker blocker(repairRoundCombo_);
+        repairRoundCombo_->clear();
+        repairRoundCombo_->addItem("Итоговая раскладка", -1);
+        repairRoundCombo_->setEnabled(false);
+    }
+    if (repairConflictLayer_) repairConflictLayer_->setEnabled(false);
+    if (repairExtractedLayer_) repairExtractedLayer_->setEnabled(false);
+    if (repairMovedLayer_) repairMovedLayer_->setEnabled(false);
+    if (repairStationaryLayer_) repairStationaryLayer_->setEnabled(false);
     exportButton_->setEnabled(false);
 
     const auto instancesCopy = instances_;
