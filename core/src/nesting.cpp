@@ -718,6 +718,509 @@ SheetState stateFromPlacements(
     return state;
 }
 
+
+std::size_t placementIndexById(
+    const SheetState& state,
+    const std::string& id
+) {
+    for (std::size_t i = 0; i < state.placements.size(); ++i) {
+        if (state.placements[i].id == id) return i;
+    }
+    return state.placements.size();
+}
+
+void erasePlacement(
+    SheetState& state,
+    std::size_t index,
+    const Instance& instance
+) {
+    if (index >= state.placements.size() ||
+        index >= state.shapes.size()) {
+        return;
+    }
+
+    state.placements.erase(
+        state.placements.begin() +
+        static_cast<std::ptrdiff_t>(index)
+    );
+    state.shapes.erase(
+        state.shapes.begin() +
+        static_cast<std::ptrdiff_t>(index)
+    );
+    state.placedArea = std::max(
+        0.0,
+        state.placedArea - materialArea(instance.part)
+    );
+}
+
+std::vector<std::string> orderedPlacementIds(
+    const SheetState& state,
+    const std::vector<Instance>& instances
+) {
+    std::vector<std::string> ids;
+    ids.reserve(state.placements.size());
+
+    for (const auto& placement : state.placements) {
+        ids.push_back(placement.id);
+    }
+
+    std::sort(
+        ids.begin(),
+        ids.end(),
+        [&](const std::string& a, const std::string& b) {
+            const auto* ia = findInstance(instances, a);
+            const auto* ib = findInstance(instances, b);
+
+            const double aa =
+                ia ? materialArea(ia->part) : 0.0;
+            const double ab =
+                ib ? materialArea(ib->part) : 0.0;
+
+            if (std::abs(aa - ab) > kEps) {
+                return aa > ab;
+            }
+            return a < b;
+        }
+    );
+
+    return ids;
+}
+
+bool tryPlaceOnExistingSheets(
+    const Instance& instance,
+    std::vector<SheetState>& states,
+    std::size_t sheetLimit,
+    const Sheet& sheet,
+    const Options& options,
+    NestingStats* stats
+) {
+    std::vector<int> rotations = options.rotations;
+    if (rotations.empty()) rotations.push_back(0);
+
+    sheetLimit = std::min(sheetLimit, states.size());
+
+    for (std::size_t targetIndex = 0;
+         targetIndex < sheetLimit;
+         ++targetIndex) {
+
+        SheetState trial = states[targetIndex];
+
+        if (!placeOnSheet(
+                instance,
+                sheet,
+                options,
+                trial,
+                rotations,
+                stats
+            )) {
+            continue;
+        }
+
+        states[targetIndex] = std::move(trial);
+        return true;
+    }
+
+    return false;
+}
+
+std::vector<std::string> exchangeCandidates(
+    const SheetState& target,
+    const std::vector<Instance>& instances
+) {
+    std::vector<std::string> ids;
+    ids.reserve(target.placements.size());
+
+    const auto ordered =
+        orderedPlacementIds(target, instances);
+
+    // Keep both ends of the area distribution. A blocker may be a tiny
+    // detail consuming a narrow gap, but it may also be a large detail whose
+    // removal creates a meaningful contiguous placement region.
+    constexpr std::size_t kMaxCandidates = 6;
+
+    for (std::size_t i = 0;
+         i < ordered.size() &&
+         ids.size() < kMaxCandidates / 2;
+         ++i) {
+        ids.push_back(ordered[i]);
+    }
+
+    for (std::size_t i = 0;
+         i < ordered.size() &&
+         ids.size() < kMaxCandidates;
+         ++i) {
+        const std::size_t reverseIndex =
+            ordered.size() - 1 - i;
+
+        if (std::find(
+                ids.begin(),
+                ids.end(),
+                ordered[reverseIndex]
+            ) == ids.end()) {
+            ids.push_back(ordered[reverseIndex]);
+        }
+    }
+
+    return ids;
+}
+
+bool relocateEvicted(
+    const std::vector<std::string>& evictedIds,
+    std::vector<SheetState>& trial,
+    std::size_t sourceIndex,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    NestingStats* stats
+) {
+    for (const auto& id : evictedIds) {
+        const auto* instance = findInstance(instances, id);
+        if (!instance) return false;
+
+        // Never put an evicted item back into the source sheet: the purpose
+        // of this transaction is to make that sheet removable.
+        if (!tryPlaceOnExistingSheets(
+                *instance,
+                trial,
+                sourceIndex,
+                sheet,
+                options,
+                stats
+            )) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool tryExchangeEliminateSheet(
+    std::size_t sourceIndex,
+    std::vector<SheetState>& states,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    NestingStats* stats
+) {
+    if (sourceIndex == 0 || sourceIndex >= states.size()) {
+        return false;
+    }
+
+    const auto sourceIds =
+        orderedPlacementIds(states[sourceIndex], instances);
+
+    if (sourceIds.empty()) {
+        states.erase(
+            states.begin() +
+            static_cast<std::ptrdiff_t>(sourceIndex)
+        );
+        return true;
+    }
+
+    constexpr std::size_t kMaxSourceParts = 96;
+    constexpr std::size_t kMaxExchangeAttempts = 2500;
+
+    if (sourceIds.size() > kMaxSourceParts) {
+        return false;
+    }
+
+    std::size_t attempts = 0;
+    std::vector<SheetState> working = states;
+
+    auto moveOnePart = [&](const std::string& id) -> bool {
+        const auto* instance = findInstance(instances, id);
+        if (!instance) return false;
+
+        const auto sourcePos =
+            placementIndexById(
+                working[sourceIndex],
+                id
+            );
+
+        if (sourcePos >= working[sourceIndex].placements.size()) {
+            return false;
+        }
+
+        SheetState directTrial = working[sourceIndex];
+        erasePlacement(
+            directTrial,
+            sourcePos,
+            *instance
+        );
+
+        // Direct relocation is always cheaper and should be attempted first.
+        for (std::size_t targetIndex = 0;
+             targetIndex < sourceIndex;
+             ++targetIndex) {
+
+            if (++attempts > kMaxExchangeAttempts) {
+                return false;
+            }
+
+            SheetState targetTrial =
+                working[targetIndex];
+
+            if (!placeOnSheet(
+                    *instance,
+                    sheet,
+                    options,
+                    targetTrial,
+                    options.rotations,
+                    stats
+                )) {
+                continue;
+            }
+
+            auto committed = working;
+            committed[targetIndex] =
+                std::move(targetTrial);
+            committed[sourceIndex] =
+                std::move(directTrial);
+            working = std::move(committed);
+            return true;
+        }
+
+        // Now try an exchange: remove one or two blockers from a target,
+        // place the source part there, then refill all evicted blockers into
+        // other already existing sheets.
+        for (std::size_t targetIndex = 0;
+             targetIndex < sourceIndex;
+             ++targetIndex) {
+
+            const auto candidates =
+                exchangeCandidates(
+                    working[targetIndex],
+                    instances
+                );
+
+            for (std::size_t i = 0;
+                 i < candidates.size();
+                 ++i) {
+
+                // One-blocker exchange.
+                for (std::size_t subsetSize = 1;
+                     subsetSize <= 2;
+                     ++subsetSize) {
+
+                    if (subsetSize == 2 &&
+                        i + 1 >= candidates.size()) {
+                        break;
+                    }
+
+                    if (++attempts > kMaxExchangeAttempts) {
+                        return false;
+                    }
+
+                    std::vector<std::string> evicted{
+                        candidates[i]
+                    };
+
+                    if (subsetSize == 2) {
+                        if (candidates[i + 1] == candidates[i]) {
+                            continue;
+                        }
+                        evicted.push_back(
+                            candidates[i + 1]
+                        );
+                    }
+
+                    auto trial = working;
+
+                    bool validEviction = true;
+                    for (const auto& evictedId : evicted) {
+                        const auto* evictedInstance =
+                            findInstance(
+                                instances,
+                                evictedId
+                            );
+                        if (!evictedInstance) {
+                            validEviction = false;
+                            break;
+                        }
+
+                        const auto pos =
+                            placementIndexById(
+                                trial[targetIndex],
+                                evictedId
+                            );
+                        if (pos >= trial[targetIndex].placements.size()) {
+                            validEviction = false;
+                            break;
+                        }
+
+                        erasePlacement(
+                            trial[targetIndex],
+                            pos,
+                            *evictedInstance
+                        );
+                    }
+
+                    if (!validEviction) continue;
+
+                    auto sourceTrial =
+                        trial[sourceIndex];
+
+                    const auto sourcePos =
+                        placementIndexById(
+                            sourceTrial,
+                            id
+                        );
+                    if (sourcePos >= sourceTrial.placements.size()) {
+                        continue;
+                    }
+
+                    erasePlacement(
+                        sourceTrial,
+                        sourcePos,
+                        *instance
+                    );
+
+                    auto targetTrial =
+                        trial[targetIndex];
+
+                    if (!placeOnSheet(
+                            *instance,
+                            sheet,
+                            options,
+                            targetTrial,
+                            options.rotations,
+                            stats
+                        )) {
+                        continue;
+                    }
+
+                    trial[targetIndex] =
+                        std::move(targetTrial);
+                    trial[sourceIndex] =
+                        std::move(sourceTrial);
+
+                    if (!relocateEvicted(
+                            evicted,
+                            trial,
+                            sourceIndex,
+                            instances,
+                            sheet,
+                            options,
+                            stats
+                        )) {
+                        continue;
+                    }
+
+                    working = std::move(trial);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    };
+
+    for (const auto& id : sourceIds) {
+        if (!moveOnePart(id)) {
+            return false;
+        }
+    }
+
+    if (!working[sourceIndex].placements.empty()) {
+        return false;
+    }
+
+    states = std::move(working);
+    states.erase(
+        states.begin() +
+        static_cast<std::ptrdiff_t>(sourceIndex)
+    );
+    return true;
+}
+
+bool refillExistingSheets(
+    std::vector<SheetState>& states,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    NestingStats* stats
+) {
+    bool changed = false;
+    constexpr int kPasses = 3;
+
+    for (int pass = 0; pass < kPasses; ++pass) {
+        bool passChanged = false;
+
+        for (std::size_t sourceIndex = states.size();
+             sourceIndex-- > 1;) {
+
+            const auto sourceIds =
+                orderedPlacementIds(
+                    states[sourceIndex],
+                    instances
+                );
+
+            for (const auto& id : sourceIds) {
+                const auto* instance =
+                    findInstance(instances, id);
+                if (!instance) continue;
+
+                const auto sourcePos =
+                    placementIndexById(
+                        states[sourceIndex],
+                        id
+                    );
+                if (sourcePos >= states[sourceIndex].placements.size()) {
+                    continue;
+                }
+
+                for (std::size_t targetIndex = 0;
+                     targetIndex < sourceIndex;
+                     ++targetIndex) {
+
+                    SheetState targetTrial =
+                        states[targetIndex];
+
+                    if (!placeOnSheet(
+                            *instance,
+                            sheet,
+                            options,
+                            targetTrial,
+                            options.rotations,
+                            stats
+                        )) {
+                        continue;
+                    }
+
+                    auto committed = states;
+                    committed[targetIndex] =
+                        std::move(targetTrial);
+                    erasePlacement(
+                        committed[sourceIndex],
+                        sourcePos,
+                        *instance
+                    );
+                    states = std::move(committed);
+
+                    changed = true;
+                    passChanged = true;
+                    break;
+                }
+            }
+        }
+
+        if (!passChanged) break;
+    }
+
+    for (std::size_t i = states.size();
+         i-- > 0;) {
+        if (states[i].placements.empty()) {
+            states.erase(
+                states.begin() +
+                static_cast<std::ptrdiff_t>(i)
+            );
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 bool compactResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
@@ -921,6 +1424,54 @@ bool compactResult(
             static_cast<std::ptrdiff_t>(sourceIndex)
         );
         changed = true;
+    }
+
+    // Refill first: moving already placed details into earlier sheets
+    // exposes space that a direct sheet-elimination pass may have missed.
+    if (refillExistingSheets(
+            states,
+            instances,
+            sheet,
+            options,
+            stats
+        )) {
+        changed = true;
+    }
+
+    // Repeatedly try to remove the last sheets. Exchange is deliberately
+    // bounded; every successful transaction reduces the primary objective.
+    constexpr int kGlobalPasses = 3;
+    for (int pass = 0; pass < kGlobalPasses; ++pass) {
+        bool passChanged = false;
+
+        for (std::size_t sourceIndex = states.size();
+             sourceIndex-- > 1;) {
+
+            if (tryExchangeEliminateSheet(
+                    sourceIndex,
+                    states,
+                    instances,
+                    sheet,
+                    options,
+                    stats
+                )) {
+                changed = true;
+                passChanged = true;
+            }
+        }
+
+        if (refillExistingSheets(
+                states,
+                instances,
+                sheet,
+                options,
+                stats
+            )) {
+            changed = true;
+            passChanged = true;
+        }
+
+        if (!passChanged) break;
     }
 
     if (!changed) return false;
