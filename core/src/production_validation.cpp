@@ -295,6 +295,44 @@ void addIssue(
 
 } // namespace
 
+int productionIssuePriority(ProductionValidationIssueType type) {
+    switch (type) {
+    case ProductionValidationIssueType::Collision:
+        return 100;
+    case ProductionValidationIssueType::Gap:
+        return 95;
+    case ProductionValidationIssueType::Margin:
+        return 70;
+    case ProductionValidationIssueType::MissingId:
+        return 50;
+    case ProductionValidationIssueType::DuplicateId:
+    case ProductionValidationIssueType::UnknownId:
+        return 20;
+    }
+    return 0;
+}
+
+double productionIssueSeverity(
+    const ProductionValidationIssue& issue
+) {
+    switch (issue.type) {
+    case ProductionValidationIssueType::Collision:
+        return 1.0;
+    case ProductionValidationIssueType::Gap:
+        return std::max(
+            0.0,
+            issue.requiredMm - issue.measuredMm
+        );
+    case ProductionValidationIssueType::Margin:
+        return std::max(0.0, -issue.measuredMm);
+    case ProductionValidationIssueType::MissingId:
+    case ProductionValidationIssueType::DuplicateId:
+    case ProductionValidationIssueType::UnknownId:
+        return 1.0;
+    }
+    return 0.0;
+}
+
 const char* productionValidationIssueTypeName(
     ProductionValidationIssueType type
 ) {
@@ -585,6 +623,37 @@ ProductionValidationReport validateProductionResult(
             }
         }
     }
+
+    // Keep diagnostics and Adaptive Repair deterministic: physical geometry
+    // violations are surfaced before boundary, missing-instance and metadata
+    // issues. Severity then breaks ties within the same class.
+    std::stable_sort(
+        report.issues.begin(),
+        report.issues.end(),
+        [](const ProductionValidationIssue& a,
+           const ProductionValidationIssue& b) {
+            const int priorityA = productionIssuePriority(a.type);
+            const int priorityB = productionIssuePriority(b.type);
+            if (priorityA != priorityB) {
+                return priorityA > priorityB;
+            }
+
+            const double severityA = productionIssueSeverity(a);
+            const double severityB = productionIssueSeverity(b);
+            if (std::abs(severityA - severityB) > kEps) {
+                return severityA > severityB;
+            }
+
+            if (a.sheetIndex != b.sheetIndex) {
+                return a.sheetIndex < b.sheetIndex;
+            }
+            if (a.instanceId != b.instanceId) {
+                return a.instanceId < b.instanceId;
+            }
+            return a.relatedInstanceId < b.relatedInstanceId;
+        }
+    );
+
     return report;
 }
 
