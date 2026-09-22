@@ -1306,6 +1306,7 @@ void MainWindow::exportBenchmarkResults() {
     statusBar()->showMessage("Benchmark экспортирован", 5000);
 }
 
+// Production Validator: final export gate
 void MainWindow::exportDxf() {
     if (result_.sheets.empty()) {
         return;
