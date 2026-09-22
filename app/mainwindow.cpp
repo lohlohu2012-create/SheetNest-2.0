@@ -186,6 +186,9 @@ void MainWindow::buildUi() {
     calculateButton_ = new QPushButton("Рассчитать раскрой");
     calculateButton_->setEnabled(false);
 
+    repairButton_ = new QPushButton("Исправить ошибки");
+    repairButton_->setEnabled(false);
+
     benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
     benchmarkButton_->setEnabled(false);
 
@@ -316,6 +319,7 @@ void MainWindow::buildUi() {
     controlLayout->addWidget(progressDetails_);
 
     controlLayout->addWidget(calculateButton_);
+    controlLayout->addWidget(repairButton_);
 
     stopButton_ = new QPushButton("Остановить расчёт");
     stopButton_->setEnabled(false);
@@ -460,7 +464,12 @@ void MainWindow::connectUi() {
     });
 
     connect(calculateButton_, &QPushButton::clicked, this, [this] {
+        repairRequested_ = false;
         calculate();
+    });
+
+    connect(repairButton_, &QPushButton::clicked, this, [this] {
+        repairErrors();
     });
 
     connect(exportButton_, &QPushButton::clicked, this, [this] {
@@ -583,6 +592,7 @@ void MainWindow::connectUi() {
             );
         }
 
+        repairRequested_ = false;
         nestingController_.reset();
         setBusy(false);
     });
@@ -703,6 +713,9 @@ void MainWindow::refreshInstances() {
     hasBenchmarkResult_ = false;
     validation_ = {};
     validation_.valid = false;
+    if (repairButton_) {
+        repairButton_->setEnabled(false);
+    }
     if (exportButton_) {
         exportButton_->setEnabled(false);
     }
@@ -977,6 +990,25 @@ void MainWindow::calculate() {
     options_.iterations =
         static_cast<std::size_t>(iterationsSpin_->value());
     options_.gapMm = gapSpin_->value();
+    options_.enableAutoRepair = true;
+
+    if (repairRequested_) {
+        options_.iterations =
+            std::clamp<std::size_t>(
+                std::max<std::size_t>(
+                    64,
+                    options_.iterations * 2
+                ),
+                64,
+                128
+            );
+        options_.seed += 0xA5A5F00Du;
+
+        appendLog(
+            QString("Запущено усиленное исправление: %1 итераций + Auto Repair.")
+                .arg(static_cast<int>(options_.iterations))
+        );
+    }
 
     Material material = Material::CarbonSteel;
     switch (materialCombo_->currentIndex()) {
@@ -1063,6 +1095,28 @@ void MainWindow::calculate() {
             }
         )
     );
+}
+
+void MainWindow::repairErrors() {
+    if (instances_.empty() || result_.sheets.empty()) {
+        return;
+    }
+
+    if (validation_.valid) {
+        QMessageBox::information(
+            this,
+            "Production Validator",
+            "Ошибок для исправления не обнаружено."
+        );
+        return;
+    }
+
+    repairRequested_ = true;
+    appendLog(
+        "Запущено автоматическое исправление: усиленный пересчёт → "
+        "Global Optimizer → Production Validator."
+    );
+    calculate();
 }
 
 void MainWindow::benchmark() {
@@ -1514,6 +1568,12 @@ void MainWindow::updateProgress(
 void MainWindow::setBusy(bool busy) {
     importButton_->setEnabled(!busy);
     calculateButton_->setEnabled(!busy && !instances_.empty());
+    repairButton_->setEnabled(
+        !busy &&
+        !instances_.empty() &&
+        !result_.sheets.empty() &&
+        !validation_.valid
+    );
     benchmarkButton_->setEnabled(!busy && !instances_.empty());
     exportButton_->setEnabled(
         !busy &&
