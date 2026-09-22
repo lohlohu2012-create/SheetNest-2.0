@@ -1,4 +1,5 @@
 #include "sheetnest/parallel_nesting.hpp"
+#include "sheetnest/production_validation.hpp"
 #include "sheetnest/production_validator.hpp"
 
 #include <algorithm>
@@ -356,6 +357,8 @@ Result ParallelNestingController::run(
     });
 
     Result optimizedBest = best;
+    bool hasValidatedCandidate = false;
+
     for (std::size_t i = 0; i < collected.size(); ++i) {
         if (control->shouldStop()) break;
 
@@ -389,10 +392,83 @@ Result ParallelNestingController::run(
             candidate
         );
 
-        if (optimizedBest.utilization < 0.0 ||
+        publish({
+            NestingProgressPhase::ProductionValidation,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - candidate.unplaced.size(),
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            candidate.utilization,
+            0,
+            0,
+            "Production Validator: collision → gap → margin → duplicate IDs → missing IDs"
+        });
+
+        const auto validation =
+            validateProductionResult(
+                instances,
+                sheet,
+                optimizerOptions,
+                candidate
+            );
+
+        if (!validation.valid) {
+            publish({
+                NestingProgressPhase::ProductionValidation,
+                0,
+                workerCount,
+                completedIterations.load(
+                    std::memory_order_relaxed
+                ),
+                totalIterations,
+                instances.size() - candidate.unplaced.size(),
+                candidate.unplaced.size(),
+                candidate.sheets.size(),
+                candidate.utilization,
+                0,
+                0,
+                "Production Validator: кандидат отклонён; ошибок " +
+                    std::to_string(validation.issues.size())
+            });
+            continue;
+        }
+
+        hasValidatedCandidate = true;
+
+        publish({
+            NestingProgressPhase::ProductionValidation,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - candidate.unplaced.size(),
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            candidate.utilization,
+            0,
+            0,
+            "Production Validator: OK"
+        });
+
+        if (!hasValidatedCandidate ||
+            optimizedBest.utilization < 0.0 ||
             betterResult(candidate, optimizedBest)) {
             optimizedBest = std::move(candidate);
         }
+    }
+
+    if (!hasValidatedCandidate && !collected.empty()) {
+        // No candidate passed the production gate. Preserve the best raw
+        // result for diagnostics; the UI-level validator will report it as
+        // unsafe for export.
+        optimizedBest = best;
     }
 
     best = std::move(optimizedBest);
