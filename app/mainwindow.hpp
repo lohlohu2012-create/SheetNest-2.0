@@ -6,6 +6,7 @@
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting.hpp"
 #include "sheetnest/cutting_path.hpp"
+#include "sheetnest/cam_export.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_model.hpp"
@@ -51,6 +52,7 @@ private:
     void repairErrors();
     void benchmark();
     void exportDxf();
+    void exportCam();
     void populatePartTable();
     void populateDiagnostics();
     void populateBenchmark(const sheetnest::BenchmarkResult& benchmarkResult);
@@ -173,6 +175,7 @@ private:
     QPushButton* benchmarkExportButton_{};
     QPushButton* stopButton_{};
     QPushButton* exportButton_{};
+    QPushButton* exportCamButton_{};
 
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
