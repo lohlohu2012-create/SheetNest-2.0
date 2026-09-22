@@ -2693,6 +2693,7 @@ void MainWindow::updateLaserAnimationUi() {
     }
     const bool hasSelectedContour =
         hasRoute &&
+        !laserAnimationPlaying_ &&
         laserAnimationOperation_ >= 0 &&
         static_cast<std::size_t>(laserAnimationOperation_) <
             view_->cuttingRouteOperations().size();
