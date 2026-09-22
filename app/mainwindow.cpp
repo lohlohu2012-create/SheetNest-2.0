@@ -556,6 +556,7 @@ void MainWindow::connectUi() {
             );
         }
 
+        nestingController_.reset();
         setBusy(false);
     });
 
@@ -1017,6 +1018,7 @@ void MainWindow::benchmark() {
 
     hasBenchmarkResult_ = false;
     benchmarkExportButton_->setEnabled(false);
+    nestingController_.reset();
     setBusy(true);
     appendLog("Запущен benchmark: базовый поиск vs оптимизированный...");
 
