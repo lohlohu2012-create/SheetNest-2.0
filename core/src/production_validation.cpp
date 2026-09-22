@@ -1205,12 +1205,13 @@ bool repairProductionResult(
                 const auto levelReport = validateProductionResult(
                     instances, sheet, repairOptions, levelCandidate
                 );
-                const auto remainingLevels =
-                    classifyConflictLevels(levelReport, levelIds);
-
+                // Store the hierarchy that governed this sub-level.
+                // The validator result itself is kept in the next adaptive
+                // state, so the following sub-level is always based on fresh
+                // geometry rather than a stale graph.
                 adaptiveHistory.push_back(makeRoundSnapshot(
                     round + 1, levelIds, levelExtractedIds,
-                    remainingLevels, levelBefore, levelCandidate
+                    conflictLevels, levelBefore, levelCandidate
                 ));
 
                 localCandidate = std::move(levelCandidate);
