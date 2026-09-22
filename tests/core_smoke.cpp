@@ -8,6 +8,7 @@
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/parallel_nesting.hpp"
 #include "sheetnest/production_validation.hpp"
+#include "sheetnest/spatial_index.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -1183,6 +1184,63 @@ void testNestingBenchmark() {
     );
 }
 
+void testSpatialIndexBroadPhase() {
+    SpatialIndex index(10.0);
+    index.insert(0, Bounds{0.0, 0.0, 5.0, 5.0});
+    index.insert(1, Bounds{40.0, 40.0, 45.0, 45.0});
+    index.insert(2, Bounds{-35.0, -35.0, 70.0, 70.0});
+
+    const auto nearOrigin = index.query(
+        Bounds{4.0, 4.0, 6.0, 6.0},
+        0.0
+    );
+
+    assert(std::find(
+        nearOrigin.begin(),
+        nearOrigin.end(),
+        0
+    ) != nearOrigin.end());
+
+    // Entry 1 is far away, while the large overflow entry 2 must always
+    // remain visible to preserve broad-phase completeness.
+    assert(std::find(
+        nearOrigin.begin(),
+        nearOrigin.end(),
+        1
+    ) == nearOrigin.end());
+
+    assert(std::find(
+        nearOrigin.begin(),
+        nearOrigin.end(),
+        2
+    ) != nearOrigin.end());
+
+    const auto padded = index.query(
+        Bounds{0.0, 0.0, 5.0, 5.0},
+        35.0
+    );
+    assert(std::find(
+        padded.begin(),
+        padded.end(),
+        1
+    ) != padded.end());
+
+    std::vector<Bounds> rebuilt{
+        {-100.0, -100.0, -90.0, -90.0},
+        {100.0, 100.0, 110.0, 110.0}
+    };
+    index.rebuild(rebuilt);
+    assert(index.size() == rebuilt.size());
+    const auto afterRebuild = index.query(
+        Bounds{-95.0, -95.0, -85.0, -85.0}
+    );
+    assert(std::find(
+        afterRebuild.begin(),
+        afterRebuild.end(),
+        0
+    ) != afterRebuild.end());
+}
+
 void testProductionValidator() {
     std::vector<Instance> instances{
         {"p1", Part{"part-a", rectangle(10, 10), {}}},
@@ -1700,6 +1758,7 @@ int main() {
     testReadableValidationErrors();
     testMinimumSheets();
     testProductionValidator();
+    testSpatialIndexBroadPhase();
     testAdaptiveDestroyAndRepair();
     testAutomaticProductionRepair();
     testCandidateCollectorAndGlobalOptimizer();
