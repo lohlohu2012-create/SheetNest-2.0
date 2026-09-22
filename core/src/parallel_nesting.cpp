@@ -483,6 +483,10 @@ Result ParallelNestingController::run(
         best
     );
 
+    best.productionValidated = true;
+    best.productionValid = validation.valid;
+    best.productionIssueCount = validation.issues.size();
+
     if (options.onValidation) {
         options.onValidation(validation);
     }
@@ -493,15 +497,13 @@ Result ParallelNestingController::run(
         "; collision=" +
         std::to_string(validation.collisionCount) +
         ", gap=" +
-        std::to_string(validation.gapViolationCount) +
+        std::to_string(validation.gapCount) +
         ", margin=" +
-        std::to_string(validation.marginViolationCount) +
+        std::to_string(validation.marginCount) +
         ", duplicateIds=" +
         std::to_string(validation.duplicateIdCount) +
         ", missingIds=" +
-        std::to_string(validation.missingIdCount) +
-        ", unknownIds=" +
-        std::to_string(validation.unknownIdCount);
+        std::to_string(validation.missingIdCount);
 
     publish({
         NestingProgressPhase::ProductionValidation,
