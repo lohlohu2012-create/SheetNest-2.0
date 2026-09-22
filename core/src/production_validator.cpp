@@ -429,6 +429,42 @@ ProductionValidationReport validateProductionResult(
         }
     }
 
+    // An instance is considered accounted for when it is either placed
+    // or explicitly present in result.unplaced. This keeps partial/cancelled
+    // results structurally valid while still detecting silently lost IDs.
+    for (const auto& id : result.unplaced) {
+        if (!outputIds.insert(id).second) {
+            appendIssue(
+                report,
+                {
+                    ProductionValidationIssueType::DuplicateId,
+                    std::numeric_limits<std::size_t>::max(),
+                    id,
+                    {},
+                    2.0,
+                    1.0,
+                    "ID повторяется между placed/unplaced или внутри unplaced: " +
+                        id
+                }
+            );
+        }
+
+        if (!findInstance(instanceById, id)) {
+            appendIssue(
+                report,
+                {
+                    ProductionValidationIssueType::MissingId,
+                    std::numeric_limits<std::size_t>::max(),
+                    id,
+                    {},
+                    0.0,
+                    1.0,
+                    "В unplaced указан неизвестный ID: " + id
+                }
+            );
+        }
+    }
+
     for (const auto& instance : instances) {
         if (outputIds.find(instance.id) == outputIds.end()) {
             appendIssue(
@@ -440,7 +476,7 @@ ProductionValidationReport validateProductionResult(
                     {},
                     0.0,
                     1.0,
-                    "Instance не найден в результате раскладки: " +
+                    "Instance не найден ни среди размещённых, ни среди unplaced: " +
                         instance.id
                 }
             );
