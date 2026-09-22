@@ -68,6 +68,11 @@ private:
     void stepAdaptiveRepairAnimation(int direction);
     void advanceAdaptiveRepairAnimation();
     void updateAdaptiveRepairAnimationUi();
+    void toggleLaserAnimation();
+    void pauseLaserAnimation();
+    void resetLaserAnimation();
+    void advanceLaserAnimation();
+    void updateLaserAnimationUi();
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
@@ -110,6 +115,11 @@ private:
     QCheckBox* rotation90_{};
     QCheckBox* rotation180_{};
     QCheckBox* rotation270_{};\n    QCheckBox* cuttingRouteCheck_{};
+    QPushButton* laserPlayButton_{};
+    QPushButton* laserPauseButton_{};
+    QPushButton* laserResetButton_{};
+    QComboBox* laserSpeedCombo_{};
+    QLabel* laserStageLabel_{};
 
     QLabel* fileLabel_{};
     QLabel* partCountLabel_{};
@@ -153,6 +163,9 @@ private:
 
     QTimer* repairAnimationTimer_{};
     QTimer* calculationWatchdog_{};
+    QTimer* laserAnimationTimer_{};
+    bool laserAnimationPlaying_{false};
+    double laserAnimationProgress_{1.0};
     qint64 calculationStartedMs_{0};
     qint64 lastProgressMs_{0};
     bool watchdogTriggered_{false};
