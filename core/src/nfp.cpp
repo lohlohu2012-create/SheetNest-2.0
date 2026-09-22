@@ -1133,35 +1133,109 @@ std::vector<Point> pointsOnFeasibilityBoundary(
         points.push_back(p);
     };
 
-    // When the number of segments exceeds the global budget, favor
-    // the longest segments and reserve part of the budget for an interior
-    // sample. Endpoint-only sampling is especially weak on long feasibility
-    // edges because both endpoints can fail collision checks while the middle
-    // of the same edge is valid.
+    // When the number of segments exceeds the global budget, do not
+    // discard whole spatial regions merely because their segments are short.
+    // The candidate budget is deliberately split between:
+    //   1) spatially stratified segments covering the full boundary order;
+    //   2) the longest segments, which preserve dense coverage on large
+    //      feasibility edges.
+    // Each selected segment contributes an endpoint and, when useful, an
+    // interior midpoint. This keeps the search continuous without allowing
+    // one long edge to monopolize the candidate budget.
     if (segments.size() >= budget) {
         const std::size_t selectedSegments =
             std::max<std::size_t>(1, budget / 2);
 
+        std::vector<std::size_t> spatialOrder(segments.size());
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            spatialOrder[i] = i;
+        }
+
         std::sort(
-            segments.begin(),
-            segments.end(),
-            [](const SegmentWork& a, const SegmentWork& b) {
-                if (std::abs(a.length - b.length) > kPointEps) {
-                    return a.length > b.length;
+            spatialOrder.begin(),
+            spatialOrder.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
                 }
-                return std::tie(a.bestY, a.bestX) <
-                       std::tie(b.bestY, b.bestX);
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
             }
         );
 
-        segments.resize(
-            std::min<std::size_t>(
-                segments.size(),
-                selectedSegments
-            )
+        std::vector<std::size_t> lengthOrder(segments.size());
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            lengthOrder[i] = i;
+        }
+
+        std::sort(
+            lengthOrder.begin(),
+            lengthOrder.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].length - segments[b].length) > kPointEps) {
+                    return segments[a].length > segments[b].length;
+                }
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
+                }
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
+            }
         );
 
-        for (const auto& work : segments) {
+        std::vector<std::size_t> selected;
+        selected.reserve(selectedSegments);
+        std::vector<bool> selectedFlags(segments.size(), false);
+
+        // First reserve half of the selected slots across the complete
+        // spatially ordered boundary. Evenly spaced indices guarantee that
+        // short/isolated feasibility segments remain visible.
+        const std::size_t spatialSlots =
+            std::max<std::size_t>(1, selectedSegments / 2);
+        for (std::size_t slot = 0;
+             slot < spatialSlots && selected.size() < selectedSegments;
+             ++slot) {
+            const std::size_t index =
+                (slot * segments.size()) /
+                std::max<std::size_t>(1, spatialSlots);
+            const std::size_t clamped =
+                std::min(index, segments.size() - 1);
+
+            if (!selectedFlags[spatialOrder[clamped]]) {
+                selected.push_back(spatialOrder[clamped]);
+                selectedFlags[spatialOrder[clamped]] = true;
+            }
+        }
+
+        // Fill the remaining slots with the longest segments, but only after
+        // the global boundary coverage has been reserved.
+        for (const auto index : lengthOrder) {
+            if (selected.size() >= selectedSegments) break;
+            if (selectedFlags[index]) continue;
+            selected.push_back(index);
+            selectedFlags[index] = true;
+        }
+
+        std::sort(
+            selected.begin(),
+            selected.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
+                }
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
+            }
+        );
+
+        for (const auto index : selected) {
+            const auto& work = segments[index];
             const Point a = work.segment.a;
             const Point b = work.segment.b;
 
@@ -1172,8 +1246,9 @@ std::vector<Point> pointsOnFeasibilityBoundary(
             }
         }
 
-        for (const auto& work : segments) {
+        for (const auto index : selected) {
             if (points.size() >= budget) break;
+            const auto& work = segments[index];
             if (work.length + kPointEps < spacing) continue;
 
             appendPoint({
