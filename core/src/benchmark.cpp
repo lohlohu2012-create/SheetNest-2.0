@@ -25,6 +25,9 @@ BenchmarkCase runCase(
     benchmark.skipped = result.unplaced.size();
     benchmark.placed = instances.size() - benchmark.skipped;
     benchmark.utilization = result.utilization;
+    benchmark.candidateChecks = result.stats.candidateChecks;
+    benchmark.collisionChecks = result.stats.collisionChecks;
+    benchmark.nfpChecks = result.stats.nfpChecks;
     return benchmark;
 }
 
