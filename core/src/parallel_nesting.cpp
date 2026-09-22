@@ -141,6 +141,11 @@ Result ParallelNestingController::run(
     const auto control = impl_->control;
     const auto started = Clock::now();
 
+    Options optimizerOptions = nestingOptions;
+    optimizerOptions.iterations = 1;
+    optimizerOptions.enableOptimizer = true;
+    optimizerOptions.control = control;
+
     Result best;
     best.utilization = -1.0;
     best.unplaced.reserve(instances.size());
@@ -375,7 +380,7 @@ Result ParallelNestingController::run(
         optimizeNestingResult(
             instances,
             sheet,
-            iterationOptions,
+            optimizerOptions,
             candidate
         );
 
