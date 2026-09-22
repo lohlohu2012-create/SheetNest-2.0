@@ -358,6 +358,108 @@ ENDSEC
 EOF
 )DXF";
 
+const char* kComplexContoursDxf = R"DXF(
+0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+CONVEX
+70
+1
+10
+0
+20
+0
+10
+40
+20
+10
+40
+20
+10
+0
+20
+20
+0
+LWPOLYLINE
+8
+CONCAVE
+70
+1
+10
+60
+20
+0
+10
+120
+20
+0
+10
+120
+20
+10
+10
+95
+20
+10
+10
+95
+20
+38
+10
+85
+20
+38
+10
+85
+20
+10
+10
+60
+20
+10
+0
+LWPOLYLINE
+8
+DEGENERATE
+70
+1
+10
+140
+20
+0
+10
+170
+20
+0
+10
+170
+20
+0.0000000001
+10
+170
+20
+20
+10
+155
+20
+20
+10
+140
+20
+20
+10
+140
+20
+0
+ENDSEC
+0
+EOF
+)DXF";
+
 const char* kDegenerateArcDxf = R"DXF(
 0
 SECTION
@@ -720,6 +822,23 @@ void testNfpUnionAndCache() {
 }
 
 void testNfpComplexContourMatrix() {
+    const auto dxf = importDxf(kComplexContoursDxf, 0.001);
+    assert(dxf.valid());
+    assert(dxf.contours.size() == 3);
+    const auto dxfParts = partsFromDxf(dxf);
+    assert(dxfParts.size() == 3);
+    for (const auto& part : dxfParts) {
+        assert(part.outer.size() >= 4);
+        const auto dxfNfp = nfp::noFitPolygons(
+            dxfParts.front().outer,
+            part.outer,
+            0,
+            0.5
+        );
+        assert(!dxfNfp.empty());
+    }
+
+
     nfp::clearCache();
 
     // Convex: baseline must be non-empty and deterministic.
