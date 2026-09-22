@@ -3,9 +3,30 @@
 #include "geometry.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 namespace sheetnest::nfp {
+
+struct NfpRunControl {
+    std::function<bool()> shouldStop;
+    std::size_t maxInputVertices{512};
+    std::size_t maxConvexPieces{128};
+    std::size_t maxPairwisePolygons{4096};
+    std::size_t maxUnionSegments{20000};
+    std::size_t* timeoutCount{};
+    std::size_t* complexityFallbackCount{};
+
+    bool stop() const {
+        if (!shouldStop || !shouldStop()) return false;
+        if (timeoutCount) ++(*timeoutCount);
+        return true;
+    }
+
+    void complexityFallback() const {
+        if (complexityFallbackCount) ++(*complexityFallbackCount);
+    }
+};
 
 struct CacheStats {
     std::size_t hits{};
@@ -37,14 +58,16 @@ std::vector<Polygon> noFitPolygons(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation = 0,
-    double clearanceMm = 0.0
+    double clearanceMm = 0.0,
+    const NfpRunControl* control = nullptr
 );
 
 std::vector<Point> noFitVertices(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation = 0,
-    double clearanceMm = 0.0
+    double clearanceMm = 0.0,
+    const NfpRunControl* control = nullptr
 );
 
 FeasibilityRegion feasibilityRegion(
@@ -55,7 +78,8 @@ FeasibilityRegion feasibilityRegion(
     double minY,
     double maxX,
     double maxY,
-    double clearanceMm = 0.0
+    double clearanceMm = 0.0,
+    const NfpRunControl* control = nullptr
 );
 
 std::vector<Point> pointsOnFeasibilityBoundary(
