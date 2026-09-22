@@ -2036,6 +2036,157 @@ int main() {
     testSpatialIndexBroadPhase();
     testAdaptiveDestroyAndRepair();
     testAdaptiveRepairLocalityAndDeduplication();
-    testAdaptiveRepairConflictGraph();
+    
+void testAdaptiveRepairNewCollisionPriority() {
+    std::vector<Instance> instances{
+        {"priority-a", Part{"priority-a-part", rectangle(10, 10), {}}},
+        {"priority-b", Part{"priority-b-part", rectangle(10, 10), {}}},
+        {"priority-c", Part{"priority-c-part", rectangle(10, 10), {}}},
+        {"priority-d", Part{"priority-d-part", rectangle(10, 10), {}}},
+        {"priority-e", Part{"priority-e-part", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{120, 100, 2.0};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 2;
+    options.gapMm = 2.0;
+    options.adaptiveRepairMaxNeighbors = 8;
+    options.adaptiveRepairRounds = 3;
+    options.autoRepairAttempts = 1;
+    options.autoRepairTimeBudgetMs = 5000;
+
+    // Phase 1: the first repair is deliberately limited to A/B.
+    // C is valid at its original position, while D/E form an independent
+    // 1.5 mm gap violation that must remain for the next hierarchy level.
+    Result firstBroken;
+    firstBroken.sheets = {{
+        {"priority-a", 2.0, 2.0, 0},
+        {"priority-b", 8.0, 2.0, 0},
+        {"priority-c", 25.0, 2.0, 0},
+        {"priority-d", 36.5, 2.0, 0},
+        {"priority-e", 48.0, 2.0, 0}
+    }};
+
+    const auto beforeFirst =
+        validateProductionResult(instances, sheet, options, firstBroken);
+    assert(beforeFirst.collisionCount >= 1);
+    assert(beforeFirst.gapViolationCount >= 1);
+
+    // Repair the original collision neighborhood first.
+    std::vector<std::string> extracted;
+    const bool firstRepair =
+        adaptiveDestroyAndRepairResult(
+            instances,
+            sheet,
+            options,
+            {"priority-a", "priority-b"},
+            firstBroken,
+            &extracted
+        );
+    assert(firstRepair);
+
+    const auto afterFirst =
+        validateProductionResult(instances, sheet, options, firstBroken);
+    assert(afterFirst.collisionCount == 0);
+
+    // Deterministically expose a NEW Collision after the first repair by
+    // moving C onto the repaired A position. This is intentional test
+    // instrumentation: it makes the regression independent of optimizer
+    // randomness while exercising the exact revalidation/re-prioritization
+    // path required in production.
+    const auto repairedA = std::find_if(
+        firstBroken.sheets[0].begin(),
+        firstBroken.sheets[0].end(),
+        [](const Placement& p) { return p.id == "priority-a"; }
+    );
+    assert(repairedA != firstBroken.sheets[0].end());
+
+    auto injectedC = std::find_if(
+        firstBroken.sheets[0].begin(),
+        firstBroken.sheets[0].end(),
+        [](const Placement& p) { return p.id == "priority-c"; }
+    );
+    assert(injectedC != firstBroken.sheets[0].end());
+    injectedC->x = repairedA->x;
+    injectedC->y = repairedA->y;
+
+    const auto afterInjectedCollision =
+        validateProductionResult(instances, sheet, options, firstBroken);
+    assert(afterInjectedCollision.collisionCount >= 1);
+    assert(afterInjectedCollision.gapViolationCount >= 1);
+
+    // Phase 2: Adaptive Repair must see the newly exposed Collision first,
+    // validate it again, and only then enter Gap processing.
+    ProductionValidationReport report;
+    const bool repaired =
+        repairProductionResult(
+            instances,
+            sheet,
+            options,
+            firstBroken,
+            &report
+        );
+    assert(repaired);
+    assert(report.valid);
+    assert(!report.adaptiveHistory.empty());
+
+    bool sawNewCollisionState = false;
+    bool sawCollisionResolved = false;
+    bool sawGapAfterCollision = false;
+    std::size_t lastSequence = 0;
+    std::size_t lastLevel = 0;
+
+    for (const auto& round : report.adaptiveHistory) {
+        assert(round.validationSequence > lastSequence);
+        lastSequence = round.validationSequence;
+
+        Result after;
+        after.sheets = round.afterSheets;
+        const auto validation =
+            validateProductionResult(instances, sheet, options, after);
+
+        assert(round.collisionCountAfter == validation.collisionCount);
+        assert(round.gapViolationCountAfter == validation.gapViolationCount);
+        assert(round.validAfter == validation.valid);
+
+        if (round.repairedLevel == 0) {
+            sawNewCollisionState = true;
+
+            // A Collision-level repair is allowed to expose another
+            // Collision. It must be reported by the immediate validator.
+            if (round.collisionCountAfter > 0) {
+                assert(!round.conflictIds.empty());
+                assert(!round.conflictLevels.empty());
+                assert(!round.conflictLevels.front().empty());
+            } else {
+                sawCollisionResolved = true;
+            }
+        }
+
+        if (round.repairedLevel == 1) {
+            // Gap is legal to process only after Collision validation has
+            // reported zero remaining collisions.
+            assert(sawCollisionResolved);
+            assert(round.collisionCountAfter == 0);
+            assert(round.conflictLevels.size() >= 2);
+            assert(!round.conflictLevels[1].empty());
+            sawGapAfterCollision = true;
+        }
+
+        // The hierarchy must not jump from Collision directly to a dependent
+        // level while a Collision is still present.
+        if (lastSequence > 0 && round.repairedLevel > lastLevel + 1) {
+            assert(false);
+        }
+        lastLevel = round.repairedLevel;
+    }
+
+    assert(sawNewCollisionState);
+    assert(sawCollisionResolved);
+    assert(sawGapAfterCollision);
+}
+
+testAdaptiveRepairConflictGraph();
     testAutomaticProductionRepair();
 }
