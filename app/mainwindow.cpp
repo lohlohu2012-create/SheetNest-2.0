@@ -865,6 +865,73 @@ void MainWindow::connectUi() {
                         .arg(static_cast<qulonglong>(benchmarkResult.optimized.sheetsEliminated))
                         .arg(static_cast<qulonglong>(benchmarkResult.optimized.optimizerPasses))
                 );
+
+                const double timeDelta =
+                    benchmarkResult.optimized.milliseconds -
+                    benchmarkResult.baseline.milliseconds;
+                const double timeChangePercent =
+                    benchmarkResult.baseline.milliseconds > 1e-9
+                        ? (
+                            timeDelta /
+                            benchmarkResult.baseline.milliseconds
+                        ) * 100.0
+                        : 0.0;
+                const long long sheetDelta =
+                    static_cast<long long>(
+                        benchmarkResult.optimized.sheets
+                    ) -
+                    static_cast<long long>(
+                        benchmarkResult.baseline.sheets
+                    );
+                const long long placedDelta =
+                    static_cast<long long>(
+                        benchmarkResult.optimized.placed
+                    ) -
+                    static_cast<long long>(
+                        benchmarkResult.baseline.placed
+                    );
+                const double utilizationDelta =
+                    (
+                        benchmarkResult.optimized.utilization -
+                        benchmarkResult.baseline.utilization
+                    ) * 100.0;
+
+                appendLog(
+                    QString(
+                        "Benchmark итог: время %1%2%, листов %3%4, "
+                        "размещено %5%6, использование %7%8 п.п."
+                    )
+                        .arg(
+                            timeChangePercent >= 0.0 ? "+" : ""
+                        )
+                        .arg(
+                            timeChangePercent,
+                            0,
+                            'f',
+                            1
+                        )
+                        .arg(
+                            sheetDelta >= 0 ? "+" : ""
+                        )
+                        .arg(
+                            sheetDelta
+                        )
+                        .arg(
+                            placedDelta >= 0 ? "+" : ""
+                        )
+                        .arg(
+                            placedDelta
+                        )
+                        .arg(
+                            utilizationDelta >= 0.0 ? "+" : ""
+                        )
+                        .arg(
+                            utilizationDelta,
+                            0,
+                            'f',
+                            2
+                        )
+                );
             } catch (const std::exception& error) {
                 QMessageBox::critical(
                     this,
