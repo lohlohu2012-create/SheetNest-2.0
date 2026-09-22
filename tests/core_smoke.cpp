@@ -2006,37 +2006,6 @@ void testInterlockIntoHole() {
     assert(foundInsert);
 }
 
-} // namespace
-
-int main() {
-    testGeometry();
-    testDxfHoleRecovery();
-    testLayerSeparation();
-    testLineArcClosure();
-    testBulgePolyline();
-    testLegacyPolyline();
-    testMultipleParts();
-    testOpenPolylineJoining();
-    testDegenerateArc();
-    testDxfModelPipeline();
-    testPerPartQuantitiesAndUnitIds();
-    testDxfExportRoundTrip();
-    testCollinearConcaveNfpRegression();
-    testClearanceCornerSampling();
-    testNfpMinkowski();
-    testContinuousConcaveFeasibilityRegion();
-    testFeasibilitySamplingBudget();
-    testFeasibilityGap();
-    testNfpUnionAndCache();
-    testConcaveUnionNfp();
-    testConcaveNfpCandidates();
-    testReadableValidationErrors();
-    testMinimumSheets();
-    testProductionValidator();
-    testSpatialIndexBroadPhase();
-    testAdaptiveDestroyAndRepair();
-    testAdaptiveRepairLocalityAndDeduplication();
-    
 void testAdaptiveRepairNewCollisionPriority() {
     std::vector<Instance> instances{
         {"priority-a", Part{"priority-a-part", rectangle(10, 10), {}}},
@@ -2187,7 +2156,39 @@ void testAdaptiveRepairNewCollisionPriority() {
     assert(sawGapAfterCollision);
 }
 
-    testAdaptiveRepairNewCollisionPriority();
+
+} // namespace
+
+int main() {
+    testGeometry();
+    testDxfHoleRecovery();
+    testLayerSeparation();
+    testLineArcClosure();
+    testBulgePolyline();
+    testLegacyPolyline();
+    testMultipleParts();
+    testOpenPolylineJoining();
+    testDegenerateArc();
+    testDxfModelPipeline();
+    testPerPartQuantitiesAndUnitIds();
+    testDxfExportRoundTrip();
+    testCollinearConcaveNfpRegression();
+    testClearanceCornerSampling();
+    testNfpMinkowski();
+    testContinuousConcaveFeasibilityRegion();
+    testFeasibilitySamplingBudget();
+    testFeasibilityGap();
+    testNfpUnionAndCache();
+    testConcaveUnionNfp();
+    testConcaveNfpCandidates();
+    testReadableValidationErrors();
+    testMinimumSheets();
+    testProductionValidator();
+    testSpatialIndexBroadPhase();
+    testAdaptiveDestroyAndRepair();
+    testAdaptiveRepairLocalityAndDeduplication();
+    
+ 
 testAdaptiveRepairConflictGraph();
     testAutomaticProductionRepair();
 }
