@@ -39,6 +39,45 @@ const char* phaseMessage(NestingProgressPhase phase) {
 
 } // namespace
 
+NestingCandidateCollector::NestingCandidateCollector(
+    std::size_t capacity
+)
+    : capacity_(std::max<std::size_t>(1, capacity)) {
+    candidates_.reserve(capacity_);
+}
+
+void NestingCandidateCollector::add(Result candidate) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = std::lower_bound(
+        candidates_.begin(),
+        candidates_.end(),
+        candidate,
+        [](const Result& existing, const Result& value) {
+            return betterResult(existing, value);
+        }
+    );
+
+    candidates_.insert(
+        it,
+        std::move(candidate)
+    );
+
+    if (candidates_.size() > capacity_) {
+        candidates_.resize(capacity_);
+    }
+}
+
+std::vector<Result> NestingCandidateCollector::snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return candidates_;
+}
+
+std::size_t NestingCandidateCollector::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return candidates_.size();
+}
+
 struct ParallelNestingController::Impl {
     std::shared_ptr<NestingRunControl> control =
         std::make_shared<NestingRunControl>();
@@ -113,6 +152,7 @@ Result ParallelNestingController::run(
     std::mutex progressMutex;
     std::atomic<std::size_t> nextIteration{0};
     std::atomic<std::size_t> completedIterations{0};
+    NestingCandidateCollector collector(options.candidateCapacity);
 
     auto publish = [&](NestingProgress event) {
         if (!options.onProgress) return;
@@ -214,6 +254,7 @@ Result ParallelNestingController::run(
                 ) +
                 static_cast<std::uint32_t>(workerIndex);
             iterationOptions.control = control;
+            iterationOptions.enableOptimizer = false;
 
             const Result candidate =
                 nest(
@@ -221,6 +262,8 @@ Result ParallelNestingController::run(
                     sheet,
                     iterationOptions
                 );
+
+            collector.add(candidate);
 
             {
                 std::lock_guard<std::mutex> lock(resultMutex);
@@ -280,6 +323,69 @@ Result ParallelNestingController::run(
     for (auto& thread : workers) {
         if (thread.joinable()) thread.join();
     }
+
+    const collected = collector.snapshot();
+
+    publish({
+        NestingProgressPhase::CandidatesCollected,
+        0,
+        workerCount,
+        completedIterations.load(
+            std::memory_order_relaxed
+        ),
+        totalIterations,
+        instances.size() - best.unplaced.size(),
+        best.unplaced.size(),
+        best.sheets.size(),
+        best.utilization,
+        0,
+        0,
+        "Candidate Collector: собрано " +
+            std::to_string(collected.size()) +
+            " лучших кандидатов"
+    });
+
+    Result optimizedBest = best;
+    for (std::size_t i = 0; i < collected.size(); ++i) {
+        if (control->shouldStop()) break;
+
+        Result candidate = collected[i];
+
+        publish({
+            NestingProgressPhase::GlobalOptimization,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - candidate.unplaced.size(),
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            candidate.utilization,
+            0,
+            0,
+            "Global Optimizer: кандидат " +
+                std::to_string(i + 1) +
+                "/" +
+                std::to_string(collected.size()) +
+                " → refill → exchange → sheet elimination → local repack"
+        });
+
+        optimizeNestingResult(
+            instances,
+            sheet,
+            iterationOptions,
+            candidate
+        );
+
+        if (optimizedBest.utilization < 0.0 ||
+            betterResult(candidate, optimizedBest)) {
+            optimizedBest = std::move(candidate);
+        }
+    }
+
+    best = std::move(optimizedBest);
 
     if (best.utilization < 0.0) {
         best.utilization = 0.0;
