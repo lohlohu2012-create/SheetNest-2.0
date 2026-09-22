@@ -7,8 +7,7 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/parallel_nesting.hpp"
-#include "sheetnest/production_validation.hpp"
-#include "sheetnest/production_validation.hpp"
+#include "sheetnest/production_validator.hpp"
 
 #include <cassert>
 #include <cmath>
