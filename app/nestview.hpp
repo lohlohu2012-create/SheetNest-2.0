@@ -18,7 +18,8 @@ public:
         bool showConflict = true,
         bool showExtracted = true,
         bool showMoved = true,
-        bool showStationary = true
+        bool showStationary = true,
+        int animationStage = -1
     );
 
     void clearResult();
