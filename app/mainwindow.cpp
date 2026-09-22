@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <numeric>
 
 using namespace sheetnest;
 
@@ -1839,6 +1840,18 @@ void MainWindow::exportBenchmarkResults() {
         object["exchangeAttempts"] = static_cast<qint64>(b.exchangeAttempts);
         object["sheetsEliminated"] = static_cast<qint64>(b.sheetsEliminated);
         object["optimizerPasses"] = static_cast<qint64>(b.optimizerPasses);
+        object["nfpTimeouts"] = static_cast<qint64>(b.nfpTimeouts);
+        object["nfpComplexityFallbacks"] = static_cast<qint64>(b.nfpComplexityFallbacks);
+        QJsonArray placed;
+        for (const auto& id : b.placedInstanceIds) {
+            placed.append(QString::fromStdString(id));
+        }
+        object["placedInstanceIds"] = placed;
+        QJsonArray skipped;
+        for (const auto& id : b.skippedInstanceIds) {
+            skipped.append(QString::fromStdString(id));
+        }
+        object["skippedInstanceIds"] = skipped;
         return object;
     };
 
@@ -1865,7 +1878,7 @@ void MainWindow::exportBenchmarkResults() {
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses\n";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,placedInstanceIds,skippedInstanceIds\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -1887,7 +1900,23 @@ void MainWindow::exportBenchmarkResults() {
                 QString::number(static_cast<qulonglong>(b.refillMoves)),
                 QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
                 QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
-                QString::number(static_cast<qulonglong>(b.optimizerPasses))
+                QString::number(static_cast<qulonglong>(b.optimizerPasses)),
+                QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+                QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+                QString::fromStdString(std::accumulate(
+                    b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
+                    std::string{},
+                    [](std::string a, const std::string& id) {
+                        return a.empty() ? id : a + ";" + id;
+                    }
+                )),
+                QString::fromStdString(std::accumulate(
+                    b.skippedInstanceIds.begin(), b.skippedInstanceIds.end(),
+                    std::string{},
+                    [](std::string a, const std::string& id) {
+                        return a.empty() ? id : a + ";" + id;
+                    }
+                ))
             };
 
             for (int i = 0; i < 17; ++i) {
