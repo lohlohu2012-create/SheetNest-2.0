@@ -1213,6 +1213,11 @@ bool repairProductionResult(
                     round + 1, levelIds, levelExtractedIds,
                     conflictLevels, levelBefore, levelCandidate
                 ));
+                auto& sublevelSnapshot = adaptiveHistory.back();
+                sublevelSnapshot.collisionCountAfter = levelReport.collisionCount;
+                sublevelSnapshot.gapViolationCountAfter = levelReport.gapViolationCount;
+                sublevelSnapshot.marginViolationCountAfter = levelReport.marginViolationCount;
+                sublevelSnapshot.validAfter = levelReport.valid;
 
                 localCandidate = std::move(levelCandidate);
                 adaptiveReport = levelReport;
