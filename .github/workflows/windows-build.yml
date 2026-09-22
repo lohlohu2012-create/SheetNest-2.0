@@ -32,7 +32,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Install application
-        run: cmake --install build --config Release --prefix dist
+        run: cmake --install build --config Release --prefix "$env:GITHUB_WORKSPACE\dist"
 
       - name: Package
         run: cpack --config build/CPackConfig.cmake -C Release -B dist
