@@ -2009,7 +2009,66 @@ Result nest(
         auto attemptOrder = order;
 
         if (attempt > 0) {
-            std::shuffle(attemptOrder.begin(), attemptOrder.end(), rng);
+            if (attempt % 3 == 1) {
+                // Small-first restart: explicitly targets narrow residual
+                // spaces that can be missed when large parts monopolize the
+                // candidate order.
+                std::stable_sort(
+                    attemptOrder.begin(),
+                    attemptOrder.end(),
+                    [&](std::size_t a, std::size_t b) {
+                        const double areaA =
+                            materialArea(instances[a].part);
+                        const double areaB =
+                            materialArea(instances[b].part);
+
+                        if (std::abs(areaA - areaB) > kEps) {
+                            return areaA < areaB;
+                        }
+
+                        return instances[a].id < instances[b].id;
+                    }
+                );
+            } else if (attempt % 3 == 2) {
+                // Large-dimension-first restart: different from pure area
+                // ordering and useful for long/narrow details.
+                std::stable_sort(
+                    attemptOrder.begin(),
+                    attemptOrder.end(),
+                    [&](std::size_t a, std::size_t b) {
+                        const auto ba =
+                            bounds(instances[a].part.outer);
+                        const auto bb =
+                            bounds(instances[b].part.outer);
+
+                        const double da =
+                            std::max(ba.width(), ba.height());
+                        const double db =
+                            std::max(bb.width(), bb.height());
+
+                        if (std::abs(da - db) > kEps) {
+                            return da > db;
+                        }
+
+                        const double areaA =
+                            materialArea(instances[a].part);
+                        const double areaB =
+                            materialArea(instances[b].part);
+
+                        if (std::abs(areaA - areaB) > kEps) {
+                            return areaA > areaB;
+                        }
+
+                        return instances[a].id < instances[b].id;
+                    }
+                );
+            } else {
+                std::shuffle(
+                    attemptOrder.begin(),
+                    attemptOrder.end(),
+                    rng
+                );
+            }
         }
 
         NestingStats attemptStats;
