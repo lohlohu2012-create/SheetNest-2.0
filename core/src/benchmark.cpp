@@ -28,6 +28,10 @@ BenchmarkCase runCase(
     benchmark.candidateChecks = result.stats.candidateChecks;
     benchmark.collisionChecks = result.stats.collisionChecks;
     benchmark.nfpChecks = result.stats.nfpChecks;
+    benchmark.refillMoves = result.stats.refillMoves;
+    benchmark.exchangeAttempts = result.stats.exchangeAttempts;
+    benchmark.sheetsEliminated = result.stats.sheetsEliminated;
+    benchmark.optimizerPasses = result.stats.optimizerPasses;
     return benchmark;
 }
 
