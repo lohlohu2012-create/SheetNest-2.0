@@ -32,6 +32,16 @@ struct ProductionValidationIssue {
     std::string message;
 };
 
+struct AdaptiveRepairChange {
+    std::size_t sheetIndex{};
+    Placement before{};
+    Placement after{};
+    bool conflictGroup{};
+    bool extracted{};
+    bool moved{};
+    bool stationary{};
+};
+
 struct ProductionValidationReport {
     bool valid{true};
     std::size_t checkedPlacements{};
@@ -46,6 +56,11 @@ struct ProductionValidationReport {
     std::size_t adaptiveRepairGroupSize{};
     std::uint64_t repairElapsedMs{};
     bool repaired{};
+    std::vector<AdaptiveRepairChange> adaptiveChanges;
+    std::vector<std::string> adaptiveConflictIds;
+    std::vector<std::string> adaptiveExtractedIds;
+    std::vector<std::string> adaptiveMovedIds;
+    std::vector<std::string> adaptiveStationaryIds;
     std::vector<ProductionValidationIssue> issues;
 };
 
