@@ -961,6 +961,18 @@ void testNfpTimeoutRecovery() {
     std::sort(ids.begin(), ids.end());
     assert(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
     assert(placed + result.unplaced.size() <= parts.size());
+    assert(result.instanceTelemetry.size() == parts.size());
+    bool sawTimedOutInstance = false;
+    for (const auto& telemetry : result.instanceTelemetry) {
+        if (telemetry.placed) {
+            assert(telemetry.reason == NestingFailureReason::None);
+        } else {
+            sawTimedOutInstance =
+                sawTimedOutInstance ||
+                telemetry.reason == NestingFailureReason::Timeout;
+        }
+    }
+    assert(sawTimedOutInstance);
 }
 
 void testNfpInternalTimeoutAndComplexityGuard() {
@@ -2421,6 +2433,15 @@ void testParallelNestingCancellation() {
     (void)result;
     assert(controller.cancelRequested());
     assert(completed.load(std::memory_order_relaxed) < parallel.iterations);
+    assert(result.instanceTelemetry.size() == instances.size());
+    bool sawCancelledInstance = false;
+    for (const auto& telemetry : result.instanceTelemetry) {
+        if (!telemetry.placed &&
+            telemetry.reason == NestingFailureReason::Cancelled) {
+            sawCancelledInstance = true;
+        }
+    }
+    assert(sawCancelledInstance);
 }
 
 void testDenseSmallPartPlacement() {
