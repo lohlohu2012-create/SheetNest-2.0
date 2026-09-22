@@ -1653,6 +1653,11 @@ void testAdaptiveRepairConflictGraph() {
     assert(report.valid);
     assert(report.adaptiveRepairRounds >= 1);
     assert(report.adaptiveRepairGroupSize >= 3);
+    if (!report.adaptiveHistory.empty()) {
+        const auto& levels = report.adaptiveHistory.front().conflictLevels;
+        assert(!levels.empty());
+        assert(!levels.front().empty());
+    }
 
     bool sawDStationary = false;
     for (const auto& change : report.adaptiveChanges) {
