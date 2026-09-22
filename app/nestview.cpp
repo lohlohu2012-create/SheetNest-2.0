@@ -8,6 +8,7 @@
 #include <QBrush>
 #include <QWheelEvent>
 #include <QPolygonF>
+#include <QPainterPath>
 #include <QGraphicsLineItem>
 #include <QGraphicsEllipseItem>
 
@@ -203,6 +204,11 @@ NestView::NestView(QWidget* parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setFrameShape(QFrame::NoFrame);
+}
+
+void NestView::setCuttingRouteVisible(bool visible) {
+    cuttingRouteVisible_ = visible;
+    viewport()->update();
 }
 
 void NestView::clearResult() {
