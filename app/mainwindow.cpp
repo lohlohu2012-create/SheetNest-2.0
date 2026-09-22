@@ -18,6 +18,12 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -297,6 +303,10 @@ void MainWindow::buildUi() {
     benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
     controlLayout->addWidget(benchmarkButton_);
 
+    benchmarkExportButton_ = new QPushButton("Экспорт результатов Benchmark");
+    benchmarkExportButton_->setEnabled(false);
+    controlLayout->addWidget(benchmarkExportButton_);
+
     controlLayout->addWidget(exportButton_);
 
     log_ = new QPlainTextEdit;
@@ -317,10 +327,12 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 9);
+    benchmarkTable_ = new QTableWidget(0, 13);
     benchmarkTable_->setHorizontalHeaderLabels({
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
-        "Использование", "Кандидаты", "Collision checks", "NFP checks"
+        "Использование", "Кандидаты", "Collision checks", "NFP checks",
+        "Refill moves", "Exchange attempts", "Sheets eliminated",
+        "Optimizer passes"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -430,6 +442,10 @@ void MainWindow::connectUi() {
         benchmark();
     });
 
+    connect(benchmarkExportButton_, &QPushButton::clicked, this, [this] {
+        exportBenchmarkResults();
+    });
+
     connect(materialCombo_,
             qOverload<int>(&QComboBox::currentIndexChanged),
             this,
@@ -529,17 +545,28 @@ void MainWindow::connectUi() {
         [this] {
             try {
                 const auto benchmarkResult = benchmarkWatcher_->result();
+                lastBenchmarkResult_ = benchmarkResult;
+                hasBenchmarkResult_ = true;
+                benchmarkExportButton_->setEnabled(true);
                 populateBenchmark(benchmarkResult);
                 appendLog(
-                    QString("Benchmark: базовый %1 мс / %2 листов / %3 кандидатов / %4 NFP; оптимизированный %5 мс / %6 листов / %7 кандидатов / %8 NFP.")
+                    QString("Benchmark: базовый %1 мс / %2 листов / %3 кандидатов / %4 NFP / refill %5 / exchange %6 / eliminated %7 / passes %8; оптимизированный %9 мс / %10 листов / %11 кандидатов / %12 NFP / refill %13 / exchange %14 / eliminated %15 / passes %16.")
                         .arg(benchmarkResult.baseline.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.baseline.sheets))
                         .arg(static_cast<qulonglong>(benchmarkResult.baseline.candidateChecks))
                         .arg(static_cast<qulonglong>(benchmarkResult.baseline.nfpChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.refillMoves))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.exchangeAttempts))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.sheetsEliminated))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.optimizerPasses))
                         .arg(benchmarkResult.optimized.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.optimized.sheets))
                         .arg(static_cast<qulonglong>(benchmarkResult.optimized.candidateChecks))
                         .arg(static_cast<qulonglong>(benchmarkResult.optimized.nfpChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.refillMoves))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.exchangeAttempts))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.sheetsEliminated))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.optimizerPasses))
                 );
             } catch (const std::exception& error) {
                 QMessageBox::critical(
@@ -784,10 +811,14 @@ void MainWindow::populateBenchmark(
             QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2),
             QString::number(static_cast<qulonglong>(b.candidateChecks)),
             QString::number(static_cast<qulonglong>(b.collisionChecks)),
-            QString::number(static_cast<qulonglong>(b.nfpChecks))
+            QString::number(static_cast<qulonglong>(b.nfpChecks)),
+            QString::number(static_cast<qulonglong>(b.refillMoves)),
+            QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
+            QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
+            QString::number(static_cast<qulonglong>(b.optimizerPasses))
         };
 
-        for (int column = 0; column < 9; ++column) {
+        for (int column = 0; column < 13; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
@@ -914,6 +945,8 @@ void MainWindow::benchmark() {
     const auto sheetCopy = sheet_;
     const auto optionsCopy = options_;
 
+    hasBenchmarkResult_ = false;
+    benchmarkExportButton_->setEnabled(false);
     setBusy(true);
     appendLog("Запущен benchmark: базовый поиск vs оптимизированный...");
 
@@ -965,6 +998,122 @@ sheetnest::BenchmarkResult MainWindow::performBenchmark(
         sheet,
         options
     );
+}
+
+void MainWindow::exportBenchmarkResults() {
+    if (!hasBenchmarkResult_) {
+        return;
+    }
+
+    const QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "Сохранить результаты Benchmark",
+        currentFile_.isEmpty()
+            ? "sheetnest-benchmark.csv"
+            : QFileInfo(currentFile_).completeBaseName() + "_benchmark.csv",
+        "CSV files (*.csv);;JSON files (*.json)"
+    );
+
+    if (fileName.isEmpty()) return;
+
+    auto appendCsvField = [](QString& row, const QString& value) {
+        QString escaped = value;
+        escaped.replace('"', """");
+        row += '"';
+        row += escaped;
+        row += '"';
+    };
+
+    auto benchmarkObject = [](const BenchmarkCase& b) {
+        QJsonObject object;
+        object["name"] = QString::fromStdString(b.name);
+        object["milliseconds"] = b.milliseconds;
+        object["sheets"] = static_cast<qint64>(b.sheets);
+        object["placed"] = static_cast<qint64>(b.placed);
+        object["skipped"] = static_cast<qint64>(b.skipped);
+        object["utilization"] = b.utilization;
+        object["candidateChecks"] = static_cast<qint64>(b.candidateChecks);
+        object["collisionChecks"] = static_cast<qint64>(b.collisionChecks);
+        object["nfpChecks"] = static_cast<qint64>(b.nfpChecks);
+        object["refillMoves"] = static_cast<qint64>(b.refillMoves);
+        object["exchangeAttempts"] = static_cast<qint64>(b.exchangeAttempts);
+        object["sheetsEliminated"] = static_cast<qint64>(b.sheetsEliminated);
+        object["optimizerPasses"] = static_cast<qint64>(b.optimizerPasses);
+        return object;
+    };
+
+    const QString suffix = QFileInfo(fileName).suffix().toLower();
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(
+            this,
+            "Экспорт Benchmark",
+            "Не удалось открыть файл для записи."
+        );
+        return;
+    }
+
+    if (suffix == "json") {
+        QJsonObject root;
+        root["exportedAt"] =
+            QDateTime::currentDateTime().toString(Qt::ISODate);
+        root["baseline"] = benchmarkObject(lastBenchmarkResult_.baseline);
+        root["optimized"] = benchmarkObject(lastBenchmarkResult_.optimized);
+
+        const QByteArray data =
+            QJsonDocument(root).toJson(QJsonDocument::Indented);
+        file.write(data);
+    } else {
+        QString csv;
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses
+";
+
+        const BenchmarkCase rows[] = {
+            lastBenchmarkResult_.baseline,
+            lastBenchmarkResult_.optimized
+        };
+
+        for (const auto& b : rows) {
+            QString row;
+            const QString values[] = {
+                QString::fromStdString(b.name),
+                QString::number(b.milliseconds, 'f', 3),
+                QString::number(static_cast<qulonglong>(b.sheets)),
+                QString::number(static_cast<qulonglong>(b.placed)),
+                QString::number(static_cast<qulonglong>(b.skipped)),
+                QString::number(b.utilization * 100.0, 'f', 4),
+                QString::number(static_cast<qulonglong>(b.candidateChecks)),
+                QString::number(static_cast<qulonglong>(b.collisionChecks)),
+                QString::number(static_cast<qulonglong>(b.nfpChecks)),
+                QString::number(static_cast<qulonglong>(b.refillMoves)),
+                QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
+                QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
+                QString::number(static_cast<qulonglong>(b.optimizerPasses))
+            };
+
+            for (int i = 0; i < 13; ++i) {
+                if (i > 0) row += ',';
+                appendCsvField(row, values[i]);
+            }
+            row += '
+';
+            csv += row;
+        }
+
+        file.write(csv.toUtf8());
+    }
+
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт Benchmark",
+            "Не удалось завершить запись файла."
+        );
+        return;
+    }
+
+    appendLog(QString("Результаты Benchmark сохранены: %1").arg(fileName));
+    statusBar()->showMessage("Benchmark экспортирован", 5000);
 }
 
 void MainWindow::exportDxf() {
@@ -1064,6 +1213,7 @@ void MainWindow::setBusy(bool busy) {
     calculateButton_->setEnabled(!busy && !instances_.empty());
     benchmarkButton_->setEnabled(!busy && !instances_.empty());
     exportButton_->setEnabled(!busy && !result_.sheets.empty());
+    benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
 
     progress_->setRange(0, busy ? 0 : 1);
     if (!busy) progress_->setValue(0);
