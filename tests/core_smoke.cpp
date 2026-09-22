@@ -1663,16 +1663,42 @@ void testAdaptiveRepairConflictGraph() {
     bool sawCollisionLevel = false;
     bool sawGapLevel = false;
     bool sawEStationary = false;
-    for (const auto& round : report.adaptiveHistory) {
-        if (!round.conflictLevels.empty()) {
-            if (round.conflictLevels.front().size() >= 3) {
-                sawCollisionLevel = true;
-            }
-            if (round.conflictLevels.size() >= 2 &&
-                !round.conflictLevels[1].empty()) {
-                sawGapLevel = true;
-            }
+    bool sawNewCollisionAfterRepair = false;
+    for (std::size_t i = 0; i < report.adaptiveHistory.size(); ++i) {
+        const auto& round = report.adaptiveHistory[i];
+        assert(!round.conflictLevels.empty());
+
+        // The snapshot must contain the validator result produced immediately
+        // after this exact sub-level. Re-run validation against afterSheets
+        // and compare every recorded physical violation count.
+        Result after;
+        after.sheets = round.afterSheets;
+        const auto afterValidation =
+            validateProductionResult(instances, sheet, options, after);
+        assert(round.collisionCountAfter == afterValidation.collisionCount);
+        assert(round.gapViolationCountAfter == afterValidation.gapViolationCount);
+        assert(round.marginViolationCountAfter == afterValidation.marginViolationCount);
+        assert(round.validAfter == afterValidation.valid);
+
+        if (!round.conflictLevels.empty() &&
+            round.conflictLevels.front().size() >= 3) {
+            sawCollisionLevel = true;
         }
+        if (round.conflictLevels.size() >= 2 &&
+            !round.conflictLevels[1].empty()) {
+            sawGapLevel = true;
+        }
+
+        // If a repair itself exposes a new Collision, the next adaptive
+        // sub-level/round must remain Collision-first; it must not jump to Gap.
+        if (round.collisionCountAfter > 0 && i + 1 < report.adaptiveHistory.size()) {
+            sawNewCollisionAfterRepair = true;
+            const auto& next = report.adaptiveHistory[i + 1];
+            assert(!next.conflictLevels.empty());
+            assert(!next.conflictLevels.front().empty());
+            assert(next.conflictIds.size() >= 1);
+        }
+
         for (const auto& change : round.changes) {
             if (change.before.id == "graph-e") {
                 sawEStationary = change.stationary;
@@ -1684,6 +1710,10 @@ void testAdaptiveRepairConflictGraph() {
     if (!report.adaptiveChanges.empty()) {
         assert(sawEStationary);
     }
+    // The scenario is also accepted when the first repair solves Collision
+    // immediately; the important regression is that any newly exposed
+    // Collision is revalidated and remains the highest-priority next level.
+    (void)sawNewCollisionAfterRepair;
 }
 
 
