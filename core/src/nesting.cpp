@@ -27,6 +27,7 @@ struct PlacedShape {
     Polygon outer;
     std::vector<Polygon> holes;
     Placement placement;
+    Bounds outerBounds{};
 };
 
 struct SheetState {
@@ -68,6 +69,7 @@ Polygon transformPolygon(const Polygon& p, int rotation, double x, double y) {
 PlacedShape transformed(const Instance& instance, int rotation, double x, double y) {
     PlacedShape result;
     result.outer = transformPolygon(instance.part.outer, rotation, x, y);
+    result.outerBounds = bounds(result.outer);
     result.placement = {instance.id, x, y, rotation};
 
     result.holes.reserve(instance.part.holes.size());
@@ -206,14 +208,27 @@ bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
 }
 
 bool conflict(const PlacedShape& a, const PlacedShape& b, double gap) {
+    const double requiredGap = std::max(0.0, gap);
+
+    // Broad phase: when the outer AABBs are farther apart than the required
+    // clearance, the exact true-shape test cannot possibly report a conflict.
+    // Keep the exact collision/clearance checks authoritative for all
+    // overlapping or near-touching bounding boxes.
+    if (a.outerBounds.maxX + requiredGap < b.outerBounds.minX - kEps ||
+        b.outerBounds.maxX + requiredGap < a.outerBounds.minX - kEps ||
+        a.outerBounds.maxY + requiredGap < b.outerBounds.minY - kEps ||
+        b.outerBounds.maxY + requiredGap < a.outerBounds.minY - kEps) {
+        return false;
+    }
+
     if (materialOverlap(a, b)) return true;
-    return minBoundaryDistance(a, b) + kEps < std::max(0.0, gap);
+    return minBoundaryDistance(a, b) + kEps < requiredGap;
 }
 
 Bounds combinedBounds(const std::vector<PlacedShape>& shapes, const PlacedShape& extra) {
-    Bounds result = bounds(extra.outer);
+    Bounds result = extra.outerBounds;
     for (const auto& shape : shapes) {
-        const auto b = bounds(shape.outer);
+        const auto& b = shape.outerBounds;
         result.minX = std::min(result.minX, b.minX);
         result.minY = std::min(result.minY, b.minY);
         result.maxX = std::max(result.maxX, b.maxX);
@@ -227,7 +242,7 @@ bool fitsSheet(
     const Sheet& sheet,
     double marginMm
 ) {
-    const auto b = bounds(shape.outer);
+    const auto& b = shape.outerBounds;
     const double margin = std::max(0.0, marginMm);
 
     return b.minX >= margin - kEps &&
@@ -1554,14 +1569,14 @@ bool compactResult(
                     target.shapes.back();
 
                 Bounds envelope =
-                    bounds(candidateShape.outer);
+                    candidateShape.outerBounds;
 
                 for (std::size_t i = 0;
                      i + 1 < target.shapes.size();
                      ++i) {
 
-                    const auto b =
-                        bounds(target.shapes[i].outer);
+                    const auto& b =
+                        target.shapes[i].outerBounds;
 
                     envelope.minX =
                         std::min(envelope.minX, b.minX);
