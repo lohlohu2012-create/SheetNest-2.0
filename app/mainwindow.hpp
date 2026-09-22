@@ -194,6 +194,11 @@ private:
     double laserContourProgress_{0.0};
     qint64 calculationStartedMs_{0};
     qint64 lastProgressMs_{0};
+    QString lastProgressStage_;
+    std::size_t lastProgressWorker_{0};
+    std::size_t lastProgressPlaced_{0};
+    std::size_t lastProgressSkipped_{0};
+    std::size_t lastProgressSheets_{0};
     bool watchdogTriggered_{false};
     bool userCancelRequested_{false};
 
