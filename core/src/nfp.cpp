@@ -313,7 +313,8 @@ Point outwardNormal(
 }
 
 std::vector<SegmentPiece> unionBoundaryPieces(
-    const std::vector<Polygon>& polygons
+    const std::vector<Polygon>& polygons,
+    const NfpRunControl* control
 ) {
     std::vector<SegmentPiece> retained;
     if (polygons.empty()) return retained;
@@ -333,6 +334,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
     };
 
     for (std::size_t polyIndex = 0; polyIndex < polygons.size(); ++polyIndex) {
+        if (control && control->stop()) return retained;
         const Polygon polygon = cleanPolygon(polygons[polyIndex]);
         if (polygon.size() < 3) continue;
 
@@ -340,6 +342,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
         if (std::abs(area) <= kEps) continue;
 
         for (std::size_t edgeIndex = 0; edgeIndex < polygon.size(); ++edgeIndex) {
+            if (control && control->stop()) return retained;
             const Point a = polygon[edgeIndex];
             const Point b = polygon[(edgeIndex + 1) % polygon.size()];
             const Point edge{b.x - a.x, b.y - a.y};
@@ -356,6 +359,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
             const Point outward = outwardNormal(a, b, area);
 
             for (std::size_t p = 1; p < parameters.size(); ++p) {
+                if (control && control->stop()) return retained;
                 const double t0 = parameters[p - 1];
                 const double t1 = parameters[p];
                 if (t1 - t0 <= 1e-10) continue;
@@ -377,6 +381,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
                 bool onBoundaryOther = false;
 
                 for (const auto& other : others) {
+                    if (control && control->stop()) return retained;
                     if (pointInPolygonInclusive(mid, other)) {
                         onBoundaryOther = false;
                         strictlyInsideOther = true;
@@ -432,6 +437,10 @@ std::vector<SegmentPiece> unionBoundaryPieces(
         }
     }
 
+    if (control && retained.size() > control->maxUnionSegments) {
+        control->complexityFallback();
+        retained.clear();
+    }
     return retained;
 }
 
@@ -549,7 +558,8 @@ std::vector<Polygon> assembleBoundaryLoops(
 }
 
 std::vector<Polygon> unionPolygons(
-    const std::vector<Polygon>& polygons
+    const std::vector<Polygon>& polygons,
+    const NfpRunControl* control
 ) {
     std::vector<Polygon> cleaned;
     cleaned.reserve(polygons.size());
@@ -588,9 +598,21 @@ std::vector<Polygon> conservativeConvexFallback(const Polygon& polygon) {
     }};
 }
 
-std::vector<Polygon> decomposeWithFallback(const Polygon& polygon) {
+std::vector<Polygon> decomposeWithFallback(
+    const Polygon& polygon,
+    const NfpRunControl* control
+) {
+    if (control && control->stop()) return conservativeConvexFallback(polygon);
+    if (control && polygon.size() > control->maxInputVertices) {
+        control->complexityFallback();
+        return conservativeConvexFallback(polygon);
+    }
     auto pieces = convexDecompose(polygon);
-    if (!pieces.empty()) return pieces;
+    if (!pieces.empty() &&
+        (!control || pieces.size() <= control->maxConvexPieces)) return pieces;
+    if (control && pieces.size() > control->maxConvexPieces) {
+        control->complexityFallback();
+    }
 
     // A malformed/near-degenerate contour must not collapse the NFP stage to
     // zero candidates. The convex-hull fallback is deliberately conservative:
@@ -602,26 +624,40 @@ std::vector<Polygon> decomposeWithFallback(const Polygon& polygon) {
 
 std::vector<Polygon> computeUnionNfp(
     const Polygon& fixed,
-    const Polygon& moving
+    const Polygon& moving,
+    const NfpRunControl* control
 ) {
-    const auto fixedPieces = decomposeWithFallback(fixed);
-    const auto movingPieces = decomposeWithFallback(moving);
+    if (control && control->stop()) return {};
+    const auto fixedPieces = decomposeWithFallback(fixed, control);
+    const auto movingPieces = decomposeWithFallback(moving, control);
 
     std::vector<Polygon> pairwise;
     pairwise.reserve(fixedPieces.size() * movingPieces.size());
 
     for (const auto& fixedPiece : fixedPieces) {
+        if (control && control->stop()) return {};
         for (const auto& movingPiece : movingPieces) {
+            if (control && control->stop()) return {};
             const auto reflectedPiece = reflected(movingPiece);
             const auto nfp = minkowskiConvexSum(
                 fixedPiece,
                 reflectedPiece
             );
-            if (nfp.size() >= 3) pairwise.push_back(nfp);
+            if (nfp.size() >= 3) {
+                pairwise.push_back(nfp);
+                if (control && pairwise.size() >= control->maxPairwisePolygons) {
+                    control->complexityFallback();
+                    return {minkowskiConvexSum(
+                        conservativeConvexFallback(fixed).front(),
+                        reflected(conservativeConvexFallback(moving).front())
+                    )};
+                }
+            }
         }
     }
 
-    auto unionResult = unionPolygons(pairwise);
+    if (control && control->stop()) return {};
+    auto unionResult = unionPolygons(pairwise, control);
     if (!unionResult.empty()) return unionResult;
 
     // Last-resort conservative NFP. This keeps the placement pipeline alive
@@ -758,7 +794,8 @@ std::vector<Polygon> noFitPolygons(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     const int normalizedRotation =
         ((rotation % 360) + 360) % 360;
@@ -767,7 +804,8 @@ std::vector<Polygon> noFitPolygons(
         fixed,
         moving,
         normalizedRotation,
-        clearanceMm
+        clearanceMm,
+        control
     );
 
     CacheStore& store = cacheStore();
@@ -805,7 +843,8 @@ std::vector<Polygon> noFitPolygons(
 
     const auto computed = computeUnionNfp(
         fixedCanonical,
-        movingCanonical
+        movingCanonical,
+        control
     );
 
     {
@@ -951,7 +990,8 @@ std::vector<Point> noFitVertices(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     std::vector<Point> vertices;
 
@@ -1024,7 +1064,8 @@ FeasibilityRegion feasibilityRegion(
     double minY,
     double maxX,
     double maxY,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     FeasibilityRegion region;
 
@@ -1040,7 +1081,8 @@ FeasibilityRegion feasibilityRegion(
         fixed,
         moving,
         rotation,
-        0.0
+        0.0,
+        control
     );
 
     const double safeGap = std::max(1e-7, clearanceMm);
