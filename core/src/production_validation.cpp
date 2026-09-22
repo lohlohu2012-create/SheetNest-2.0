@@ -785,6 +785,9 @@ bool repairProductionResult(
     std::vector<AdaptiveRepairRound> adaptiveHistory;
     Result adaptiveBefore = result;
 
+    // Build the Adaptive Repair conflict graph from actual placed geometry.
+    // Vertices are placements. An edge exists only when material overlaps or
+    // exact boundary clearance violates the configured gap.
     auto seedIdsFromReport = [](
         const ProductionValidationReport& report,
         const Result& candidate,
@@ -794,20 +797,7 @@ bool repairProductionResult(
         std::size_t roundIndex
     ) {
         std::vector<std::string> ids;
-        std::unordered_set<std::string> seen;
-
-        for (const auto& issue : report.issues) {
-            if (!issue.instanceId.empty() &&
-                seen.insert(issue.instanceId).second) {
-                ids.push_back(issue.instanceId);
-            }
-            if (!issue.relatedInstanceId.empty() &&
-                seen.insert(issue.relatedInstanceId).second) {
-                ids.push_back(issue.relatedInstanceId);
-            }
-        }
-
-        if (ids.empty() || maxNeighbors == 0) return ids;
+        if (maxNeighbors == 0) return ids;
 
         std::unordered_map<std::string, const Instance*> instanceById;
         instanceById.reserve(allInstances.size());
@@ -815,212 +805,122 @@ bool repairProductionResult(
             instanceById.emplace(instance.id, &instance);
         }
 
-        struct CandidateNeighbor {
-            int priority{};
-            double severity{};
-            double distance{};
+        struct Node {
             std::string id;
+            std::size_t sheetIndex{};
+            PlacedShape shape;
+            Bounds bounds{};
         };
+        std::vector<Node> nodes;
+        std::unordered_map<std::string, std::size_t> nodeById;
 
-        auto issuePriority = [](ProductionValidationIssueType type) {
-            switch (type) {
-            case ProductionValidationIssueType::Collision:
-                return 100;
-            case ProductionValidationIssueType::Gap:
-                return 95;
-            case ProductionValidationIssueType::Margin:
-                return 70;
-            case ProductionValidationIssueType::MissingId:
-                return 50;
-            case ProductionValidationIssueType::DuplicateId:
-            case ProductionValidationIssueType::UnknownId:
-                return 20;
+        for (std::size_t sheetIndex = 0; sheetIndex < candidate.sheets.size(); ++sheetIndex) {
+            for (const auto& placement : candidate.sheets[sheetIndex]) {
+                const auto instanceIt = instanceById.find(placement.id);
+                if (instanceIt == instanceById.end()) continue;
+                const auto shape = transform(*instanceIt->second, placement);
+                const auto nodeIndex = nodes.size();
+                nodes.push_back({placement.id, sheetIndex, shape, bounds(shape.outer)});
+                nodeById[placement.id] = nodeIndex;
             }
-            return 0;
-        };
+        }
+        if (nodes.empty()) return ids;
 
-        auto issueSeverity = [](const ProductionValidationIssue& issue) {
-            switch (issue.type) {
-            case ProductionValidationIssueType::Collision:
-                return 1.0;
-            case ProductionValidationIssueType::Gap:
-                return std::max(
-                    0.0,
-                    issue.requiredMm - issue.measuredMm
-                );
-            case ProductionValidationIssueType::Margin:
-                return std::max(0.0, -issue.measuredMm);
-            case ProductionValidationIssueType::MissingId:
-                return 1.0;
-            case ProductionValidationIssueType::DuplicateId:
-            case ProductionValidationIssueType::UnknownId:
-                return 1.0;
+        const double requiredGap = std::max(0.0, gapMm);
+        struct Edge {
+            std::size_t to{};
+            double distance{};
+            bool overlap{};
+        };
+        std::vector<std::vector<Edge>> graph(nodes.size());
+
+        std::vector<SpatialIndex> indexes(candidate.sheets.size());
+        std::vector<std::vector<std::size_t>> localToNode(candidate.sheets.size());
+        for (std::size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex) {
+            const auto sheetIndex = nodes[nodeIndex].sheetIndex;
+            const auto localIndex = localToNode[sheetIndex].size();
+            localToNode[sheetIndex].push_back(nodeIndex);
+            indexes[sheetIndex].insert(localIndex, nodes[nodeIndex].bounds);
+        }
+
+        for (std::size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex) {
+            const auto sheetIndex = nodes[nodeIndex].sheetIndex;
+            const auto nearby = indexes[sheetIndex].query(nodes[nodeIndex].bounds, requiredGap);
+            for (const auto localIndex : nearby) {
+                if (localIndex >= localToNode[sheetIndex].size()) continue;
+                const auto otherIndex = localToNode[sheetIndex][localIndex];
+                if (otherIndex <= nodeIndex) continue;
+                const bool overlap = materialOverlap(nodes[nodeIndex].shape, nodes[otherIndex].shape);
+                const double distance = minBoundaryDistance(nodes[nodeIndex].shape, nodes[otherIndex].shape);
+                if (!overlap && distance + kEps >= requiredGap) continue;
+                graph[nodeIndex].push_back({otherIndex, overlap ? 0.0 : distance, overlap});
+                graph[otherIndex].push_back({nodeIndex, overlap ? 0.0 : distance, overlap});
             }
-            return 0.0;
-        };
+        }
 
-        std::vector<CandidateNeighbor> neighbors;
-        std::unordered_map<std::string, std::pair<int, double>> seedPriority;
-        seedPriority.reserve(ids.size());
-
+        std::vector<std::string> seeds;
+        std::unordered_set<std::string> seenSeeds;
         for (const auto& issue : report.issues) {
-            const int priority = issuePriority(issue.type);
-            const double severity = issueSeverity(issue);
-
-            for (const auto& id : {issue.instanceId, issue.relatedInstanceId}) {
-                if (id.empty()) continue;
-                const auto it = seedPriority.find(id);
-                if (it == seedPriority.end() ||
-                    priority > it->second.first ||
-                    (priority == it->second.first &&
-                     severity > it->second.second)) {
-                    seedPriority[id] = {priority, severity};
-                }
-            }
+            if (!issue.instanceId.empty() && seenSeeds.insert(issue.instanceId).second) seeds.push_back(issue.instanceId);
+            if (!issue.relatedInstanceId.empty() && seenSeeds.insert(issue.relatedInstanceId).second) seeds.push_back(issue.relatedInstanceId);
         }
-
-        std::stable_sort(
-            ids.begin(),
-            ids.end(),
-            [&](const std::string& a, const std::string& b) {
-                const auto pa = seedPriority.find(a);
-                const auto pb = seedPriority.find(b);
-                const int priorityA =
-                    pa == seedPriority.end() ? 0 : pa->second.first;
-                const int priorityB =
-                    pb == seedPriority.end() ? 0 : pb->second.first;
-                if (priorityA != priorityB) {
-                    return priorityA > priorityB;
+        std::stable_sort(seeds.begin(), seeds.end(), [&](const std::string& a, const std::string& b) {
+            int pa = 0, pb = 0;
+            double sa = 0.0, sb = 0.0;
+            for (const auto& issue : report.issues) {
+                if (issue.instanceId == a || issue.relatedInstanceId == a) {
+                    pa = std::max(pa, productionIssuePriority(issue.type));
+                    sa = std::max(sa, productionIssueSeverity(issue));
                 }
-
-                const double severityA =
-                    pa == seedPriority.end() ? 0.0 : pa->second.second;
-                const double severityB =
-                    pb == seedPriority.end() ? 0.0 : pb->second.second;
-                if (std::abs(severityA - severityB) > kEps) {
-                    return severityA > severityB;
+                if (issue.instanceId == b || issue.relatedInstanceId == b) {
+                    pb = std::max(pb, productionIssuePriority(issue.type));
+                    sb = std::max(sb, productionIssueSeverity(issue));
                 }
-                return a < b;
             }
+            if (pa != pb) return pa > pb;
+            if (std::abs(sa - sb) > kEps) return sa > sb;
+            return a < b;
+        });
+
+        const std::size_t componentBudget = std::max<std::size_t>(
+            1,
+            maxNeighbors + std::min<std::size_t>(roundIndex, 3)
         );
+        std::unordered_set<std::size_t> visited;
 
-        const double roundScale =
-            0.35 + 0.35 * static_cast<double>(
-                std::min<std::size_t>(roundIndex, 3)
-            );
+        for (const auto& seedId : seeds) {
+            if (ids.size() >= componentBudget) break;
+            const auto seedIt = nodeById.find(seedId);
+            if (seedIt == nodeById.end() || !visited.insert(seedIt->second).second) continue;
 
-        const double requiredGap =
-            std::max(0.0, gapMm);
-
-        for (const auto& seedId : ids) {
-            const auto seedInstanceIt = instanceById.find(seedId);
-            if (seedInstanceIt == instanceById.end()) continue;
-
-            for (std::size_t sheetIndex = 0;
-                 sheetIndex < candidate.sheets.size();
-                 ++sheetIndex) {
-                const auto& placements = candidate.sheets[sheetIndex];
-                const auto seedIt = std::find_if(
-                    placements.begin(),
-                    placements.end(),
-                    [&](const Placement& placement) {
-                        return placement.id == seedId;
-                    }
-                );
-                if (seedIt == placements.end()) continue;
-
-                const auto seedShape =
-                    transform(*seedInstanceIt->second, *seedIt);
-                const auto seedBounds = bounds(seedShape.outer);
-                const double seedSpan =
-                    std::max(seedBounds.width(), seedBounds.height());
-                const double searchRadius =
-                    std::max(gapMm * 2.0, seedSpan * roundScale);
-                const double centerX =
-                    (seedBounds.minX + seedBounds.maxX) * 0.5;
-                const double centerY =
-                    (seedBounds.minY + seedBounds.maxY) * 0.5;
-
-                for (const auto& placement : placements) {
-                    if (placement.id == seedId ||
-                        seen.contains(placement.id)) continue;
-
-                    const auto instanceIt =
-                        instanceById.find(placement.id);
-                    if (instanceIt == instanceById.end()) continue;
-
-                    const auto shape =
-                        transform(*instanceIt->second, placement);
-                    const auto placementBounds = bounds(shape.outer);
-                    const double dx =
-                        ((placementBounds.minX + placementBounds.maxX) * 0.5) -
-                        centerX;
-                    const double dy =
-                        ((placementBounds.minY + placementBounds.maxY) * 0.5) -
-                        centerY;
-                    const double distance = std::hypot(dx, dy);
-
-                    // Center proximity alone is not sufficient for Adaptive
-                    // Repair. A neighbor is extracted only when its exact
-                    // geometry can actually block the seed: overlap or a
-                    // boundary clearance violation.
-                    const bool exactOverlap =
-                        materialOverlap(seedShape, shape);
-                    const double exactBoundaryDistance =
-                        minBoundaryDistance(seedShape, shape);
-                    const bool violatesClearance =
-                        exactBoundaryDistance + kEps < requiredGap;
-
-                    if (!exactOverlap && !violatesClearance) {
-                        continue;
-                    }
-
-                    const auto priorityIt =
-                            seedPriority.find(seedId);
-                        const int priority =
-                            priorityIt == seedPriority.end()
-                                ? 0
-                                : priorityIt->second.first;
-                        const double severity =
-                            priorityIt == seedPriority.end()
-                                ? 0.0
-                                : priorityIt->second.second;
-                    neighbors.push_back({
-                        priority,
-                        severity,
-                        exactOverlap ? 0.0 : exactBoundaryDistance,
-                        placement.id
-                    });
+            std::vector<std::size_t> queue{seedIt->second};
+            for (std::size_t head = 0; head < queue.size() && queue.size() < componentBudget; ++head) {
+                auto edges = graph[queue[head]];
+                std::sort(edges.begin(), edges.end(), [&](const Edge& a, const Edge& b) {
+                    if (a.overlap != b.overlap) return a.overlap > b.overlap;
+                    if (std::abs(a.distance - b.distance) > kEps) return a.distance < b.distance;
+                    return nodes[a.to].id < nodes[b.to].id;
+                });
+                for (const auto& edge : edges) {
+                    if (queue.size() >= componentBudget) break;
+                    if (visited.insert(edge.to).second) queue.push_back(edge.to);
                 }
+            }
+            std::sort(queue.begin(), queue.end(), [&](std::size_t a, std::size_t b) {
+                return nodes[a].id < nodes[b].id;
+            });
+            for (const auto nodeIndex : queue) {
+                if (ids.size() >= componentBudget) break;
+                ids.push_back(nodes[nodeIndex].id);
             }
         }
 
-        std::sort(
-            neighbors.begin(),
-            neighbors.end(),
-            [](const CandidateNeighbor& a, const CandidateNeighbor& b) {
-                if (a.priority != b.priority) {
-                    return a.priority > b.priority;
-                }
-                if (std::abs(a.severity - b.severity) > kEps) {
-                    return a.severity > b.severity;
-                }
-                if (std::abs(a.distance - b.distance) > kEps) {
-                    return a.distance < b.distance;
-                }
-                return a.id < b.id;
-            }
-        );
-
-        std::size_t added = 0;
-        for (const auto& neighbor : neighbors) {
-            if (added >= maxNeighbors) break;
-            if (seen.insert(neighbor.id).second) {
-                ids.push_back(neighbor.id);
-                ++added;
+        if (ids.empty()) {
+            for (const auto& seedId : seeds) {
+                if (ids.size() >= componentBudget) break;
+                ids.push_back(seedId);
             }
         }
-
         return ids;
     };
 
