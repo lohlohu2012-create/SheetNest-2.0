@@ -504,24 +504,37 @@ ProductionValidationReport validateProductionResult(
     // Build one broad-phase index per sheet. The exact material-overlap
     // and boundary-distance predicates below remain authoritative.
     std::vector<SpatialIndex> sheetIndexes(result.sheets.size());
-    for (const auto& item : placed) {
-        const auto sheetIndex = item.sheetIndex;
+    std::vector<std::vector<std::size_t>> sheetPlacementIds(
+        result.sheets.size()
+    );
+
+    for (std::size_t globalIndex = 0;
+         globalIndex < placed.size();
+         ++globalIndex) {
+        const auto sheetIndex = placed[globalIndex].sheetIndex;
         if (sheetIndex >= sheetIndexes.size()) continue;
+
+        auto& ids = sheetPlacementIds[sheetIndex];
+        const auto localIndex = ids.size();
+        ids.push_back(globalIndex);
         sheetIndexes[sheetIndex].insert(
-            static_cast<std::size_t>(&item - placed.data()),
-            item.bounds
+            localIndex,
+            placed[globalIndex].bounds
         );
     }
 
     for (std::size_t i = 0;
          i < placed.size();
          ++i) {
-        const auto nearby = sheetIndexes[placed[i].sheetIndex].query(
+        const auto sheetIndex = placed[i].sheetIndex;
+        const auto nearby = sheetIndexes[sheetIndex].query(
             placed[i].bounds,
             requiredGap
         );
 
-        for (const auto j : nearby) {
+        for (const auto localIndex : nearby) {
+            if (localIndex >= sheetPlacementIds[sheetIndex].size()) continue;
+            const auto j = sheetPlacementIds[sheetIndex][localIndex];
             if (j <= i || j >= placed.size()) continue;
             if (placed[i].sheetIndex != placed[j].sheetIndex) continue;
 
