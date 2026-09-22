@@ -1375,15 +1375,11 @@ void MainWindow::setBusy(bool busy) {
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
     stopButton_->setEnabled(busy && nestingController_ != nullptr);
 
-    if (!busy) {
-        progress_->setRange(0, 100);
-        progress_->setValue(0);
-        progressDetails_->setText("Ожидание расчёта");
-    }
-
     if (busy) {
+        progress_->setRange(0, 0);
         statusBar()->showMessage("Выполняется расчёт…");
     } else {
+        progress_->setRange(0, 100);
         statusBar()->showMessage("Готово");
     }
 }
