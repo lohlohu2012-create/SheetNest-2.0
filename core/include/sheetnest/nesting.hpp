@@ -50,27 +50,6 @@ struct NestingStats {
     std::size_t nfpComplexityFallbacks{};
 };
 
-struct BenchmarkMetrics {
-    double milliseconds{};
-    std::size_t placed{};
-    std::size_t skipped{};
-    std::size_t sheets{};
-    std::size_t candidateChecks{};
-    std::size_t collisionChecks{};
-    std::size_t nfpChecks{};
-    std::size_t refillMoves{};
-    std::size_t exchangeAttempts{};
-    std::size_t sheetsEliminated{};
-    std::size_t optimizerPasses{};
-    std::size_t nfpTimeouts{};
-    std::size_t nfpComplexityFallbacks{};
-};
-
-struct BenchmarkCase {
-    BenchmarkMetrics baseline{};
-    BenchmarkMetrics optimized{};
-};
-
 struct Result {
     std::vector<std::vector<Placement>> sheets;
     std::vector<std::string> unplaced;
@@ -136,11 +115,6 @@ Result nest(
     const Options& options
 );
 
-BenchmarkCase benchmarkNest(
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options
-);
 
 // Runs the global post-processing stage on an already-built candidate.
 // The stage is transactional: invalid repacks/exchanges are rolled back.
