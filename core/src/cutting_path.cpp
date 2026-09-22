@@ -48,6 +48,7 @@ static void appendOperation(
         source.contourIndex,
         source.inner,
         contour,
+        head,
         start,
         contour.back(),
         cutLength,
