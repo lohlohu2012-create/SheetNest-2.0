@@ -598,6 +598,35 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
     Polygon polygon = cleanPolygon(input);
     if (polygon.size() < 3) return {};
 
+    // DXF chains often contain runs of collinear segments. Removing only
+    // collinear interior vertices makes ear clipping deterministic without
+    // changing the represented simple polygon.
+    bool removedCollinear = true;
+    while (removedCollinear && polygon.size() > 3) {
+        removedCollinear = false;
+        for (std::size_t i = 0; i < polygon.size(); ++i) {
+            const std::size_t prev =
+                (i + polygon.size() - 1) % polygon.size();
+            const std::size_t next =
+                (i + 1) % polygon.size();
+
+            if (std::abs(cross(
+                    polygon[prev],
+                    polygon[i],
+                    polygon[next]
+                )) <= 1e-10) {
+                polygon.erase(
+                    polygon.begin() +
+                    static_cast<std::ptrdiff_t>(i)
+                );
+                removedCollinear = true;
+                break;
+            }
+        }
+    }
+
+    if (polygon.size() < 3) return {};
+
     if (signedArea(polygon) < 0.0) {
         std::reverse(polygon.begin(), polygon.end());
     }
@@ -969,6 +998,9 @@ FeasibilityRegion feasibilityRegion(
 
     const double safeGap = std::max(1e-7, clearanceMm);
 
+    // Edge offsets alone do not describe the complete Euclidean clearance
+    // boundary at NFP vertices. Add sampled circular joins around each
+    // forbidden vertex. Candidates remain subject to exact collision checks.
     for (const auto& polygon : forbidden) {
         const auto segments = offsetBoundary(
             polygon,
@@ -983,6 +1015,49 @@ FeasibilityRegion feasibilityRegion(
             segments.begin(),
             segments.end()
         );
+
+        if (safeGap > 1e-7) {
+            constexpr int kArcSamples = 16;
+            const double twoPi =
+                2.0 * 3.14159265358979323846;
+
+            for (const auto& vertex : polygon) {
+                Point previous{};
+                bool hasPrevious = false;
+
+                for (int sample = 0;
+                     sample <= kArcSamples;
+                     ++sample) {
+                    const double angle =
+                        twoPi *
+                        static_cast<double>(sample) /
+                        static_cast<double>(kArcSamples);
+
+                    const Point current{
+                        vertex.x + std::cos(angle) * safeGap,
+                        vertex.y + std::sin(angle) * safeGap
+                    };
+
+                    if (hasPrevious) {
+                        Point a = previous;
+                        Point b = current;
+                        if (clipSegmentToRect(
+                                a,
+                                b,
+                                minX,
+                                minY,
+                                maxX,
+                                maxY
+                            )) {
+                            region.boundary.push_back({a, b});
+                        }
+                    }
+
+                    previous = current;
+                    hasPrevious = true;
+                }
+            }
+        }
     }
 
     const Polygon sheet{
