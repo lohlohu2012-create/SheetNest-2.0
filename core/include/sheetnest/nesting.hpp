@@ -2,7 +2,10 @@
 #include "geometry.hpp"
 
 #include <cstddef>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -52,11 +55,35 @@ struct Result {
     NestingStats stats{};
 };
 
+struct NestingRunControl {
+    std::atomic<bool> cancelRequested{false};
+    std::atomic<bool> timeoutObserved{false};
+    std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::time_point::max();
+
+    bool shouldStop() const {
+        if (cancelRequested.load(std::memory_order_relaxed)) {
+            return true;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            timeoutObserved.store(
+                true,
+                std::memory_order_relaxed
+            );
+            return true;
+        }
+
+        return false;
+    }
+};
+
 struct Options {
     std::vector<int> rotations{0, 90, 180, 270};
     std::size_t iterations{24};
     double gapMm{2.0};
     std::uint32_t seed{0x534E4553u};
+    std::shared_ptr<NestingRunControl> control{};
 };
 
 Result nest(
