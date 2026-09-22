@@ -1144,6 +1144,13 @@ void testNestingBenchmark() {
     assert(benchmark.optimized.candidateChecks > 0);
     assert(benchmark.optimized.nfpChecks > 0);
 
+    // The baseline must remain a true greedy reference. If post-processing
+    // accidentally leaks back into the baseline, this assertion catches it.
+    assert(benchmark.baseline.optimizerPasses == 0);
+    assert(benchmark.baseline.refillMoves == 0);
+    assert(benchmark.baseline.exchangeAttempts == 0);
+    assert(benchmark.baseline.sheetsEliminated == 0);
+
     // BenchmarkCase must expose the complete optimizer telemetry from nest().
     const auto optimizedDirect = nest(instances, sheet, options);
     assert(
