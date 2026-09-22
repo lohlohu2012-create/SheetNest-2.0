@@ -265,7 +265,6 @@ Result ParallelNestingController::run(
                 static_cast<std::uint32_t>(workerIndex);
             iterationOptions.control = control;
             iterationOptions.enableOptimizer = false;
-            iterationOptions.enableProductionValidation = false;
 
             const Result candidate =
                 nest(
@@ -477,49 +476,51 @@ Result ParallelNestingController::run(
         best.utilization = 0.0;
     }
 
-    if (nestingOptions.enableProductionValidation) {
-        const auto validation = validateProductionResult(
-            instances,
-            sheet,
-            nestingOptions,
-            best
-        );
+    // Production Validator is deliberately executed after all workers and
+    // after Global Optimizer. It never participates in the search hot path.
+    const auto validation = validateProductionResult(
+        instances,
+        sheet,
+        nestingOptions,
+        best
+    );
 
-        best.productionValidated = true;
-        best.productionValid = validation.valid;
-        best.productionIssueCount = validation.issues.size();
-
-        std::string message =
-            "Production Validator: " +
-            std::string(validation.valid ? "PASS" : "FAIL") +
-            "; collision=" +
-            std::to_string(validation.collisionCount) +
-            ", gap=" +
-            std::to_string(validation.gapCount) +
-            ", margin=" +
-            std::to_string(validation.marginCount) +
-            ", duplicateIds=" +
-            std::to_string(validation.duplicateIdCount) +
-            ", missingIds=" +
-            std::to_string(validation.missingIdCount);
-
-        publish({
-            NestingProgressPhase::ProductionValidation,
-            0,
-            workerCount,
-            completedIterations.load(
-                std::memory_order_relaxed
-            ),
-            totalIterations,
-            instances.size() - best.unplaced.size(),
-            best.unplaced.size(),
-            best.sheets.size(),
-            best.utilization,
-            0,
-            0,
-            std::move(message)
-        });
+    if (options.onValidation) {
+        options.onValidation(validation);
     }
+
+    std::string validationMessage =
+        "Production Validator: " +
+        std::string(validation.valid ? "PASS" : "FAIL") +
+        "; collision=" +
+        std::to_string(validation.collisionCount) +
+        ", gap=" +
+        std::to_string(validation.gapViolationCount) +
+        ", margin=" +
+        std::to_string(validation.marginViolationCount) +
+        ", duplicateIds=" +
+        std::to_string(validation.duplicateIdCount) +
+        ", missingIds=" +
+        std::to_string(validation.missingIdCount) +
+        ", unknownIds=" +
+        std::to_string(validation.unknownIdCount);
+
+    publish({
+        NestingProgressPhase::ProductionValidation,
+        0,
+        workerCount,
+        completedIterations.load(
+            std::memory_order_relaxed
+        ),
+        totalIterations,
+        instances.size() - best.unplaced.size(),
+        best.unplaced.size(),
+        best.sheets.size(),
+        best.utilization,
+        0,
+        0,
+        std::move(validationMessage)
+    });
 
     if (control->timeoutObserved.load(
             std::memory_order_relaxed
