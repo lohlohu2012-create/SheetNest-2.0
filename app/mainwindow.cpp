@@ -524,8 +524,8 @@ void MainWindow::connectUi() {
                         "Использование: %4%\n"
                         "Production Validator: %5\n"
                         "Длина реза: %6 м\n"
-                        "Пробивок: %6\n"
-                        "Время лазерной резки: %7 ч %8 мин")
+                        "Пробивок: %7\n"
+                        "Время лазерной резки: %8 ч %9 мин")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(static_cast<int>(
                         instances_.size() - result_.unplaced.size()))
@@ -558,7 +558,7 @@ void MainWindow::connectUi() {
             }
 
             appendLog(
-                QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6, unknown ID=%7.")
+                QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6.")
                     .arg(validation_.valid ? "OK" : "ОШИБКА")
                     .arg(static_cast<qulonglong>(validation_.collisionCount))
                     .arg(static_cast<qulonglong>(validation_.gapCount))
