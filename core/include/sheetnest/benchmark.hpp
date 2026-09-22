@@ -26,6 +26,7 @@ struct BenchmarkCase {
     std::size_t nfpComplexityFallbacks{};
     std::vector<std::string> placedInstanceIds;
     std::vector<std::string> skippedInstanceIds;
+    std::vector<InstanceNestingTelemetry> instanceTelemetry;
 };
 
 struct BenchmarkResult {
