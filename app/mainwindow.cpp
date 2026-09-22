@@ -1864,7 +1864,19 @@ void MainWindow::exportBenchmarkResults() {
         row += '"';
     };
 
-    auto benchmarkObject = [](const BenchmarkCase& b) {
+    auto failureReasonCode = [](NestingFailureReason reason) {
+        switch (reason) {
+        case NestingFailureReason::None: return QString("None");
+        case NestingFailureReason::NoFeasiblePosition: return QString("NoFeasiblePosition");
+        case NestingFailureReason::Timeout: return QString("Timeout");
+        case NestingFailureReason::InvalidGeometry: return QString("InvalidGeometry");
+        case NestingFailureReason::RepairExhausted: return QString("RepairExhausted");
+        case NestingFailureReason::Cancelled: return QString("Cancelled");
+        }
+        return QString("None");
+    };
+
+    auto benchmarkObject = [&](const BenchmarkCase& b) {
         QJsonObject object;
         object["name"] = QString::fromStdString(b.name);
         object["milliseconds"] = b.milliseconds;
@@ -1891,6 +1903,23 @@ void MainWindow::exportBenchmarkResults() {
             skipped.append(QString::fromStdString(id));
         }
         object["skippedInstanceIds"] = skipped;
+
+        QJsonArray telemetry;
+        for (const auto& item : b.instanceTelemetry) {
+            QJsonObject t;
+            t["instanceId"] = QString::fromStdString(item.instanceId);
+            t["unitId"] = QString::fromStdString(item.unitId);
+            t["reason"] = failureReasonCode(item.reason);
+            t["placed"] = item.placed;
+            t["candidateChecks"] = static_cast<qint64>(item.candidateChecks);
+            t["collisionChecks"] = static_cast<qint64>(item.collisionChecks);
+            t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
+            t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
+            t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+            t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
+            telemetry.append(t);
+        }
+        object["instanceTelemetry"] = telemetry;
         return object;
     };
 
@@ -1917,7 +1946,7 @@ void MainWindow::exportBenchmarkResults() {
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,placedInstanceIds,skippedInstanceIds\n";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -1955,10 +1984,29 @@ void MainWindow::exportBenchmarkResults() {
                     [](std::string a, const std::string& id) {
                         return a.empty() ? id : a + ";" + id;
                     }
-                ))
+                )),
+                [&]() {
+                    QJsonArray telemetry;
+                    for (const auto& item : b.instanceTelemetry) {
+                        QJsonObject t;
+                        t["instanceId"] = QString::fromStdString(item.instanceId);
+                        t["unitId"] = QString::fromStdString(item.unitId);
+                        t["reason"] = failureReasonCode(item.reason);
+                        t["placed"] = item.placed;
+                        t["candidateChecks"] = static_cast<qint64>(item.candidateChecks);
+                        t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
+                        t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
+                        t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+                        t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
+                        telemetry.append(t);
+                    }
+                    return QString::fromUtf8(
+                        QJsonDocument(telemetry).toJson(QJsonDocument::Compact)
+                    );
+                }()
             };
 
-            for (int i = 0; i < 17; ++i) {
+            for (int i = 0; i < 18; ++i) {
                 if (i > 0) row += ',';
                 appendCsvField(row, values[i]);
             }
