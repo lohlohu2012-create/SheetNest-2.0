@@ -89,7 +89,8 @@ struct Options {
     bool enableOptimizer{true};
     bool enableProductionValidation{true};
     bool enableAutoRepair{true};
-    std::size_t autoRepairAttempts{3};
+    std::size_t autoRepairAttempts{8};
+    std::uint64_t autoRepairTimeBudgetMs{15000};
     std::shared_ptr<NestingRunControl> control{};
 };
 
