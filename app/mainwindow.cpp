@@ -514,7 +514,8 @@ void MainWindow::buildUi() {
     repairViewLayout->addWidget(repairControls);
     repairViewLayout->addWidget(view_, 1);
     diagnosticsTable_->setHorizontalHeaderLabels({
-        "instanceId", "unitId", "Source ID", "Слой", "Этап", "Сообщение"
+        "instanceId", "unitId", "Source ID", "Лист", "Этап", "Сообщение",
+        "CAM ops", "CAM sec", "Repair", "Final"
     });
     diagnosticsTable_->horizontalHeader()->setStretchLastSection(true);
     diagnosticsTable_->setSelectionBehavior(
@@ -1344,13 +1345,21 @@ void MainWindow::populateDiagnostics() {
             QString::fromStdString(d.instanceId),
             QString::fromStdString(d.unitId),
             QString::fromStdString(d.sourceId),
-            QString::fromStdString(d.layer),
+            d.sheetIndex == static_cast<std::size_t>(-1)
+                ? "-"
+                : QString::number(static_cast<qulonglong>(d.sheetIndex + 1)),
             statusText(d.status) + " / " +
                 QString::fromStdString(d.stage),
-            QString::fromStdString(d.message)
+            QString::fromStdString(d.message),
+            QString::number(static_cast<qulonglong>(d.cuttingOperationCount)),
+            QString::number(d.cuttingSeconds, 'f', 2),
+            QString("%1 / %2")
+                .arg(static_cast<qulonglong>(d.repairAttempts))
+                .arg(static_cast<qulonglong>(d.adaptiveRepairRounds)),
+            QString::fromStdString(d.finalStatus)
         };
 
-        for (int column = 0; column < 6; ++column) {
+        for (int column = 0; column < 10; ++column) {
             diagnosticsTable_->setItem(
                 static_cast<int>(i),
                 column,
@@ -1758,10 +1767,8 @@ CalculationOutput MainWindow::performCalculation(
     routeOptions.rapidSpeedMMin = 120.0;
     routeOptions.pierceSeconds = 0.25;
     output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
-    output.diagnostics = diagnoseNest(
-        instances,
-        output.result
-    );
+    output.diagnostics = diagnoseNest(instances, output.result);
+    enrichDiagnostics(output.diagnostics, output.cuttingRoute, output.validation);
     return output;
 }
 
