@@ -1819,7 +1819,12 @@ CalculationOutput MainWindow::performCalculation(
     routeOptions.pierceSeconds = 0.25;
     output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
     output.diagnostics = diagnoseNest(instances, output.result);
-    enrichDiagnostics(output.diagnostics, output.cuttingRoute, output.validation);
+    enrichDiagnostics(
+        output.diagnostics,
+        output.cuttingRoute,
+        output.validation,
+        &output.result
+    );
     return output;
 }
 
