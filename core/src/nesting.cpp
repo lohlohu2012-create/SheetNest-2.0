@@ -2081,6 +2081,22 @@ Result runAttempt(
     std::vector<SheetState> states;
     states.reserve(16);
 
+    result.instanceTelemetry.reserve(instances.size());
+    for (const auto& instance : instances) {
+        result.instanceTelemetry.push_back({
+            instance.id,
+            instance.unitId.empty() ? instance.id + ":unit-1" : instance.unitId,
+            NestingFailureReason::None,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            false
+        });
+    }
+
     if (order.empty()) return result;
 
     for (std::size_t position = 0; position < order.size(); ++position) {
@@ -2096,6 +2112,9 @@ Result runAttempt(
         }
 
         const auto& instance = instances[order[position]];
+        const auto telemetryIndex = order[position];
+        const auto telemetryStarted = std::chrono::steady_clock::now();
+        const NestingStats statsBeforeInstance = stats;
 
         std::vector<int> rotations = options.rotations;
         if (rotations.empty()) rotations.push_back(0);
@@ -2193,7 +2212,33 @@ Result runAttempt(
             );
             if (placed) states.push_back(std::move(state));
         }
-        if (!placed) result.unplaced.push_back(instance.id);
+        auto& telemetry = result.instanceTelemetry[telemetryIndex];
+        telemetry.candidateChecks += stats.candidateChecks - statsBeforeInstance.candidateChecks;
+        telemetry.collisionChecks += stats.collisionChecks - statsBeforeInstance.collisionChecks;
+        telemetry.nfpChecks += stats.nfpChecks - statsBeforeInstance.nfpChecks;
+        telemetry.nfpTimeouts += stats.nfpTimeouts - statsBeforeInstance.nfpTimeouts;
+        telemetry.nfpFallbacks += stats.nfpComplexityFallbacks - statsBeforeInstance.nfpComplexityFallbacks;
+        telemetry.elapsedMs = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - telemetryStarted
+            ).count()
+        );
+        telemetry.placed = placed;
+
+        if (!placed) {
+            if (options.control && options.control->cancelRequested.load(std::memory_order_relaxed)) {
+                telemetry.reason = NestingFailureReason::Cancelled;
+            } else if (options.control && options.control->timeoutObserved.load(std::memory_order_relaxed)) {
+                telemetry.reason = NestingFailureReason::Timeout;
+            } else if (telemetry.nfpTimeouts > 0) {
+                telemetry.reason = NestingFailureReason::Timeout;
+            } else if (telemetry.nfpFallbacks > 0 && telemetry.candidateChecks == 0) {
+                telemetry.reason = NestingFailureReason::InvalidGeometry;
+            } else {
+                telemetry.reason = NestingFailureReason::NoFeasiblePosition;
+            }
+            result.unplaced.push_back(instance.id);
+        }
     }
 
     // Targeted residual-space refill. Only small parts are retried,
