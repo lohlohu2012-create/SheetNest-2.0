@@ -273,6 +273,7 @@ std::vector<Candidate> candidatesFor(
     const Sheet& sheetSize,
     double gap,
     double margin,
+    const Options& options,
     NestingStats* stats,
     const std::shared_ptr<NestingRunControl>& control
 ) {
@@ -690,6 +691,7 @@ bool placeOnSheet(
                  sheet,
                  options.gapMm,
                  sheet.edgeMarginMm,
+                 options,
                  stats,
                  options.control)) {
             if (shouldStop(options)) return false;
