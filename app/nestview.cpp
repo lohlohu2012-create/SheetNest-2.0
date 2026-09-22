@@ -416,9 +416,7 @@ void NestView::addCuttingRoute(
             cuttingRouteOperations_.push_back({
                 operation,
                 sheetIndex,
-                contour.inner
-                    ? (it->second->id)
-                    : (it->second->id),
+                it->second->id,
                 contour.inner,
                 contour.inner
                     ? [&] {
@@ -447,10 +445,32 @@ void NestView::addCuttingRoute(
                         }
                         return holeIndex;
                     }()
-                    : 0
+                    : 0,
+                0.0,
+                bestDistance,
+                0.0
             });
             ++operation;
         }
+    }
+
+    // Bind physical CAM metrics to each visible contour operation.
+    for (auto& op : cuttingRouteOperations_) {
+        double cutLength = 0.0;
+        double rapidLength = 0.0;
+        double duration = 0.0;
+        for (const auto& event : events) {
+            if (event.operation != op.operation + 1) continue;
+            if (event.kind == RouteEvent::Kind::Cut) {
+                cutLength += event.lengthMm;
+            } else if (event.kind == RouteEvent::Kind::Rapid) {
+                rapidLength += event.lengthMm;
+            }
+            duration += std::max(0.0, event.durationSec);
+        }
+        op.cutLengthMm = cutLength;
+        op.rapidLengthMm = rapidLength;
+        op.estimatedSeconds = duration;
     }
 
     // Use the current technology speed for a better visual time scale when
