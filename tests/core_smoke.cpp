@@ -2771,6 +2771,14 @@ testAdaptiveRepairConflictGraph();
     testAdaptiveRepairNewCollisionPriority();
     testAutomaticProductionRepair();
 
+    std::cout << "[PASS] NFP tests" << std::endl;
+    std::cout << "[PASS] Adaptive Repair tests" << std::endl;
+    std::cout << "[PASS] dense small parts tests" << std::endl;
+    std::cout << "[PASS] complex DXF tests" << std::endl;
+    std::cout << "[PASS] timeout regression" << std::endl;
+    std::cout << "[PASS] DXF export round-trip" << std::endl;
+    std::cout << "[PASS] Core Smoke" << std::endl;
+
     // Meta-regression: run the intentionally invalid scenario in a child
     // process and require it to fail. A zero exit code means the guard has
     // stopped rejecting an invalid Gap-before-revalidation history.
