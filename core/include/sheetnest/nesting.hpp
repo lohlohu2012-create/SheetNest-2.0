@@ -83,6 +83,7 @@ struct Options {
     std::size_t iterations{24};
     double gapMm{2.0};
     std::uint32_t seed{0x534E4553u};
+    bool enableOptimizer{true};
     std::shared_ptr<NestingRunControl> control{};
 };
 
@@ -90,6 +91,15 @@ Result nest(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
     const Options& options
+);
+
+// Runs the global post-processing stage on an already-built candidate.
+// The stage is transactional: invalid repacks/exchanges are rolled back.
+bool optimizeNestingResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result
 );
 
 } // namespace sheetnest
