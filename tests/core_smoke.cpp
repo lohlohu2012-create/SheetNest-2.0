@@ -1488,12 +1488,12 @@ void testCuttingPathInnerContoursFirst() {
     assert(estimate.contourLengthMm > 0.0);
     assert(estimate.totalMinutes > 0.0);
 
-    const auto camReport = validateCuttingPath(route);
+    const auto camReport = validateCuttingPath(path);
     assert(camReport.valid);
     CamExportOptions camOptions;
     camOptions.includeComments = true;
     const auto camProgram =
-        exportCamProgram(route, technology, camOptions);
+        exportCamProgram(path, technology, camOptions);
     assert(!camProgram.empty());
     assert(camProgram.find("G90") != std::string::npos);
     assert(camProgram.find("M2") != std::string::npos);
