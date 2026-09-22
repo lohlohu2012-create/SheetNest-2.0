@@ -697,6 +697,7 @@ bool repairProductionResult(
     ) {
         AdaptiveRepairRound roundSnapshot;
         roundSnapshot.roundIndex = roundIndex;
+        roundSnapshot.beforeSheets = before.sheets;
         roundSnapshot.afterSheets = after.sheets;
         roundSnapshot.conflictIds = conflictIds;
         roundSnapshot.extractedIds = extractedIds;
