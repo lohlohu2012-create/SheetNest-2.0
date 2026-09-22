@@ -73,6 +73,10 @@ private:
     void resetLaserAnimation();
     void advanceLaserAnimation();
     void updateLaserAnimationUi();
+    void laserNextOperation();
+    void laserPreviousOperation();
+    void laserSelectOperation(int index);
+    void populateLaserOperationSelector();
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
@@ -119,6 +123,9 @@ private:
     QPushButton* laserPauseButton_{};
     QPushButton* laserResetButton_{};
     QComboBox* laserSpeedCombo_{};
+    QComboBox* laserOperationCombo_{};
+    QPushButton* laserPrevButton_{};
+    QPushButton* laserNextButton_{};
     QLabel* laserStageLabel_{};
 
     QLabel* fileLabel_{};
@@ -166,6 +173,7 @@ private:
     QTimer* laserAnimationTimer_{};
     bool laserAnimationPlaying_{false};
     double laserAnimationProgress_{1.0};
+    int laserAnimationOperation_{-1};
     qint64 calculationStartedMs_{0};
     qint64 lastProgressMs_{0};
     bool watchdogTriggered_{false};
