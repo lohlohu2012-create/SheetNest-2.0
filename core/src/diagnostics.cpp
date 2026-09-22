@@ -2,6 +2,7 @@
 
 #include <unordered_set>
 #include <string>
+#include <unordered_map>
 
 namespace sheetnest {
 
@@ -55,6 +56,50 @@ std::vector<InstanceDiagnostic> diagnoseNest(
     }
 
     return diagnostics;
+}
+
+void enrichDiagnostics(
+    std::vector<InstanceDiagnostic>& diagnostics,
+    const CuttingPath& route,
+    const ProductionValidationReport& validation
+) {
+    std::unordered_map<std::string, std::size_t> operationCounts;
+    std::unordered_map<std::string, double> operationSeconds;
+    std::unordered_map<std::string, std::size_t> sheets;
+    for (const auto& operation : route.operations) {
+        ++operationCounts[operation.instanceId];
+        operationSeconds[operation.instanceId] += operation.totalSeconds;
+        sheets[operation.instanceId] = operation.sheetIndex;
+    }
+
+    for (auto& diagnostic : diagnostics) {
+        const auto opCount = operationCounts.find(diagnostic.instanceId);
+        if (opCount != operationCounts.end()) {
+            diagnostic.cuttingOperationCount = opCount->second;
+            diagnostic.cuttingSeconds = operationSeconds[diagnostic.instanceId];
+            diagnostic.sheetIndex = sheets[diagnostic.instanceId];
+        }
+
+        diagnostic.repairAttempts = validation.repairAttempts;
+        diagnostic.adaptiveRepairRounds = validation.adaptiveRepairRounds;
+
+        // Candidate/NFP telemetry is populated by the nesting engine when
+        // per-instance counters are available. Keep zero as an explicit
+        // "not instrumented for this run" value rather than inventing data.
+        diagnostic.candidateChecks = 0;
+        diagnostic.nfpTimeouts = 0;
+        diagnostic.nfpFallbacks = 0;
+
+        if (diagnostic.status == InstanceDiagnosticStatus::Placed) {
+            diagnostic.finalStatus = "Placed";
+        } else if (diagnostic.status == InstanceDiagnosticStatus::Unplaced) {
+            diagnostic.finalStatus = validation.valid
+                ? "Unplaced after valid nesting"
+                : "Unplaced / validation not valid";
+        } else {
+            diagnostic.finalStatus = "Unknown";
+        }
+    }
 }
 
 } // namespace sheetnest
