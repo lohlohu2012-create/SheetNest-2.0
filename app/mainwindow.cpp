@@ -2373,9 +2373,16 @@ void MainWindow::refreshAdaptiveRepairView() {
             repairAnimationFrame_ % 4;
     }
 
-    view_->setCuttingAnimationProgress(
-        laserAnimationProgress_
-    );
+    if (laserAnimationOperation_ >= 0) {
+        view_->setCuttingAnimationOperationProgress(
+            laserAnimationOperation_,
+            laserContourProgress_
+        );
+    } else {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
 
     view_->showResult(
         result_,
