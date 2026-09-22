@@ -528,7 +528,7 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 15);
+    benchmarkTable_ = new QTableWidget(0, 17);
     benchmarkTable_->setHorizontalHeaderLabels({
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
         "Использование", "Кандидаты", "Collision checks", "NFP checks",
@@ -1354,9 +1354,15 @@ void MainWindow::populatePartTable() {
 void MainWindow::populateDiagnostics() {
     if (!diagnosticsTable_) return;
 
-    const auto diagnostics = diagnoseNest(
+    auto diagnostics = diagnoseNest(
         instances_,
         result_
+    );
+    enrichDiagnostics(
+        diagnostics,
+        cuttingRoute_,
+        validation_,
+        &result_
     );
 
     diagnosticsTable_->setRowCount(
@@ -1393,10 +1399,16 @@ void MainWindow::populateDiagnostics() {
             QString("%1 / %2")
                 .arg(static_cast<qulonglong>(d.repairAttempts))
                 .arg(static_cast<qulonglong>(d.adaptiveRepairRounds)),
+            QString::number(static_cast<qulonglong>(d.candidateChecks)),
+            QString::number(static_cast<qulonglong>(d.nfpChecks)),
+            QString::number(static_cast<qulonglong>(d.nfpTimeouts)),
+            QString::number(static_cast<qulonglong>(d.nfpFallbacks)),
+            QString::fromStdString(d.failureReason),
+            QString::number(static_cast<qulonglong>(d.nestingElapsedMs)),
             QString::fromStdString(d.finalStatus)
         };
 
-        for (int column = 0; column < 10; ++column) {
+        for (int column = 0; column < 16; ++column) {
             diagnosticsTable_->setItem(
                 static_cast<int>(i),
                 column,
