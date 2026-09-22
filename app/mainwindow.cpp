@@ -23,6 +23,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -244,6 +246,18 @@ void MainWindow::buildUi() {
     iterationsSpin_->setValue(24);
     settingsForm->addRow("Итерации оптимизации", iterationsSpin_);
 
+    workersSpin_ = new QSpinBox;
+    workersSpin_->setRange(0, 64);
+    workersSpin_->setValue(0);
+    workersSpin_->setSpecialValueText("Авто");
+    settingsForm->addRow("Параллельные workers", workersSpin_);
+
+    timeBudgetSpin_ = new QSpinBox;
+    timeBudgetSpin_->setRange(5, 3600);
+    timeBudgetSpin_->setValue(120);
+    timeBudgetSpin_->setSuffix(" с");
+    settingsForm->addRow("Лимит расчёта", timeBudgetSpin_);
+
     auto* rotationWidget = new QWidget;
     auto* rotationLayout = new QGridLayout(rotationWidget);
     rotationLayout->setContentsMargins(0, 0, 0, 0);
@@ -297,7 +311,15 @@ void MainWindow::buildUi() {
     progress_->setValue(0);
     controlLayout->addWidget(progress_);
 
+    progressDetails_ = new QLabel("Ожидание расчёта");
+    progressDetails_->setWordWrap(true);
+    controlLayout->addWidget(progressDetails_);
+
     controlLayout->addWidget(calculateButton_);
+
+    stopButton_ = new QPushButton("Остановить расчёт");
+    stopButton_->setEnabled(false);
+    controlLayout->addWidget(stopButton_);
 
     benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
     controlLayout->addWidget(benchmarkButton_);
@@ -888,8 +910,50 @@ void MainWindow::calculate() {
     const auto optionsCopy = options_;
     const auto technologyCopy = technology_;
 
+    auto controller =
+        std::make_shared<sheetnest::ParallelNestingController>();
+    nestingController_ = controller;
+
+    sheetnest::ParallelNestingOptions parallelOptions;
+    parallelOptions.workers =
+        static_cast<std::size_t>(workersSpin_->value());
+    parallelOptions.iterations = options_.iterations;
+    parallelOptions.timeBudgetMs =
+        static_cast<std::uint64_t>(timeBudgetSpin_->value()) * 1000u;
+
+    QPointer<MainWindow> safeThis(this);
+    parallelOptions.onProgress =
+        [safeThis](const sheetnest::NestingProgress& event) {
+            if (!safeThis) return;
+
+            QMetaObject::invokeMethod(
+                safeThis,
+                [safeThis, event]() {
+                    if (!safeThis) return;
+                    safeThis->updateProgress(event);
+                },
+                Qt::QueuedConnection
+            );
+        };
+
     setBusy(true);
-    appendLog("Запущен расчёт nesting в фоновом потоке...");
+    progress_->setRange(0, 100);
+    progress_->setValue(0);
+    progressDetails_->setText(
+        QString("Контроллер: %1 workers, лимит %2 с")
+            .arg(workersSpin_->value() == 0
+                ? QString("авто")
+                : QString::number(workersSpin_->value()))
+            .arg(timeBudgetSpin_->value())
+    );
+    appendLog(
+        QString("Запущен Parallel Nesting Engine: workers=%1, итераций=%2, лимит=%3 с.")
+            .arg(workersSpin_->value() == 0
+                ? QString("auto")
+                : QString::number(workersSpin_->value()))
+            .arg(static_cast<int>(options_.iterations))
+            .arg(timeBudgetSpin_->value())
+    );
 
     watcher_->setFuture(
         QtConcurrent::run(
@@ -897,12 +961,14 @@ void MainWindow::calculate() {
              instancesCopy,
              sheetCopy,
              optionsCopy,
-             technologyCopy]() {
+             technologyCopy,
+             parallelOptions]() {
                 return performCalculation(
                     instancesCopy,
                     sheetCopy,
                     optionsCopy,
-                    technologyCopy
+                    technologyCopy,
+                    parallelOptions
                 );
             }
         )
@@ -971,15 +1037,23 @@ CalculationOutput MainWindow::performCalculation(
     std::vector<Instance> instances,
     Sheet sheet,
     Options options,
-    CuttingParameters technology
+    CuttingParameters technology,
+    ParallelNestingOptions parallelOptions
 ) const {
     CalculationOutput output;
     output.technology = technology;
-    output.result = nest(
-        instances,
-        sheet,
-        options
-    );
+    output.result = nestingController_
+        ? nestingController_->run(
+            instances,
+            sheet,
+            options,
+            parallelOptions
+        )
+        : nest(
+            instances,
+            sheet,
+            options
+        );
     output.cutting = estimateWholeResult(
         output.result,
         instances,
@@ -1210,15 +1284,100 @@ void MainWindow::appendLog(const QString& text) {
     log_->appendPlainText(text);
 }
 
+void MainWindow::updateProgress(
+    const sheetnest::NestingProgress& progress
+) {
+    if (progress.totalIterations > 0) {
+        const auto completed =
+            std::min(
+                progress.completedIterations,
+                progress.totalIterations
+            );
+        const int percent =
+            static_cast<int>(
+                (completed * 100u) /
+                progress.totalIterations
+            );
+        progress_->setRange(0, 100);
+        progress_->setValue(percent);
+    }
+
+    const int remainingSeconds =
+        static_cast<int>(progress.remainingMs / 1000u);
+
+    progressDetails_->setText(
+        QString("%1\nWorkers: %2\nИтерации: %3 / %4\n"
+                "Листов: %5 • размещено: %6 • пропущено: %7\n"
+                "Прошло: %8 с • осталось: %9 с")
+            .arg(QString::fromStdString(progress.message))
+            .arg(static_cast<int>(progress.workerCount))
+            .arg(static_cast<int>(progress.completedIterations))
+            .arg(static_cast<int>(progress.totalIterations))
+            .arg(static_cast<int>(progress.sheets))
+            .arg(static_cast<int>(progress.placed))
+            .arg(static_cast<int>(progress.skipped))
+            .arg(static_cast<int>(progress.elapsedMs / 1000u))
+            .arg(remainingSeconds)
+    );
+
+    statusBar()->showMessage(
+        QString("%1 | %2/%3 итераций | %4 листов")
+            .arg(QString::fromStdString(progress.message))
+            .arg(static_cast<int>(progress.completedIterations))
+            .arg(static_cast<int>(progress.totalIterations))
+            .arg(static_cast<int>(progress.sheets))
+    );
+
+    switch (progress.phase) {
+    case sheetnest::NestingProgressPhase::Starting:
+        break;
+
+    case sheetnest::NestingProgressPhase::WorkerStarted:
+        break;
+
+    case sheetnest::NestingProgressPhase::IterationFinished:
+        break;
+
+    case sheetnest::NestingProgressPhase::Completed:
+        progress_->setValue(100);
+        appendLog(
+            QString("Parallel Nesting: завершено %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::Cancelled:
+        appendLog(
+            QString("Parallel Nesting остановлен пользователем после %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::TimedOut:
+        appendLog(
+            QString("Parallel Nesting остановлен по лимиту времени после %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+    }
+}
+
 void MainWindow::setBusy(bool busy) {
     importButton_->setEnabled(!busy);
     calculateButton_->setEnabled(!busy && !instances_.empty());
     benchmarkButton_->setEnabled(!busy && !instances_.empty());
     exportButton_->setEnabled(!busy && !result_.sheets.empty());
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
+    stopButton_->setEnabled(busy && nestingController_ != nullptr);
 
-    progress_->setRange(0, busy ? 0 : 1);
-    if (!busy) progress_->setValue(0);
+    if (!busy) {
+        progress_->setRange(0, 100);
+        progress_->setValue(0);
+        progressDetails_->setText("Ожидание расчёта");
+    }
 
     if (busy) {
         statusBar()->showMessage("Выполняется расчёт…");
