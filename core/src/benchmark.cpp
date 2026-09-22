@@ -61,6 +61,9 @@ BenchmarkResult benchmarkNest(
     baseline.adaptiveRepairAttempts = 0;
     baseline.adaptiveRepairMaxNeighbors = 0;
     baseline.adaptiveRepairRounds = 0;
+    baseline.enableSmallPartOptimization = false;
+    baseline.smallPartRefillPasses = 1;
+    baseline.control.reset();
 
     BenchmarkResult result;
     result.baseline = runCase(
