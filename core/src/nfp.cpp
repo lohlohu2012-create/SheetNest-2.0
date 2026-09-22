@@ -824,12 +824,12 @@ std::vector<Polygon> noFitPolygons(
     double clearanceMm,
     const NfpRunControl* control
 ) {
+    const int normalizedRotation =
+        ((rotation % 360) + 360) % 360;
+
     if (control && control->stop()) {
         return conservativeNfpFallback(fixed, moving, normalizedRotation);
     }
-
-    const int normalizedRotation =
-        ((rotation % 360) + 360) % 360;
 
     const std::string key = makeCacheKey(
         fixed,
