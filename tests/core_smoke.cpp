@@ -2187,6 +2187,7 @@ void testAdaptiveRepairNewCollisionPriority() {
     assert(sawGapAfterCollision);
 }
 
+    testAdaptiveRepairNewCollisionPriority();
 testAdaptiveRepairConflictGraph();
     testAutomaticProductionRepair();
 }
