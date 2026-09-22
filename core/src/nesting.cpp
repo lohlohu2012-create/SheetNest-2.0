@@ -1066,3 +1066,6 @@ Result runAttempt(
         sheet,
         options,
         result
+    );
+
+    return result;
