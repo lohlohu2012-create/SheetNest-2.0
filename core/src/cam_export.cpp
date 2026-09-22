@@ -1,5 +1,6 @@
 #include "sheetnest/cam_export.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
