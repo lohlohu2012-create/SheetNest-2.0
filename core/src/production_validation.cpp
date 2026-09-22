@@ -1,0 +1,570 @@
+#include "sheetnest/production_validation.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+
+namespace sheetnest {
+namespace {
+
+constexpr double kEps = 1e-7;
+
+struct PlacedShape {
+    Polygon outer;
+    std::vector<Polygon> holes;
+};
+
+PlacedShape transform(
+    const Instance& instance,
+    const Placement& placement
+) {
+    PlacedShape shape;
+    shape.outer = translate(
+        rotate(instance.part.outer, placement.rotation),
+        placement.x,
+        placement.y
+    );
+
+    shape.holes.reserve(instance.part.holes.size());
+    for (const auto& hole : instance.part.holes) {
+        shape.holes.push_back(
+            translate(
+                rotate(hole, placement.rotation),
+                placement.x,
+                placement.y
+            )
+        );
+    }
+
+    return shape;
+}
+
+double orientation(Point a, Point b, Point c) {
+    return (b.x - a.x) * (c.y - a.y) -
+           (b.y - a.y) * (c.x - a.x);
+}
+
+bool onSegment(Point p, Point a, Point b) {
+    return std::abs(orientation(a, b, p)) <= 1e-9 &&
+           p.x >= std::min(a.x, b.x) - 1e-9 &&
+           p.x <= std::max(a.x, b.x) + 1e-9 &&
+           p.y >= std::min(a.y, b.y) - 1e-9 &&
+           p.y <= std::max(a.y, b.y) + 1e-9;
+}
+
+bool segmentsIntersect(
+    Point a,
+    Point b,
+    Point c,
+    Point d
+) {
+    const double o1 = orientation(a, b, c);
+    const double o2 = orientation(a, b, d);
+    const double o3 = orientation(c, d, a);
+    const double o4 = orientation(c, d, b);
+
+    if (((o1 > 0.0 && o2 < 0.0) ||
+         (o1 < 0.0 && o2 > 0.0)) &&
+        ((o3 > 0.0 && o4 < 0.0) ||
+         (o3 < 0.0 && o4 > 0.0))) {
+        return true;
+    }
+
+    return (std::abs(o1) <= 1e-9 && onSegment(c, a, b)) ||
+           (std::abs(o2) <= 1e-9 && onSegment(d, a, b)) ||
+           (std::abs(o3) <= 1e-9 && onSegment(a, c, d)) ||
+           (std::abs(o4) <= 1e-9 && onSegment(b, c, d));
+}
+
+double pointSegmentDistance(
+    Point p,
+    Point a,
+    Point b
+) {
+    const double vx = b.x - a.x;
+    const double vy = b.y - a.y;
+    const double lengthSquared = vx * vx + vy * vy;
+
+    if (lengthSquared <= kEps) {
+        return std::hypot(p.x - a.x, p.y - a.y);
+    }
+
+    double t =
+        ((p.x - a.x) * vx + (p.y - a.y) * vy) /
+        lengthSquared;
+
+    t = std::clamp(t, 0.0, 1.0);
+
+    const Point q{
+        a.x + t * vx,
+        a.y + t * vy
+    };
+
+    return std::hypot(p.x - q.x, p.y - q.y);
+}
+
+double segmentDistance(
+    Point a,
+    Point b,
+    Point c,
+    Point d
+) {
+    if (segmentsIntersect(a, b, c, d)) {
+        return 0.0;
+    }
+
+    return std::min({
+        pointSegmentDistance(a, c, d),
+        pointSegmentDistance(b, c, d),
+        pointSegmentDistance(c, a, b),
+        pointSegmentDistance(d, a, b)
+    });
+}
+
+double boundaryDistance(
+    const Polygon& a,
+    const Polygon& b
+) {
+    if (a.empty() || b.empty()) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    double best = std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const Point a0 = a[i];
+        const Point a1 = a[(i + 1) % a.size()];
+
+        for (std::size_t j = 0; j < b.size(); ++j) {
+            const Point b0 = b[j];
+            const Point b1 = b[(j + 1) % b.size()];
+
+            best = std::min(
+                best,
+                segmentDistance(a0, a1, b0, b1)
+            );
+        }
+    }
+
+    return best;
+}
+
+double minBoundaryDistance(
+    const PlacedShape& a,
+    const PlacedShape& b
+) {
+    double best =
+        boundaryDistance(a.outer, b.outer);
+
+    for (const auto& ah : a.holes) {
+        best = std::min(
+            best,
+            boundaryDistance(ah, b.outer)
+        );
+
+        for (const auto& bh : b.holes) {
+            best = std::min(
+                best,
+                boundaryDistance(ah, bh)
+            );
+        }
+    }
+
+    for (const auto& bh : b.holes) {
+        best = std::min(
+            best,
+            boundaryDistance(a.outer, bh)
+        );
+    }
+
+    return best;
+}
+
+bool pointInMaterial(
+    const PlacedShape& shape,
+    const Point& point
+) {
+    if (!pointInPolygon(point, shape.outer)) {
+        return false;
+    }
+
+    for (const auto& hole : shape.holes) {
+        if (pointInPolygon(point, hole)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool materialOverlap(
+    const PlacedShape& a,
+    const PlacedShape& b
+) {
+    if (polygonsIntersect(a.outer, b.outer)) {
+        if (boundaryDistance(a.outer, b.outer) <= kEps) {
+            return true;
+        }
+
+        for (const auto& hole : b.holes) {
+            if (boundaryDistance(a.outer, hole) <= kEps) {
+                return true;
+            }
+        }
+
+        for (const auto& hole : a.holes) {
+            if (boundaryDistance(hole, b.outer) <= kEps) {
+                return true;
+            }
+        }
+    }
+
+    for (const auto& point : a.outer) {
+        if (pointInMaterial(b, point)) {
+            return true;
+        }
+    }
+
+    for (const auto& point : b.outer) {
+        if (pointInMaterial(a, point)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool boundsCanConflict(
+    const Bounds& a,
+    const Bounds& b,
+    double gap
+) {
+    const double g = std::max(0.0, gap);
+
+    return !(
+        a.maxX + g < b.minX - kEps ||
+        b.maxX + g < a.minX - kEps ||
+        a.maxY + g < b.minY - kEps ||
+        b.maxY + g < a.minY - kEps
+    );
+}
+
+const Instance* findInstance(
+    const std::unordered_map<std::string, const Instance*>& index,
+    const std::string& id
+) {
+    const auto it = index.find(id);
+    return it == index.end() ? nullptr : it->second;
+}
+
+void addIssue(
+    ProductionValidationReport& report,
+    ProductionValidationIssue issue
+) {
+    report.valid = false;
+
+    switch (issue.type) {
+    case ProductionValidationIssueType::Collision:
+        ++report.collisionCount;
+        break;
+    case ProductionValidationIssueType::Gap:
+        ++report.gapViolationCount;
+        break;
+    case ProductionValidationIssueType::Margin:
+        ++report.marginViolationCount;
+        break;
+    case ProductionValidationIssueType::DuplicateId:
+        ++report.duplicateIdCount;
+        break;
+    case ProductionValidationIssueType::MissingId:
+        ++report.missingIdCount;
+        break;
+    case ProductionValidationIssueType::UnknownId:
+        ++report.unknownIdCount;
+        break;
+    }
+
+    report.issues.push_back(std::move(issue));
+}
+
+} // namespace
+
+const char* productionValidationIssueTypeName(
+    ProductionValidationIssueType type
+) {
+    switch (type) {
+    case ProductionValidationIssueType::Collision:
+        return "collision";
+    case ProductionValidationIssueType::Gap:
+        return "gap";
+    case ProductionValidationIssueType::Margin:
+        return "margin";
+    case ProductionValidationIssueType::DuplicateId:
+        return "duplicate ID";
+    case ProductionValidationIssueType::MissingId:
+        return "missing ID";
+    case ProductionValidationIssueType::UnknownId:
+        return "unknown ID";
+    }
+
+    return "unknown";
+}
+
+ProductionValidationReport validateProductionResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const Result& result
+) {
+    ProductionValidationReport report;
+
+    std::unordered_map<std::string, const Instance*> instancesById;
+    instancesById.reserve(instances.size());
+
+    for (const auto& instance : instances) {
+        if (instance.id.empty()) {
+            addIssue(
+                report,
+                {
+                    ProductionValidationIssueType::UnknownId,
+                    0,
+                    instance.id,
+                    {},
+                    instance.unitId,
+                    0.0,
+                    0.0,
+                    "Пустой instanceId во входном списке."
+                }
+            );
+            continue;
+        }
+
+        const auto [it, inserted] =
+            instancesById.emplace(
+                instance.id,
+                &instance
+            );
+
+        if (!inserted) {
+            addIssue(
+                report,
+                {
+                    ProductionValidationIssueType::DuplicateId,
+                    0,
+                    instance.id,
+                    {},
+                    instance.unitId,
+                    0.0,
+                    0.0,
+                    "Повторяющийся instanceId во входном списке."
+                }
+            );
+        }
+    }
+
+    struct ValidatedPlacement {
+        std::size_t sheetIndex{};
+        std::string id;
+        const Instance* instance{};
+        PlacedShape shape;
+        Bounds bounds{};
+    };
+
+    std::vector<ValidatedPlacement> placed;
+    placed.reserve(result.sheets.size());
+
+    std::unordered_map<std::string, std::size_t> placementCounts;
+    placementCounts.reserve(instances.size());
+
+    const double margin =
+        std::max(0.0, sheet.edgeMarginMm);
+    const double requiredGap =
+        std::max(0.0, options.gapMm);
+
+    for (std::size_t sheetIndex = 0;
+         sheetIndex < result.sheets.size();
+         ++sheetIndex) {
+        const auto& placements = result.sheets[sheetIndex];
+
+        for (const auto& placement : placements) {
+            ++report.checkedPlacements;
+
+            const auto* instance =
+                findInstance(instancesById, placement.id);
+
+            if (!instance) {
+                addIssue(
+                    report,
+                    {
+                        ProductionValidationIssueType::UnknownId,
+                        sheetIndex,
+                        placement.id,
+                        {},
+                        {},
+                        0.0,
+                        0.0,
+                        "Раскладка содержит instanceId, которого нет во входных деталях."
+                    }
+                );
+                continue;
+            }
+
+            const auto count =
+                ++placementCounts[placement.id];
+
+            if (count > 1) {
+                addIssue(
+                    report,
+                    {
+                        ProductionValidationIssueType::DuplicateId,
+                        sheetIndex,
+                        placement.id,
+                        {},
+                        instance->unitId,
+                        static_cast<double>(count),
+                        1.0,
+                        "Один instanceId размещён более одного раза."
+                    }
+                );
+            }
+
+            const auto shape =
+                transform(*instance, placement);
+
+            const auto shapeBounds =
+                bounds(shape.outer);
+
+            if (shapeBounds.minX <
+                    margin - kEps ||
+                shapeBounds.minY <
+                    margin - kEps ||
+                shapeBounds.maxX >
+                    sheet.width - margin + kEps ||
+                shapeBounds.maxY >
+                    sheet.height - margin + kEps) {
+
+                addIssue(
+                    report,
+                    {
+                        ProductionValidationIssueType::Margin,
+                        sheetIndex,
+                        placement.id,
+                        {},
+                        instance->unitId,
+                        std::min({
+                            shapeBounds.minX - margin,
+                            shapeBounds.minY - margin,
+                            sheet.width - margin - shapeBounds.maxX,
+                            sheet.height - margin - shapeBounds.maxY
+                        }),
+                        0.0,
+                        "Контур выходит за технологическое поле листа."
+                    }
+                );
+            }
+
+            placed.push_back({
+                sheetIndex,
+                placement.id,
+                instance,
+                std::move(shape),
+                shapeBounds
+            });
+        }
+    }
+
+    for (const auto& instance : instances) {
+        const auto it = placementCounts.find(instance.id);
+
+        if (instance.id.empty() ||
+            it == placementCounts.end() ||
+            it->second == 0) {
+            addIssue(
+                report,
+                {
+                    ProductionValidationIssueType::MissingId,
+                    0,
+                    instance.id,
+                    {},
+                    instance.unitId,
+                    0.0,
+                    1.0,
+                    "Ожидаемый instanceId отсутствует в итоговой раскладке."
+                }
+            );
+        }
+    }
+
+    for (std::size_t i = 0;
+         i < placed.size();
+         ++i) {
+        for (std::size_t j = i + 1;
+             j < placed.size();
+             ++j) {
+            if (placed[i].sheetIndex != placed[j].sheetIndex) {
+                continue;
+            }
+
+            if (!boundsCanConflict(
+                    placed[i].bounds,
+                    placed[j].bounds,
+                    requiredGap
+                )) {
+                continue;
+            }
+
+            if (materialOverlap(
+                    placed[i].shape,
+                    placed[j].shape
+                )) {
+                addIssue(
+                    report,
+                    {
+                        ProductionValidationIssueType::Collision,
+                        placed[i].sheetIndex,
+                        placed[i].id,
+                        placed[j].id,
+                        placed[i].instance
+                            ? placed[i].instance->unitId
+                            : std::string{},
+                        0.0,
+                        0.0,
+                        "Пересечение материальных областей деталей."
+                    }
+                );
+                continue;
+            }
+
+            const double distance =
+                minBoundaryDistance(
+                    placed[i].shape,
+                    placed[j].shape
+                );
+
+            if (distance + kEps < requiredGap) {
+                addIssue(
+                    report,
+                    {
+                        ProductionValidationIssueType::Gap,
+                        placed[i].sheetIndex,
+                        placed[i].id,
+                        placed[j].id,
+                        placed[i].instance
+                            ? placed[i].instance->unitId
+                            : std::string{},
+                        distance,
+                        requiredGap,
+                        "Расстояние между контурами меньше заданного зазора."
+                    }
+                );
+            }
+        }
+    }
+
+    return report;
+}
+
+} // namespace sheetnest
