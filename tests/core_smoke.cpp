@@ -1622,7 +1622,8 @@ void testAdaptiveRepairConflictGraph() {
         {"graph-a", Part{"graph-a-part", rectangle(10, 10), {}}},
         {"graph-b", Part{"graph-b-part", rectangle(10, 10), {}}},
         {"graph-c", Part{"graph-c-part", rectangle(10, 10), {}}},
-        {"graph-d", Part{"graph-d-part", rectangle(10, 10), {}}}
+        {"graph-d", Part{"graph-d-part", rectangle(10, 10), {}}},
+        {"graph-e", Part{"graph-e-part", rectangle(10, 10), {}}}
     };
 
     Sheet sheet{100, 100, 2.0};
@@ -1640,12 +1641,16 @@ void testAdaptiveRepairConflictGraph() {
         {"graph-a", 2.0, 2.0, 0},
         {"graph-b", 8.0, 2.0, 0},
         {"graph-c", 14.0, 2.0, 0},
-        {"graph-d", 30.0, 2.0, 0}
+        // C-D have a real 1.5 mm clearance, below the required 2 mm gap.
+        {"graph-d", 25.5, 2.0, 0},
+        // E is unrelated and must remain outside the repair hierarchy.
+        {"graph-e", 50.0, 2.0, 0}
     }};
 
     const auto initial = validateProductionResult(instances, sheet, options, broken);
     assert(!initial.valid);
     assert(initial.collisionCount >= 2);
+    assert(initial.gapViolationCount >= 1);
 
     ProductionValidationReport report;
     const bool repaired = repairProductionResult(instances, sheet, options, broken, &report);
@@ -1653,20 +1658,31 @@ void testAdaptiveRepairConflictGraph() {
     assert(report.valid);
     assert(report.adaptiveRepairRounds >= 1);
     assert(report.adaptiveRepairGroupSize >= 3);
-    if (!report.adaptiveHistory.empty()) {
-        const auto& levels = report.adaptiveHistory.front().conflictLevels;
-        assert(!levels.empty());
-        assert(!levels.front().empty());
-    }
+    assert(!report.adaptiveHistory.empty());
 
-    bool sawDStationary = false;
-    for (const auto& change : report.adaptiveChanges) {
-        if (change.before.id == "graph-d") {
-            sawDStationary = change.stationary;
+    bool sawCollisionLevel = false;
+    bool sawGapLevel = false;
+    bool sawEStationary = false;
+    for (const auto& round : report.adaptiveHistory) {
+        if (!round.conflictLevels.empty()) {
+            if (round.conflictLevels.front().size() >= 3) {
+                sawCollisionLevel = true;
+            }
+            if (round.conflictLevels.size() >= 2 &&
+                !round.conflictLevels[1].empty()) {
+                sawGapLevel = true;
+            }
+        }
+        for (const auto& change : round.changes) {
+            if (change.before.id == "graph-e") {
+                sawEStationary = change.stationary;
+            }
         }
     }
+    assert(sawCollisionLevel);
+    assert(sawGapLevel);
     if (!report.adaptiveChanges.empty()) {
-        assert(sawDStationary);
+        assert(sawEStationary);
     }
 }
 
