@@ -14,6 +14,9 @@ public:
         std::string instanceId;
         bool inner{};
         std::size_t contourIndex{};
+        double cutLengthMm{};
+        double rapidLengthMm{};
+        double estimatedSeconds{};
     };
     explicit NestView(QWidget* parent = nullptr);
 
