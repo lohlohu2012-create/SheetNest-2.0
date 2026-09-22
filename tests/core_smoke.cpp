@@ -1,6 +1,6 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
-#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"\n#include "sheetnest/cutting.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
@@ -1437,6 +1437,18 @@ void testConcaveNfpCandidates() {
     assert(!vertices.empty());
 }
 
+void testLaserTechnologyInterpolation() {
+    const auto lower = bodor3kWParameters(Material::CarbonSteel, 2.0);
+    const auto mid = bodor3kWParameters(Material::CarbonSteel, 2.5);
+    const auto upper = bodor3kWParameters(Material::CarbonSteel, 3.0);
+
+    assert(lower.speedMMin > upper.speedMMin);
+    assert(mid.speedMMin > upper.speedMMin);
+    assert(mid.speedMMin < lower.speedMMin);
+    assert(std::abs(mid.speedMMin - 5.0) < 1e-9);
+    assert(mid.assistGas == lower.assistGas);
+}
+
 void testCuttingPathInnerContoursFirst() {
     CuttingParameters technology;
     technology.speedMMin = 10.0;
@@ -2843,7 +2855,7 @@ int main(int argc, char** argv) {
     testDegenerateArc();
     testDxfModelPipeline();
     testPerPartQuantitiesAndUnitIds();
-    testDxfExportRoundTrip();\n    testCuttingPathInnerContoursFirst();
+    testDxfExportRoundTrip();\n    testCuttingPathInnerContoursFirst();\n    testLaserTechnologyInterpolation();
     testCollinearConcaveNfpRegression();
     testClearanceCornerSampling();
     testNfpMinkowski();
