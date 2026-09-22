@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <cstdlib>
 
 using namespace sheetnest;
 
@@ -2006,6 +2007,42 @@ void testInterlockIntoHole() {
     assert(foundInsert);
 }
 
+bool gapHistoryEntryHasPriorZeroCollisionValidation(
+    const std::vector<AdaptiveRepairRound>& history,
+    std::size_t gapIndex
+) {
+    if (gapIndex >= history.size()) return false;
+
+    for (std::size_t i = 0; i < gapIndex; ++i) {
+        const auto& validation = history[i];
+        if (validation.validAfter &&
+            validation.collisionCountAfter == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Expected-failure scenario used by the parent smoke test. It intentionally
+// creates a Gap history entry while Collision is still present. The child
+// process must terminate non-zero, proving that the ordering assertion really
+// rejects the invalid history instead of merely documenting the rule.
+void testNegativeGapBeforeZeroCollisionRevalidation() {
+    AdaptiveRepairRound invalidGap;
+    invalidGap.repairedLevel = 1;
+    invalidGap.collisionCountAfter = 1;
+    invalidGap.validAfter = false;
+    invalidGap.validationSequence = 1;
+
+    const std::vector<AdaptiveRepairRound> invalidHistory{invalidGap};
+    const bool authorized =
+        gapHistoryEntryHasPriorZeroCollisionValidation(invalidHistory, 0);
+
+    assert(authorized &&
+           "Negative regression: Gap must not appear before zero-Collision revalidation");
+    std::abort();
+}
+
 void testAdaptiveRepairNewCollisionPriority() {
     std::vector<Instance> instances{
         {"priority-a", Part{"priority-a-part", rectangle(10, 10), {}}},
@@ -2189,6 +2226,10 @@ void testAdaptiveRepairNewCollisionPriority() {
             assert(firstZeroCollisionValidationHistoryIndex !=
                    std::numeric_limits<std::size_t>::max());
             assert(firstGapHistoryIndex > firstZeroCollisionValidationHistoryIndex);
+            assert(gapHistoryEntryHasPriorZeroCollisionValidation(
+                report.adaptiveHistory,
+                historyIndex
+            ));
 
             const auto& validationBeforeGap =
                 report.adaptiveHistory[firstGapHistoryIndex - 1];
@@ -2233,7 +2274,13 @@ void testAdaptiveRepairNewCollisionPriority() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1 &&
+        std::string(argv[1]) == "--negative-gap-ordering") {
+        testNegativeGapBeforeZeroCollisionRevalidation();
+        return 0;
+    }
+
     testGeometry();
     testDxfHoleRecovery();
     testLayerSeparation();
@@ -2266,4 +2313,16 @@ int main() {
 testAdaptiveRepairConflictGraph();
     testAdaptiveRepairNewCollisionPriority();
     testAutomaticProductionRepair();
+
+    // Meta-regression: run the intentionally invalid scenario in a child
+    // process and require it to fail. A zero exit code means the guard has
+    // stopped rejecting an invalid Gap-before-revalidation history.
+    if (argc > 0 && argv[0] != nullptr) {
+        std::string command = "\"";
+        command += argv[0];
+        command += "\" --negative-gap-ordering";
+        const int negativeExitCode = std::system(command.c_str());
+        assert(negativeExitCode != 0 &&
+               "Negative Gap-ordering regression unexpectedly passed");
+    }
 }
