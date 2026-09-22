@@ -958,6 +958,45 @@ void testNfpTimeoutRecovery() {
     assert(placed + result.unplaced.size() <= parts.size());
 }
 
+void testNfpInternalTimeoutAndComplexityGuard() {
+    nfp::clearCache();
+
+    std::size_t timeoutCount = 0;
+    std::size_t complexityFallbacks = 0;
+
+    nfp::NfpRunControl timeoutGuard;
+    timeoutGuard.shouldStop = []() { return true; };
+    timeoutGuard.timeoutCount = &timeoutCount;
+    timeoutGuard.complexityFallbackCount = &complexityFallbacks;
+
+    const auto timedOut = nfp::noFitPolygons(
+        rectangle(40.0, 30.0),
+        rectangle(10.0, 8.0),
+        0,
+        0.0,
+        &timeoutGuard
+    );
+    (void)timedOut;
+    assert(timeoutCount > 0);
+
+    nfp::NfpRunControl complexityGuard;
+    complexityGuard.maxInputVertices = 3;
+    complexityGuard.complexityFallbackCount = &complexityFallbacks;
+
+    Polygon complex{
+        {0,0},{20,0},{20,5},{12,5},{12,20},{0,20}
+    };
+    const auto guarded = nfp::noFitPolygons(
+        complex,
+        rectangle(5.0, 5.0),
+        0,
+        0.0,
+        &complexityGuard
+    );
+    assert(!guarded.empty());
+    assert(complexityFallbacks > 0);
+}
+
 void testNfpDegenerateFallback() {
     nfp::clearCache();
 
@@ -2715,6 +2754,7 @@ int main(int argc, char** argv) {
     testNfpComplexContourMatrix();
     testNfpHolePipeline();
     testNfpTimeoutRecovery();
+    testNfpInternalTimeoutAndComplexityGuard();
     testNfpDegenerateFallback();
     testConcaveUnionNfp();
     testConcaveNfpCandidates();
