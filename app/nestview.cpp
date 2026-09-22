@@ -8,7 +8,6 @@
 #include <QBrush>
 #include <QWheelEvent>
 #include <QPolygonF>
-#include <QGraphicsLineItem>
 
 #include <cmath>
 #include <unordered_map>
@@ -52,13 +51,6 @@ QPainterPath makePartPath(
     }
 
     return path;
-}
-
-QColor repairColor(bool conflict, bool moved, bool stationary) {
-    if (conflict) return QColor("#ff4d5e");
-    if (moved) return QColor("#22d3ee");
-    if (stationary) return QColor("#94a3b8");
-    return QColor("#facc15");
 }
 
 QGraphicsPathItem* addRepairOverlay(
@@ -207,7 +199,8 @@ void NestView::clearResult() {
 void NestView::showResult(
     const Result& result,
     const std::vector<Instance>& instances,
-    const Sheet& sheet
+    const Sheet& sheet,
+    const sheetnest::ProductionValidationReport* repairVisualization
 ) {
     clearResult();
 
