@@ -39,6 +39,10 @@ struct NestingStats {
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
     std::size_t nfpChecks{};
+    std::size_t refillMoves{};
+    std::size_t exchangeAttempts{};
+    std::size_t sheetsEliminated{};
+    std::size_t optimizerPasses{};
 };
 
 struct Result {
