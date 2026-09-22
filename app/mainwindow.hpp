@@ -47,6 +47,7 @@ private:
     void populatePartTable();
     void populateDiagnostics();
     void populateBenchmark(const sheetnest::BenchmarkResult& benchmarkResult);
+    void exportBenchmarkResults();
     void updateTechnologyPreview();
     void refreshInstances();
     void appendLog(const QString& text);
@@ -103,7 +104,11 @@ private:
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
     QPushButton* benchmarkButton_{};
+    QPushButton* benchmarkExportButton_{};
     QPushButton* exportButton_{};
+
+    sheetnest::BenchmarkResult lastBenchmarkResult_{};
+    bool hasBenchmarkResult_{false};
 
     QFutureWatcher<CalculationOutput>* watcher_{};
     QFutureWatcher<sheetnest::BenchmarkResult>* benchmarkWatcher_{};
