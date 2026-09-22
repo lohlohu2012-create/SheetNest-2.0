@@ -13,7 +13,12 @@ public:
         const sheetnest::Result& result,
         const std::vector<sheetnest::Instance>& instances,
         const sheetnest::Sheet& sheet,
-        const sheetnest::ProductionValidationReport* repairVisualization = nullptr
+        const sheetnest::ProductionValidationReport* repairVisualization = nullptr,
+        int repairRound = -1,
+        bool showConflict = true,
+        bool showExtracted = true,
+        bool showMoved = true,
+        bool showStationary = true
     );
 
     void clearResult();
