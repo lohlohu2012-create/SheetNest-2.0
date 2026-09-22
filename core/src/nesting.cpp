@@ -786,6 +786,14 @@ std::vector<std::string> orderedPlacementIds(
     return ids;
 }
 
+std::vector<int> effectiveRotations(const Options& options) {
+    std::vector<int> rotations = options.rotations;
+    if (rotations.empty()) {
+        rotations.push_back(0);
+    }
+    return rotations;
+}
+
 bool tryPlaceOnExistingSheets(
     const Instance& instance,
     std::vector<SheetState>& states,
@@ -965,7 +973,7 @@ bool tryExchangeEliminateSheet(
                     sheet,
                     options,
                     targetTrial,
-                    options.rotations,
+                    effectiveRotations(options),
                     stats
                 )) {
                 continue;
@@ -1083,7 +1091,7 @@ bool tryExchangeEliminateSheet(
                             sheet,
                             options,
                             targetTrial,
-                            options.rotations,
+                            effectiveRotations(options),
                             stats
                         )) {
                         continue;
@@ -1181,7 +1189,7 @@ bool refillExistingSheets(
                             sheet,
                             options,
                             targetTrial,
-                            options.rotations,
+                            effectiveRotations(options),
                             stats
                         )) {
                         continue;
@@ -1498,212 +1506,3 @@ bool compactResult(
             : 0.0;
 
     return true;
-}
-
-Result runAttempt(
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options,
-    std::vector<std::size_t> order,
-    std::mt19937& rng,
-    NestingStats& stats
-) {
-    Result result;
-    std::vector<SheetState> states;
-    states.reserve(16);
-
-    if (order.empty()) return result;
-
-    for (std::size_t position = 0; position < order.size(); ++position) {
-        const auto& instance = instances[order[position]];
-
-        std::vector<int> rotations = options.rotations;
-        if (rotations.empty()) rotations.push_back(0);
-        if (position > 0) std::shuffle(rotations.begin(), rotations.end(), rng);
-
-        // Evaluate every existing sheet, but roll back each trial instead
-        // of copying the whole SheetState. Only the winning newly-added shape
-        // is retained. This is materially cheaper for large nesting jobs.
-        std::size_t bestSheet = states.size();
-        PlacedShape bestShape;
-        Placement bestPlacement{};
-        double bestEnvelopeArea = std::numeric_limits<double>::infinity();
-        double bestEnvelopeY = std::numeric_limits<double>::infinity();
-        double bestEnvelopeX = std::numeric_limits<double>::infinity();
-        bool foundExisting = false;
-
-        for (std::size_t s = 0; s < states.size(); ++s) {
-            auto trialRotations = rotations;
-            if (s > 0) std::rotate(
-                trialRotations.begin(),
-                trialRotations.begin() + static_cast<std::ptrdiff_t>(s % trialRotations.size()),
-                trialRotations.end()
-            );
-
-            auto& state = states[s];
-            const std::size_t oldShapeCount = state.shapes.size();
-            const std::size_t oldPlacementCount = state.placements.size();
-            const double oldPlacedArea = state.placedArea;
-
-            if (!placeOnSheet(
-                    instance,
-                    sheet,
-                    options,
-                    state,
-                    trialRotations,
-                    &stats
-                )) {
-                continue;
-            }
-
-            const auto candidateShape = state.shapes.back();
-            Bounds envelope = bounds(candidateShape.outer);
-            for (std::size_t i = 0; i + 1 < state.shapes.size(); ++i) {
-                const auto b = bounds(state.shapes[i].outer);
-                envelope.minX = std::min(envelope.minX, b.minX);
-                envelope.minY = std::min(envelope.minY, b.minY);
-                envelope.maxX = std::max(envelope.maxX, b.maxX);
-                envelope.maxY = std::max(envelope.maxY, b.maxY);
-            }
-            const double area = envelope.width() * envelope.height();
-
-            if (!foundExisting ||
-                area + kEps < bestEnvelopeArea ||
-                (std::abs(area - bestEnvelopeArea) <= kEps &&
-                 std::tie(envelope.maxY, envelope.maxX) <
-                     std::tie(bestEnvelopeY, bestEnvelopeX))) {
-                foundExisting = true;
-                bestSheet = s;
-                bestShape = candidateShape;
-                bestPlacement = state.placements.back();
-                bestEnvelopeArea = area;
-                bestEnvelopeY = envelope.maxY;
-                bestEnvelopeX = envelope.maxX;
-            }
-
-            state.shapes.resize(oldShapeCount);
-            state.placements.resize(oldPlacementCount);
-            state.placedArea = oldPlacedArea;
-        }
-
-        bool placed = false;
-        if (foundExisting) {
-            auto& state = states[bestSheet];
-            state.shapes.push_back(std::move(bestShape));
-            state.placements.push_back(bestPlacement);
-            state.placedArea += materialArea(instance.part);
-            placed = true;
-        } else {
-            SheetState state;
-            placed = placeOnSheet(
-                instance,
-                sheet,
-                options,
-                state,
-                rotations,
-                &stats
-            );
-            if (placed) states.push_back(std::move(state));
-        }
-        if (!placed) result.unplaced.push_back(instance.id);
-    }
-
-    result.sheets.reserve(states.size());
-    double placedArea = 0.0;
-    for (auto& state : states) {
-        result.sheets.push_back(std::move(state.placements));
-        placedArea += state.placedArea;
-    }
-
-    const double sheetArea = std::max(0.0, sheet.width * sheet.height);
-    result.utilization =
-        (sheetArea > 0.0 && !result.sheets.empty())
-            ? placedArea / (sheetArea * result.sheets.size())
-            : 0.0;
-
-    compactResult(
-        instances,
-        sheet,
-        options,
-        result,
-        &stats
-    );
-
-    result.stats = stats;
-
-    return result;
-}
-
-} // namespace
-
-Result nest(
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options
-) {
-    Result best;
-    best.unplaced.reserve(instances.size());
-    for (const auto& instance : instances) {
-        best.unplaced.push_back(instance.id);
-    }
-    best.utilization = -1.0;
-
-    if (sheet.width <= 0.0 || sheet.height <= 0.0) {
-        best.unplaced.reserve(instances.size());
-        for (const auto& instance : instances) best.unplaced.push_back(instance.id);
-        best.utilization = 0.0;
-        return best;
-    }
-
-    std::vector<std::size_t> order(instances.size());
-    std::iota(order.begin(), order.end(), 0);
-
-    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        const double areaA = materialArea(instances[a].part);
-        const double areaB = materialArea(instances[b].part);
-        if (std::abs(areaA - areaB) > kEps) return areaA > areaB;
-
-        const auto ba = bounds(instances[a].part.outer);
-        const auto bb = bounds(instances[b].part.outer);
-        return std::max(ba.width(), ba.height()) >
-               std::max(bb.width(), bb.height());
-    });
-
-    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(options.iterations, 128u));
-    std::mt19937 rng(options.seed);
-
-    for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
-        auto attemptOrder = order;
-
-        if (attempt > 0) {
-            std::shuffle(attemptOrder.begin(), attemptOrder.end(), rng);
-        }
-
-        NestingStats attemptStats;
-        auto candidate = runAttempt(
-            instances,
-            sheet,
-            options,
-            std::move(attemptOrder),
-            rng,
-            attemptStats
-        );
-        candidate.stats = attemptStats;
-
-        if (best.utilization < 0.0 || betterResult(candidate, best)) {
-            best = std::move(candidate);
-        }
-
-        // A feasible single-sheet result with every requested instance is a
-        // hard lower bound on the primary objective, so further restarts can
-        // only improve secondary utilization.
-        if (best.unplaced.empty() && best.sheets.size() == 1) {
-            // Keep searching when explicitly requested; the utilization
-            // comparison still decides whether another restart is better.
-        }
-    }
-
-    return best;
-}
-
-} // namespace sheetnest
