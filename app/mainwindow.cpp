@@ -346,6 +346,14 @@ void MainWindow::buildUi() {
     laserPlayButton_ = new QPushButton("▶ Запуск");
     laserPauseButton_ = new QPushButton("⏸ Пауза");
     laserResetButton_ = new QPushButton("↺ В начало");
+    laserPrevButton_ = new QPushButton("◀ Предыдущая");
+    laserNextButton_ = new QPushButton("Следующая ▶");
+
+    laserOperationCombo_ = new QComboBox;
+    laserOperationCombo_->setMinimumWidth(260);
+    laserOperationCombo_->setToolTip(
+        "Выберите деталь или контур для перехода к нему"
+    );
 
     laserSpeedCombo_ = new QComboBox;
     laserSpeedCombo_->addItem("0.5×", 0.5);
@@ -363,12 +371,19 @@ void MainWindow::buildUi() {
     laserLayout->addWidget(laserPlayButton_, 0, 0);
     laserLayout->addWidget(laserPauseButton_, 0, 1);
     laserLayout->addWidget(laserResetButton_, 0, 2);
-    laserLayout->addWidget(new QLabel("Скорость:"), 1, 0);
-    laserLayout->addWidget(laserSpeedCombo_, 1, 1);
-    laserLayout->addWidget(laserStageLabel_, 1, 2);
+    laserLayout->addWidget(laserPrevButton_, 0, 3);
+    laserLayout->addWidget(laserNextButton_, 0, 4);
+    laserLayout->addWidget(new QLabel("Операция:"), 1, 0);
+    laserLayout->addWidget(laserOperationCombo_, 1, 1, 1, 2);
+    laserLayout->addWidget(new QLabel("Скорость:"), 1, 3);
+    laserLayout->addWidget(laserSpeedCombo_, 1, 4);
+    laserLayout->addWidget(laserStageLabel_, 2, 0, 1, 5);
 
     laserPauseButton_->setEnabled(false);
     laserResetButton_->setEnabled(false);
+    laserPrevButton_->setEnabled(false);
+    laserNextButton_->setEnabled(false);
+    laserOperationCombo_->setEnabled(false);
     laserSpeedCombo_->setEnabled(false);
 
     controlLayout->addWidget(laserControls);
@@ -741,6 +756,33 @@ void MainWindow::connectUi() {
             resetLaserAnimation();
         }
     );
+
+    connect(
+        laserPrevButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            laserPreviousOperation();
+        }
+    );
+    connect(
+        laserNextButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            laserNextOperation();
+        }
+    );
+    connect(
+        laserOperationCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int index) {
+            if (index >= 0) {
+                laserSelectOperation(index);
+            }
+        }
+    );
     connect(
         laserSpeedCombo_,
         qOverload<int>(&QComboBox::currentIndexChanged),
@@ -799,6 +841,7 @@ void MainWindow::connectUi() {
             validation_ = output.validation;
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
+            populateLaserOperationSelector();
 
             {
                 const QSignalBlocker blocker(
@@ -1507,6 +1550,9 @@ void MainWindow::calculate() {
 
     pauseLaserAnimation();
     resetLaserAnimation();
+    if (laserOperationCombo_) {
+        laserOperationCombo_->clear();
+    }
 
     setBusy(true);
     calculationStartedMs_ = QDateTime::currentMSecsSinceEpoch();
@@ -2326,6 +2372,106 @@ void MainWindow::refreshAdaptiveRepairView() {
     );
 }
 
+void MainWindow::populateLaserOperationSelector() {
+    if (!laserOperationCombo_ || !view_) return;
+
+    const QSignalBlocker blocker(laserOperationCombo_);
+    laserOperationCombo_->clear();
+
+    const auto& operations = view_->cuttingRouteOperations();
+    for (const auto& op : operations) {
+        const QString type =
+            op.inner ? "внутренний контур" : "внешний контур";
+        const QString detail =
+            QString::fromStdString(op.instanceId);
+
+        const QString label =
+            op.inner
+                ? QString(
+                    "Операция %1 • лист %2 • %3 • отверстие %4 • %5"
+                )
+                    .arg(static_cast<qulonglong>(op.operation + 1))
+                    .arg(static_cast<qulonglong>(op.sheetIndex + 1))
+                    .arg(detail)
+                    .arg(static_cast<qulonglong>(op.contourIndex + 1))
+                    .arg(type)
+                : QString(
+                    "Операция %1 • лист %2 • %3 • внешний контур"
+                )
+                    .arg(static_cast<qulonglong>(op.operation + 1))
+                    .arg(static_cast<qulonglong>(op.sheetIndex + 1))
+                    .arg(detail);
+
+        laserOperationCombo_->addItem(
+            label,
+            static_cast<int>(op.operation)
+        );
+    }
+
+    laserAnimationOperation_ = -1;
+    if (!operations.empty()) {
+        laserOperationCombo_->setCurrentIndex(0);
+    }
+    updateLaserAnimationUi();
+}
+
+void MainWindow::laserSelectOperation(int index) {
+    if (!view_) return;
+
+    const auto& operations = view_->cuttingRouteOperations();
+    if (index < 0 ||
+        static_cast<std::size_t>(index) >= operations.size()) {
+        return;
+    }
+
+    pauseLaserAnimation();
+
+    laserAnimationOperation_ = index;
+    laserAnimationProgress_ = 0.0;
+    view_->setCuttingAnimationOperation(index);
+    view_->setCuttingAnimationProgress(0.0);
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::laserPreviousOperation() {
+    const auto& operations = view_->cuttingRouteOperations();
+    if (operations.empty()) return;
+
+    const int current =
+        laserAnimationOperation_ >= 0
+            ? laserAnimationOperation_
+            : 0;
+    const int target = std::max(0, current - 1);
+
+    laserSelectOperation(target);
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(target);
+    }
+}
+
+void MainWindow::laserNextOperation() {
+    const auto& operations = view_->cuttingRouteOperations();
+    if (operations.empty()) return;
+
+    const int current =
+        laserAnimationOperation_ >= 0
+            ? laserAnimationOperation_
+            : -1;
+    const int target = std::min(
+        static_cast<int>(operations.size()) - 1,
+        current + 1
+    );
+
+    laserSelectOperation(target);
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(target);
+    }
+}
+
 void MainWindow::toggleLaserAnimation() {
     if (!cuttingRouteCheck_ ||
         !cuttingRouteCheck_->isChecked() ||
@@ -2335,6 +2481,8 @@ void MainWindow::toggleLaserAnimation() {
 
     if (laserAnimationProgress_ >= 1.0 - 1e-9) {
         laserAnimationProgress_ = 0.0;
+        laserAnimationOperation_ = -1;
+        view_->setCuttingAnimationOperation(-1);
     }
 
     laserAnimationPlaying_ = true;
@@ -2357,6 +2505,16 @@ void MainWindow::pauseLaserAnimation() {
 void MainWindow::resetLaserAnimation() {
     laserAnimationPlaying_ = false;
     laserAnimationProgress_ = 1.0;
+    laserAnimationOperation_ = -1;
+
+    if (view_) {
+        view_->setCuttingAnimationOperation(-1);
+    }
+
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(-1);
+    }
 
     if (laserAnimationTimer_) {
         laserAnimationTimer_->stop();
@@ -2396,6 +2554,8 @@ void MainWindow::advanceLaserAnimation() {
 
     if (laserAnimationProgress_ >= 1.0) {
         laserAnimationProgress_ = 1.0;
+        laserAnimationOperation_ = -1;
+        view_->setCuttingAnimationOperation(-1);
         laserAnimationPlaying_ = false;
         if (laserAnimationTimer_) {
             laserAnimationTimer_->stop();
@@ -2426,6 +2586,21 @@ void MainWindow::updateLaserAnimationUi() {
     if (laserPauseButton_) {
         laserPauseButton_->setEnabled(
             hasRoute && laserAnimationPlaying_
+        );
+    }
+    if (laserPrevButton_) {
+        laserPrevButton_->setEnabled(
+            hasRoute && !laserAnimationPlaying_
+        );
+    }
+    if (laserNextButton_) {
+        laserNextButton_->setEnabled(
+            hasRoute && !laserAnimationPlaying_
+        );
+    }
+    if (laserOperationCombo_) {
+        laserOperationCombo_->setEnabled(
+            hasRoute && !laserAnimationPlaying_
         );
     }
     if (laserResetButton_) {
