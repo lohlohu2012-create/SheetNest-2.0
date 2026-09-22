@@ -2453,67 +2453,6 @@ Result nest(
     return best;
 }
 
-BenchmarkCase benchmarkNest(
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options
-) {
-    auto collect = [](const Result& result, double milliseconds) {
-        BenchmarkMetrics metrics;
-        metrics.milliseconds = milliseconds;
-        metrics.sheets = result.sheets.size();
-        for (const auto& placements : result.sheets) {
-            metrics.placed += placements.size();
-        }
-        metrics.skipped = result.unplaced.size();
-        metrics.candidateChecks = result.stats.candidateChecks;
-        metrics.collisionChecks = result.stats.collisionChecks;
-        metrics.nfpChecks = result.stats.nfpChecks;
-        metrics.refillMoves = result.stats.refillMoves;
-        metrics.exchangeAttempts = result.stats.exchangeAttempts;
-        metrics.sheetsEliminated = result.stats.sheetsEliminated;
-        metrics.optimizerPasses = result.stats.optimizerPasses;
-        metrics.nfpTimeouts = result.stats.nfpTimeouts;
-        metrics.nfpComplexityFallbacks = result.stats.nfpComplexityFallbacks;
-        return metrics;
-    };
-
-    Options baselineOptions = options;
-    baselineOptions.iterations = 1;
-    baselineOptions.enableOptimizer = false;
-    baselineOptions.enableProductionValidation = false;
-    baselineOptions.enableAutoRepair = false;
-    baselineOptions.enableAdaptiveDestroyRepair = false;
-    baselineOptions.enableSmallPartOptimization = false;
-    baselineOptions.smallPartRefillPasses = 1;
-    baselineOptions.control.reset();
-
-    const auto baselineStart = std::chrono::steady_clock::now();
-    const Result baselineResult =
-        nest(instances, sheet, baselineOptions);
-    const auto baselineEnd = std::chrono::steady_clock::now();
-
-    const auto optimizedStart = std::chrono::steady_clock::now();
-    const Result optimizedResult =
-        nest(instances, sheet, options);
-    const auto optimizedEnd = std::chrono::steady_clock::now();
-
-    BenchmarkCase benchmark;
-    benchmark.baseline = collect(
-        baselineResult,
-        std::chrono::duration<double, std::milli>(
-            baselineEnd - baselineStart
-        ).count()
-    );
-    benchmark.optimized = collect(
-        optimizedResult,
-        std::chrono::duration<double, std::milli>(
-            optimizedEnd - optimizedStart
-        ).count()
-    );
-    return benchmark;
-}
-
 bool optimizeNestingResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
