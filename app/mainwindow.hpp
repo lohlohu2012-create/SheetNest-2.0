@@ -22,6 +22,7 @@ class QSpinBox;
 class QPushButton;
 class QTableWidget;
 class QTabWidget;
+class QTimer;
 
 class NestView;
 
@@ -59,6 +60,12 @@ private:
     void updateProgress(const sheetnest::NestingProgress& progress);
     void setBusy(bool busy);
     void refreshAdaptiveRepairView();
+    void resetAdaptiveRepairAnimation();
+    void toggleAdaptiveRepairAnimation();
+    void pauseAdaptiveRepairAnimation();
+    void stepAdaptiveRepairAnimation(int direction);
+    void advanceAdaptiveRepairAnimation();
+    void updateAdaptiveRepairAnimationUi();
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
@@ -118,6 +125,12 @@ private:
     QCheckBox* repairExtractedLayer_{};
     QCheckBox* repairMovedLayer_{};
     QCheckBox* repairStationaryLayer_{};
+    QPushButton* repairPlayButton_{};
+    QPushButton* repairPauseButton_{};
+    QPushButton* repairPrevButton_{};
+    QPushButton* repairNextButton_{};
+    QComboBox* repairSpeedCombo_{};
+    QLabel* repairStageLabel_{};
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
@@ -130,7 +143,11 @@ private:
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
     bool repairRequested_{false};
+    bool repairAnimationPlaying_{false};
+    int repairAnimationFrame_{0};
     sheetnest::ProductionValidationReport validation_{};
+
+    QTimer* repairAnimationTimer_{};
 
     std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
     QFutureWatcher<CalculationOutput>* watcher_{};
