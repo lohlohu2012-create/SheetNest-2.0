@@ -7,12 +7,16 @@
 #include <QPen>
 #include <QBrush>
 #include <QWheelEvent>
-#include <QPolygonF>\n#include <QGraphicsLineItem>\n#include <QGraphicsEllipseItem>
+#include <QPolygonF>
+#include <QGraphicsLineItem>
+#include <QGraphicsEllipseItem>
 
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>\n#include <algorithm>\n#include <limits>
+#include <vector>
+#include <algorithm>
+#include <limits>
 
 using namespace sheetnest;
 
