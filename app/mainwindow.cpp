@@ -2429,7 +2429,7 @@ void MainWindow::populateLaserOperationSelector() {
         const QString label =
             op.inner
                 ? QString(
-                    "Операция %1 • лист %2 • %3 • отверстие %4 • %5 • %6 мм"
+                    "Операция %1 • лист %2 • %3 • отверстие %4 • %5 • %6 мм • %7 с"
                 )
                     .arg(static_cast<qulonglong>(op.operation + 1))
                     .arg(static_cast<qulonglong>(op.sheetIndex + 1))
@@ -2439,7 +2439,7 @@ void MainWindow::populateLaserOperationSelector() {
                     .arg(op.cutLengthMm, 0, 'f', 1)
                     .arg(op.totalSeconds, 0, 'f', 1)
                 : QString(
-                    "Операция %1 • лист %2 • %3 • внешний контур • %4 мм"
+                    "Операция %1 • лист %2 • %3 • внешний контур • %4 мм • %5 с"
                 )
                     .arg(static_cast<qulonglong>(op.operation + 1))
                     .arg(static_cast<qulonglong>(op.sheetIndex + 1))
