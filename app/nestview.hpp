@@ -1,23 +1,14 @@
 #pragma once
 
 #include <QGraphicsView>
-
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/production_validation.hpp"
-#include "sheetnest/cutting.hpp"
+#include "sheetnest/cutting_path.hpp"
 
 class NestView final : public QGraphicsView {
 public:
-    struct CuttingRouteOperation {
-        std::size_t operation{};
-        std::size_t sheetIndex{};
-        std::string instanceId;
-        bool inner{};
-        std::size_t contourIndex{};
-        double cutLengthMm{};
-        double rapidLengthMm{};
-        double estimatedSeconds{};
-    };
+    using CuttingRouteOperation = sheetnest::CuttingOperation;
+
     explicit NestView(QWidget* parent = nullptr);
 
     void showResult(
@@ -34,13 +25,14 @@ public:
     );
 
     void clearResult();
-
+    void setCuttingRoute(const sheetnest::CuttingPath& route);
     void setCuttingRouteVisible(bool visible);
     void setCuttingAnimationProgress(double progress);
     void setCuttingAnimationOperation(int operation);
     void setCuttingAnimationOperationProgress(int operation, double progress);
+
     const std::vector<CuttingRouteOperation>& cuttingRouteOperations() const {
-        return cuttingRouteOperations_;
+        return cuttingRoute_.operations;
     }
 
 protected:
@@ -51,14 +43,9 @@ private:
     double cuttingAnimationProgress_{1.0};
     int cuttingAnimationOperation_{-1};
     double cuttingAnimationOperationProgress_{0.0};
-    std::vector<CuttingRouteOperation> cuttingRouteOperations_;
+    sheetnest::CuttingPath cuttingRoute_;
 
-    void addCuttingRoute(
-        const sheetnest::Result& result,
-        const std::vector<sheetnest::Instance>& instances,
-        const sheetnest::Sheet& sheet
-    );
-
+    void addCuttingRoute();
     QGraphicsPathItem* addPartItem(
         QGraphicsItem* parent,
         const sheetnest::Instance& instance,
