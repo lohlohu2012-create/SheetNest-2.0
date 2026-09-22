@@ -32,6 +32,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTabWidget>
+#include <QTimer>
 #include <QSignalBlocker>
 #include <QAbstractItemView>
 #include <QtConcurrent>
@@ -364,6 +365,22 @@ void MainWindow::buildUi() {
     repairMovedLayer_->setChecked(true);
     repairStationaryLayer_->setChecked(true);
 
+    repairPlayButton_ = new QPushButton("▶");
+    repairPauseButton_ = new QPushButton("⏸");
+    repairPrevButton_ = new QPushButton("◀");
+    repairNextButton_ = new QPushButton("▶|");
+    repairSpeedCombo_ = new QComboBox;
+    repairSpeedCombo_->addItem("0.5×", 0.5);
+    repairSpeedCombo_->addItem("1×", 1.0);
+    repairSpeedCombo_->addItem("2×", 2.0);
+    repairSpeedCombo_->setCurrentIndex(1);
+
+    repairStageLabel_ = new QLabel("Анимация: готово");
+    repairStageLabel_->setWordWrap(true);
+
+    repairAnimationTimer_ = new QTimer(this);
+    repairAnimationTimer_->setInterval(900);
+
     repairControlsLayout->addWidget(
         new QLabel("История:"), 0, 0
     );
@@ -382,6 +399,34 @@ void MainWindow::buildUi() {
     repairControlsLayout->addWidget(
         repairStationaryLayer_, 1, 3
     );
+
+    repairControlsLayout->addWidget(
+        repairPlayButton_, 2, 0
+    );
+    repairControlsLayout->addWidget(
+        repairPauseButton_, 2, 1
+    );
+    repairControlsLayout->addWidget(
+        repairPrevButton_, 2, 2
+    );
+    repairControlsLayout->addWidget(
+        repairNextButton_, 2, 3
+    );
+    repairControlsLayout->addWidget(
+        new QLabel("Скорость:"), 3, 0
+    );
+    repairControlsLayout->addWidget(
+        repairSpeedCombo_, 3, 1
+    );
+    repairControlsLayout->addWidget(
+        repairStageLabel_, 3, 2, 1, 2
+    );
+
+    repairPlayButton_->setEnabled(false);
+    repairPauseButton_->setEnabled(false);
+    repairPrevButton_->setEnabled(false);
+    repairNextButton_->setEnabled(false);
+    repairSpeedCombo_->setEnabled(false);
 
     repairViewLayout->addWidget(repairControls);
     repairViewLayout->addWidget(view_, 1);
