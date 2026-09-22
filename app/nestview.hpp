@@ -3,6 +3,7 @@
 #include <QGraphicsView>
 
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/production_validation.hpp"
 
 class NestView final : public QGraphicsView {
 public:
@@ -11,7 +12,8 @@ public:
     void showResult(
         const sheetnest::Result& result,
         const std::vector<sheetnest::Instance>& instances,
-        const sheetnest::Sheet& sheet
+        const sheetnest::Sheet& sheet,
+        const sheetnest::ProductionValidationReport* repairVisualization = nullptr
     );
 
     void clearResult();
