@@ -576,12 +576,20 @@ void MainWindow::connectUi() {
                     .arg(static_cast<qulonglong>(validation_.missingIdCount))
             );
 
-            if (validation_.repairAttempts > 0) {
+            if (validation_.repairAttempts > 0 ||
+                validation_.adaptiveRepairRounds > 0) {
                 appendLog(
-                    QString("Auto Repair: %1; попыток=%2, время=%3 мс.")
+                    QString("Auto Repair: %1; adaptive rounds=%2, group=%3, "
+                            "global attempts=%4, время=%5 мс.")
                         .arg(validation_.repaired ? "успешно" : "не удалось")
-                        .arg(static_cast<qulonglong>(validation_.repairAttempts))
-                        .arg(static_cast<qulonglong>(validation_.repairElapsedMs))
+                        .arg(static_cast<qulonglong>(
+                            validation_.adaptiveRepairRounds))
+                        .arg(static_cast<qulonglong>(
+                            validation_.adaptiveRepairGroupSize))
+                        .arg(static_cast<qulonglong>(
+                            validation_.repairAttempts))
+                        .arg(static_cast<qulonglong>(
+                            validation_.repairElapsedMs))
                 );
             }
 
