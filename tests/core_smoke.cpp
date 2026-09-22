@@ -1140,6 +1140,37 @@ void testNestingBenchmark() {
     );
     assert(benchmark.optimized.candidateChecks > 0);
     assert(benchmark.optimized.nfpChecks > 0);
+
+    // BenchmarkCase must expose the complete optimizer telemetry from nest().
+    const optimizedDirect = nest(instances, sheet, options);
+    assert(
+        benchmark.optimized.candidateChecks ==
+        optimizedDirect.stats.candidateChecks
+    );
+    assert(
+        benchmark.optimized.collisionChecks ==
+        optimizedDirect.stats.collisionChecks
+    );
+    assert(
+        benchmark.optimized.nfpChecks ==
+        optimizedDirect.stats.nfpChecks
+    );
+    assert(
+        benchmark.optimized.refillMoves ==
+        optimizedDirect.stats.refillMoves
+    );
+    assert(
+        benchmark.optimized.exchangeAttempts ==
+        optimizedDirect.stats.exchangeAttempts
+    );
+    assert(
+        benchmark.optimized.sheetsEliminated ==
+        optimizedDirect.stats.sheetsEliminated
+    );
+    assert(
+        benchmark.optimized.optimizerPasses ==
+        optimizedDirect.stats.optimizerPasses
+    );
 }
 
 void testMinimumSheets() {
