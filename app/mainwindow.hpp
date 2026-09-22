@@ -113,6 +113,12 @@ private:
     QTableWidget* benchmarkTable_{};
     QTableWidget* validatorTable_{};
 
+    QComboBox* repairRoundCombo_{};
+    QCheckBox* repairConflictLayer_{};
+    QCheckBox* repairExtractedLayer_{};
+    QCheckBox* repairMovedLayer_{};
+    QCheckBox* repairStationaryLayer_{};
+
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
     QPushButton* repairButton_{};
