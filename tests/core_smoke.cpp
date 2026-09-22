@@ -1138,6 +1138,8 @@ void testNestingBenchmark() {
         benchmark.optimized.skipped ==
         instances.size()
     );
+    assert(benchmark.optimized.candidateChecks > 0);
+    assert(benchmark.optimized.nfpChecks > 0);
 }
 
 void testMinimumSheets() {
