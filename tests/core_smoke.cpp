@@ -958,7 +958,71 @@ void testFeasibilityGap() {
     assert(foundExpectedGap);
 }
 
+void testCollinearConcaveNfpRegression() {
+    Polygon fixed{
+        {0,0},
+        {15,0},
+        {30,0},
+        {40,10},
+        {25,10},
+        {25,30},
+        {10,30},
+        {0,30}
+    };
+    Polygon moving = rectangle(8, 6);
+
+    const auto pieces = nfp::convexDecompose(fixed);
+    assert(!pieces.empty());
+
+    const auto polygons =
+        nfp::noFitPolygons(fixed, moving, 0, 0.0);
+
+    assert(!polygons.empty());
+}
+
+void testClearanceCornerSampling() {
+    Polygon fixed = rectangle(20, 20);
+    Polygon moving = rectangle(10, 10);
+
+    const auto region = nfp::feasibilityRegion(
+        fixed,
+        moving,
+        0,
+        -20.0,
+        -20.0,
+        40.0,
+        40.0,
+        2.0
+    );
+
+    assert(!region.boundary.empty());
+
+    const auto points = nfp::pointsOnFeasibilityBoundary(
+        region,
+        1.0,
+        512,
+        false
+    );
+
+    assert(!points.empty());
+
+    bool sawDiagonalClearancePoint = false;
+    for (const auto& point : points) {
+        const double ax = std::abs(point.x);
+        const double ay = std::abs(point.y);
+
+        if (ax > 2.0 + 1e-3 &&
+            ay > 2.0 + 1e-3) {
+            sawDiagonalClearancePoint = true;
+            break;
+        }
+    }
+
+    assert(sawDiagonalClearancePoint);
+}
+
 void testNfpMinkowski() {
+    const Polygon fixed = rectangle(20, 10);void testNfpMinkowski() {
     const Polygon fixed = rectangle(20, 10);
     const Polygon moving = rectangle(5, 4);
 
@@ -1148,6 +1212,8 @@ int main() {
     testDxfModelPipeline();
     testPerPartQuantitiesAndUnitIds();
     testDxfExportRoundTrip();
+    testCollinearConcaveNfpRegression();
+    testClearanceCornerSampling();
     testNfpMinkowski();
     testContinuousConcaveFeasibilityRegion();
     testFeasibilitySamplingBudget();
