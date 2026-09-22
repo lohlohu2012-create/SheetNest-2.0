@@ -57,7 +57,7 @@ struct Result {
 
 struct NestingRunControl {
     std::atomic<bool> cancelRequested{false};
-    std::atomic<bool> timeoutObserved{false};
+    mutable std::atomic<bool> timeoutObserved{false};
     std::chrono::steady_clock::time_point deadline =
         std::chrono::steady_clock::time_point::max();
 
