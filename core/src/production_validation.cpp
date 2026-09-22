@@ -1,4 +1,5 @@
 #include "sheetnest/production_validation.hpp"
+#include "sheetnest/spatial_index.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -500,23 +501,29 @@ ProductionValidationReport validateProductionResult(
         }
     }
 
+    // Build one broad-phase index per sheet. The exact material-overlap
+    // and boundary-distance predicates below remain authoritative.
+    std::vector<SpatialIndex> sheetIndexes(result.sheets.size());
+    for (const auto& item : placed) {
+        const auto sheetIndex = item.sheetIndex;
+        if (sheetIndex >= sheetIndexes.size()) continue;
+        sheetIndexes[sheetIndex].insert(
+            static_cast<std::size_t>(&item - placed.data()),
+            item.bounds
+        );
+    }
+
     for (std::size_t i = 0;
          i < placed.size();
          ++i) {
-        for (std::size_t j = i + 1;
-             j < placed.size();
-             ++j) {
-            if (placed[i].sheetIndex != placed[j].sheetIndex) {
-                continue;
-            }
+        const auto nearby = sheetIndexes[placed[i].sheetIndex].query(
+            placed[i].bounds,
+            requiredGap
+        );
 
-            if (!boundsCanConflict(
-                    placed[i].bounds,
-                    placed[j].bounds,
-                    requiredGap
-                )) {
-                continue;
-            }
+        for (const auto j : nearby) {
+            if (j <= i || j >= placed.size()) continue;
+            if (placed[i].sheetIndex != placed[j].sheetIndex) continue;
 
             if (materialOverlap(
                     placed[i].shape,
@@ -565,7 +572,6 @@ ProductionValidationReport validateProductionResult(
             }
         }
     }
-
     return report;
 }
 
