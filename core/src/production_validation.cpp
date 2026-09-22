@@ -687,6 +687,99 @@ bool repairProductionResult(
         return ids;
     };
 
+    auto makeRoundSnapshot = [](
+        std::size_t roundIndex,
+        const std::vector<std::string>& conflictIds,
+        const std::vector<std::string>& extractedIds,
+        const Result& before,
+        const Result& after
+    ) {
+        AdaptiveRepairRound roundSnapshot;
+        roundSnapshot.roundIndex = roundIndex;
+        roundSnapshot.conflictIds = conflictIds;
+        roundSnapshot.extractedIds = extractedIds;
+
+        std::unordered_set<std::string> conflictSet(
+            conflictIds.begin(),
+            conflictIds.end()
+        );
+        std::unordered_set<std::string> extractedSet(
+            extractedIds.begin(),
+            extractedIds.end()
+        );
+
+        std::unordered_map<std::string, Placement> afterById;
+        std::unordered_map<std::string, std::size_t> afterSheetById;
+
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < after.sheets.size();
+             ++sheetIndex) {
+            for (const auto& placement : after.sheets[sheetIndex]) {
+                afterById[placement.id] = placement;
+                afterSheetById[placement.id] = sheetIndex;
+            }
+        }
+
+        auto samePlacement = [](
+            const Placement& a,
+            const Placement& b
+        ) {
+            constexpr double eps = 1e-6;
+            return a.id == b.id &&
+                   std::abs(a.x - b.x) <= eps &&
+                   std::abs(a.y - b.y) <= eps &&
+                   a.rotation == b.rotation;
+        };
+
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < before.sheets.size();
+             ++sheetIndex) {
+            for (const auto& beforePlacement :
+                 before.sheets[sheetIndex]) {
+                const auto afterIt =
+                    afterById.find(beforePlacement.id);
+                const auto afterSheetIt =
+                    afterSheetById.find(beforePlacement.id);
+
+                if (afterIt == afterById.end() ||
+                    afterSheetIt == afterSheetById.end()) {
+                    continue;
+                }
+
+                AdaptiveRepairChange change;
+                change.sheetIndex = sheetIndex;
+                change.afterSheetIndex = afterSheetIt->second;
+                change.before = beforePlacement;
+                change.after = afterIt->second;
+                change.conflictGroup =
+                    conflictSet.contains(beforePlacement.id);
+                change.extracted =
+                    extractedSet.contains(beforePlacement.id);
+                change.moved =
+                    !samePlacement(
+                        beforePlacement,
+                        afterIt->second
+                    ) ||
+                    afterSheetIt->second != sheetIndex;
+                change.stationary = !change.moved;
+
+                roundSnapshot.changes.push_back(change);
+
+                if (change.moved) {
+                    roundSnapshot.movedIds.push_back(
+                        beforePlacement.id
+                    );
+                } else {
+                    roundSnapshot.stationaryIds.push_back(
+                        beforePlacement.id
+                    );
+                }
+            }
+        }
+
+        return roundSnapshot;
+    };
+
     // Stage 0: adaptive destroy-and-repair. Only the conflict-driven local
     // group is extracted; unrelated placements remain fixed. Each round is
     // immediately checked by the Production Validator, and a new conflict
