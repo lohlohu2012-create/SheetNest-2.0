@@ -1,6 +1,7 @@
 #include "sheetnest/benchmark.hpp"
 
 #include <chrono>
+#include <unordered_set>
 
 namespace sheetnest {
 namespace {
@@ -34,6 +35,17 @@ BenchmarkCase runCase(
     benchmark.optimizerPasses = result.stats.optimizerPasses;
     benchmark.nfpTimeouts = result.stats.nfpTimeouts;
     benchmark.nfpComplexityFallbacks = result.stats.nfpComplexityFallbacks;
+    std::unordered_set<std::string> skipped(
+        result.unplaced.begin(),
+        result.unplaced.end()
+    );
+    benchmark.skippedInstanceIds = result.unplaced;
+    benchmark.placedInstanceIds.reserve(instances.size() - benchmark.skipped);
+    for (const auto& instance : instances) {
+        if (skipped.find(instance.id) == skipped.end()) {
+            benchmark.placedInstanceIds.push_back(instance.id);
+        }
+    }
     return benchmark;
 }
 
