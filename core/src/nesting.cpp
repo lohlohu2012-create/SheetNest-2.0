@@ -1,6 +1,7 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/production_validation.hpp"
+#include "sheetnest/spatial_index.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +35,7 @@ struct SheetState {
     std::vector<PlacedShape> shapes;
     std::vector<Placement> placements;
     double placedArea{};
+    SpatialIndex spatialIndex{};
 };
 
 struct Candidate {
@@ -595,6 +597,15 @@ bool placeOnSheet(
     int bestRotation = 0;
     std::vector<PlacedShape> bestShapes;
 
+    if (state.spatialIndex.size() != state.shapes.size()) {
+        std::vector<Bounds> indexedBounds;
+        indexedBounds.reserve(state.shapes.size());
+        for (const auto& existing : state.shapes) {
+            indexedBounds.push_back(existing.outerBounds);
+        }
+        state.spatialIndex.rebuild(indexedBounds);
+    }
+
     const double margin = std::max(0.0, sheet.edgeMarginMm);
 
     for (int rotation : rotations) {
@@ -631,9 +642,18 @@ bool placeOnSheet(
             if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) continue;
 
             bool collision = false;
-            for (const auto& existing : state.shapes) {
+            const auto nearby = state.spatialIndex.query(
+                shape.outerBounds,
+                options.gapMm
+            );
+            for (const auto existingIndex : nearby) {
+                if (existingIndex >= state.shapes.size()) continue;
                 if (stats) ++stats->collisionChecks;
-                if (conflict(shape, existing, options.gapMm)) {
+                if (conflict(
+                        shape,
+                        state.shapes[existingIndex],
+                        options.gapMm
+                    )) {
                     collision = true;
                     break;
                 }
@@ -672,9 +692,18 @@ bool placeOnSheet(
                 if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) continue;
 
                 bool collision = false;
-                for (const auto& existing : state.shapes) {
+                const auto nearby = state.spatialIndex.query(
+                    shape.outerBounds,
+                    options.gapMm
+                );
+                for (const auto existingIndex : nearby) {
+                    if (existingIndex >= state.shapes.size()) continue;
                     if (stats) ++stats->collisionChecks;
-                    if (conflict(shape, existing, options.gapMm)) {
+                    if (conflict(
+                            shape,
+                            state.shapes[existingIndex],
+                            options.gapMm
+                        )) {
                         collision = true;
                         break;
                     }
@@ -704,6 +733,10 @@ bool placeOnSheet(
     state.shapes.push_back(chosen);
     state.placements.push_back(chosen.placement);
     state.placedArea += materialArea(instance.part);
+    state.spatialIndex.insert(
+        state.shapes.size() - 1,
+        chosen.outerBounds
+    );
     return true;
 }
 
@@ -738,6 +771,9 @@ SheetState stateFromPlacements(
     state.shapes.reserve(placements.size());
     state.placements = placements;
 
+    std::vector<Bounds> indexedBounds;
+    indexedBounds.reserve(placements.size());
+
     for (const auto& placement : placements) {
         const auto* instance =
             findInstance(instances, placement.id);
@@ -752,8 +788,10 @@ SheetState stateFromPlacements(
             )
         );
         state.placedArea += materialArea(instance->part);
+        indexedBounds.push_back(state.shapes.back().outerBounds);
     }
 
+    state.spatialIndex.rebuild(indexedBounds);
     return state;
 }
 
