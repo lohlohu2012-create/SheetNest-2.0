@@ -4,6 +4,8 @@ add_executable(SheetNest
     main.cpp
     mainwindow.cpp
     mainwindow.hpp
+    splashscreen.cpp
+    splashscreen.hpp
     nestview.cpp
     nestview.hpp
 )
@@ -13,6 +15,7 @@ target_link_libraries(SheetNest
         sheetnest_core
         Qt6::Widgets
         Qt6::Concurrent
+        Qt6::Gui
 )
 
 target_include_directories(SheetNest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
