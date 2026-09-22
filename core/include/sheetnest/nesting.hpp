@@ -88,6 +88,8 @@ struct Options {
     std::uint32_t seed{0x534E4553u};
     bool enableOptimizer{true};
     bool enableProductionValidation{true};
+    bool enableAutoRepair{true};
+    std::size_t autoRepairAttempts{3};
     std::shared_ptr<NestingRunControl> control{};
 };
 
