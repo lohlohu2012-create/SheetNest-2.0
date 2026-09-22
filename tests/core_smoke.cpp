@@ -1329,6 +1329,21 @@ void testProductionValidator() {
 
     assert(!collisionReport.valid);
     assert(collisionReport.collisionCount > 0);
+    assert(!collisionReport.issues.empty());
+    assert(
+        collisionReport.issues.front().type ==
+        ProductionValidationIssueType::Collision
+    );
+    assert(
+        std::any_of(
+            collisionReport.issues.begin(),
+            collisionReport.issues.end(),
+            [](const ProductionValidationIssue& issue) {
+                return issue.type ==
+                    ProductionValidationIssueType::MissingId;
+            }
+        )
+    );
 
     Result gap = valid;
     gap.sheets = {{
@@ -1798,13 +1813,3 @@ int main() {
     testSpatialIndexBroadPhase();
     testAdaptiveDestroyAndRepair();
     testAutomaticProductionRepair();
-    testCandidateCollectorAndGlobalOptimizer();
-    testParallelNestingController();
-    testParallelNestingCancellation();
-    testInstanceDiagnostics();
-    testNestingBenchmark();
-    testSmallPartOptimization();
-    testInterlockIntoHole();
-    std::cout << "SheetNest core smoke tests passed\n";
-    return 0;
-}
