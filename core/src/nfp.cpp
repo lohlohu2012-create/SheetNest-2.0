@@ -636,6 +636,10 @@ std::vector<Polygon> computeUnionNfp(
 
     for (const auto& fixedPiece : fixedPieces) {
         if (control && control->stop()) return {};
+        if (control && pairwise.size() >= control->maxPairwisePolygons) {
+            control->complexityFallback();
+            break;
+        }
         for (const auto& movingPiece : movingPieces) {
             if (control && control->stop()) return {};
             const auto reflectedPiece = reflected(movingPiece);
