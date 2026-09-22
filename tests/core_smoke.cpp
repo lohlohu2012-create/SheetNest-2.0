@@ -719,6 +719,126 @@ void testNfpUnionAndCache() {
     assert(afterSecond.entries == 1);
 }
 
+void testNfpComplexContourMatrix() {
+    nfp::clearCache();
+
+    // Convex: baseline must be non-empty and deterministic.
+    const Polygon convex = rectangle(40.0, 20.0);
+    const Polygon tool = rectangle(7.0, 5.0);
+    const auto convexNfp = nfp::noFitPolygons(convex, tool, 0, 0.0);
+    assert(!convexNfp.empty());
+
+    // Strongly concave U/L-like contour with a narrow passage. The NFP must
+    // survive reflex vertices and still expose a continuous boundary.
+    const Polygon narrowConcave{
+        {0,0},{60,0},{60,10},{35,10},{35,38},
+        {25,38},{25,10},{0,10}
+    };
+    const auto concaveNfp = nfp::noFitPolygons(
+        narrowConcave,
+        rectangle(8,8),
+        90,
+        1.0
+    );
+    assert(!concaveNfp.empty());
+
+    const auto narrowRegion = nfp::feasibilityRegion(
+        narrowConcave,
+        rectangle(8,8),
+        0,
+        -20.0,-20.0,80.0,60.0,
+        1.0
+    );
+    assert(!narrowRegion.boundary.empty());
+    const auto narrowCandidates = nfp::pointsOnFeasibilityBoundary(
+        narrowRegion, 0.5, 256, true
+    );
+    assert(!narrowCandidates.empty());
+
+    // Near-degenerate segments: repeated points, tiny collinear runs and a
+    // very short edge must not collapse the NFP stage.
+    const Polygon degenerate{
+        {0,0},{30,0},{30,0},{30,1e-10},{30,20},
+        {15,20},{15,20},{0,20},{0,0}
+    };
+    const auto degenerateNfp = nfp::noFitPolygons(
+        degenerate,
+        rectangle(5,5),
+        0,
+        0.5
+    );
+    assert(!degenerateNfp.empty());
+}
+
+void testNfpHolePipeline() {
+    // NFP is built from the outer contour; holes are retained by Part and
+    // checked by the exact production validator. Verify that a DXF hole
+    // survives import and the resulting part can pass the complete nesting
+    // pipeline without the NFP stage producing zero candidates.
+    const auto doc = importDxf(kRectangleWithHoleDxf, 0.05);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(doc.contours.front().holes.size() == 1);
+
+    const auto instances = instancesFromDxf(doc, 1);
+    assert(instances.size() == 1);
+
+    Sheet sheet{140.0, 140.0, 2.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 4;
+    options.gapMm = 1.0;
+    options.enableOptimizer = false;
+    options.enableAdaptiveDestroyRepair = false;
+    options.enableAutoRepair = false;
+
+    const auto result = nest(instances, sheet, options);
+    assert(result.unplaced.empty());
+    assert(!result.sheets.empty());
+}
+
+void testNfpTimeoutRecovery() {
+    auto control = std::make_shared<NestingRunControl>();
+    control->deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(1);
+
+    std::vector<Instance> parts;
+    for (int i = 0; i < 48; ++i) {
+        parts.push_back({
+            "nfp-timeout-" + std::to_string(i),
+            Part{"timeout", rectangle(13.0, 7.0), {}}
+        });
+    }
+
+    Sheet sheet{180.0, 120.0, 1.0};
+    Options options;
+    options.rotations = {0, 90, 180, 270};
+    options.iterations = 32;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.enableAdaptiveDestroyRepair = true;
+    options.control = control;
+
+    const auto result = nest(parts, sheet, options);
+    assert(control->timeoutObserved.load(std::memory_order_relaxed));
+    assert(result.sheets.size() <= parts.size());
+    assert(result.unplaced.size() <= parts.size());
+
+    // Timeout is a controlled termination, not a parser/NFP corruption. Any
+    // already-produced placement must still be representable and unique.
+    std::size_t placed = 0;
+    std::vector<std::string> ids;
+    for (const auto& sheetPlacements : result.sheets) {
+        for (const auto& placement : sheetPlacements) {
+            ++placed;
+            ids.push_back(placement.id);
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    assert(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
+    assert(placed + result.unplaced.size() <= parts.size());
+}
+
 void testNfpDegenerateFallback() {
     nfp::clearCache();
 
@@ -2473,6 +2593,9 @@ int main(int argc, char** argv) {
     testFeasibilitySegmentCoverage();
     testFeasibilityGap();
     testNfpUnionAndCache();
+    testNfpComplexContourMatrix();
+    testNfpHolePipeline();
+    testNfpTimeoutRecovery();
     testNfpDegenerateFallback();
     testConcaveUnionNfp();
     testConcaveNfpCandidates();
