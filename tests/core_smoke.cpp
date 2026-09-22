@@ -1317,6 +1317,59 @@ void testProductionValidator() {
     assert(unexpectedReport.unknownIdCount > 0);
 }
 
+
+void testAutomaticProductionRepair() {
+    std::vector<Instance> instances{
+        {"repair-1", Part{"repair-a", rectangle(10, 10), {}}},
+        {"repair-2", Part{"repair-b", rectangle(10, 10), {}}},
+        {"repair-3", Part{"repair-c", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{100, 100, 2.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 2;
+    options.gapMm = 2.0;
+    options.autoRepairAttempts = 4;
+    options.autoRepairTimeBudgetMs = 3000;
+
+    Result broken;
+    broken.sheets = {{
+        {"repair-1", 2.0, 2.0, 0},
+        {"repair-2", 5.0, 2.0, 0}
+    }};
+    broken.unplaced = {"repair-3"};
+
+    ProductionValidationReport report;
+    const bool repaired =
+        repairProductionResult(
+            instances,
+            sheet,
+            options,
+            broken,
+            &report
+        );
+
+    assert(repaired);
+    assert(report.valid);
+    assert(report.repaired);
+    assert(report.repairAttempts > 0);
+    assert(broken.productionValidated);
+    assert(broken.productionValid);
+    assert(broken.productionIssueCount == 0);
+
+    const auto finalReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            broken
+        );
+    assert(finalReport.valid);
+    assert(broken.unplaced.empty());
+}
+
+
 void testCandidateCollectorAndGlobalOptimizer() {
     NestingCandidateCollector collector(2);
 
@@ -1566,8 +1619,8 @@ int main() {
     testReadableValidationErrors();
     testMinimumSheets();
     testProductionValidator();
+    testAutomaticProductionRepair();
     testCandidateCollectorAndGlobalOptimizer();
-    testProductionValidator();
     testParallelNestingController();
     testParallelNestingCancellation();
     testInstanceDiagnostics();
