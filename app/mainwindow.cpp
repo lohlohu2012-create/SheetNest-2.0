@@ -1,5 +1,7 @@
 #include "mainwindow.hpp"
 #include "nestview.hpp"
+#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/dxf_export.hpp"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -464,18 +466,12 @@ void MainWindow::connectUi() {
             ) % 60;
 
             resultLabel_->setText(
-                QString("Листов: %1
-"
-                        "Размещено: %2
-"
-                        "Не размещено: %3
-"
-                        "Использование: %4%
-"
-                        "Длина реза: %5 м
-"
-                        "Пробивок: %6
-"
+                QString("Листов: %1\n"
+                        "Размещено: %2\n"
+                        "Не размещено: %3\n"
+                        "Использование: %4%\n"
+                        "Длина реза: %5 м\n"
+                        "Пробивок: %6\n"
                         "Время лазерной резки: %7 ч %8 мин")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(static_cast<int>(
@@ -576,14 +572,13 @@ void MainWindow::importDxf() {
     const std::string text(data.constData(),
                            static_cast<std::size_t>(data.size()));
 
-    document_ = importDxf(text, 0.25);
+    document_ = sheetnest::importDxf(text, 0.25);
     parts_ = partsFromDxf(document_);
     currentFile_ = fileName;
     populatePartTable();
 
     fileLabel_->setText(
-        QString("%1
-Контуры: %2")
+        QString("%1\nКонтуры: %2")
             .arg(fileName)
             .arg(static_cast<int>(document_.contours.size()))
     );
