@@ -8,6 +8,20 @@
 
 namespace sheetnest {
 
+struct DxfPreflightReport {
+    bool valid{true};
+    std::size_t validParts{};
+    std::size_t emptyParts{};
+    std::size_t invalidParts{};
+    double minArea{};
+    double maxArea{};
+    std::vector<std::string> issues;
+};
+
+DxfPreflightReport preflightDxf(
+    const DxfDocument& document
+);
+
 std::vector<Part> partsFromDxf(
     const DxfDocument& document
 );
