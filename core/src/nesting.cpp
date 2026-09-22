@@ -1201,11 +1201,36 @@ bool refillExistingSheets(
              sourceIndex-- > 1;) {
             if (shouldStop(options)) break;
 
-            const auto sourceIds =
+            auto sourceIds =
                 orderedPlacementIds(
                     states[sourceIndex],
                     instances
                 );
+
+            // Alternate refill direction: large-first preserves the
+            // existing compaction behavior, while small-first passes are
+            // specifically aimed at recovering narrow residual gaps that
+            // large parts cannot use. Only successful moves are committed.
+            if (pass % 2 == 1) {
+                std::stable_sort(
+                    sourceIds.begin(),
+                    sourceIds.end(),
+                    [&](const std::string& a, const std::string& b) {
+                        const auto* ia = findInstance(instances, a);
+                        const auto* ib = findInstance(instances, b);
+                        const double aa =
+                            ia ? materialArea(ia->part) : 0.0;
+                        const double ab =
+                            ib ? materialArea(ib->part) : 0.0;
+
+                        if (std::abs(aa - ab) > kEps) {
+                            return aa < ab;
+                        }
+
+                        return a < b;
+                    }
+                );
+            }
 
             for (const auto& id : sourceIds) {
                 const auto* instance =
