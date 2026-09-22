@@ -1,0 +1,57 @@
+#pragma once
+
+#include "geometry.hpp"
+#include "nesting.hpp"
+
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace sheetnest {
+
+enum class ProductionValidationIssueType {
+    Collision,
+    Gap,
+    Margin,
+    DuplicateId,
+    MissingId,
+    UnknownId
+};
+
+struct ProductionValidationIssue {
+    ProductionValidationIssueType type{
+        ProductionValidationIssueType::UnknownId
+    };
+    std::size_t sheetIndex{};
+    std::string instanceId;
+    std::string relatedInstanceId;
+    std::string unitId;
+    double measuredMm{};
+    double requiredMm{};
+    std::string message;
+};
+
+struct ProductionValidationReport {
+    bool valid{true};
+    std::size_t checkedPlacements{};
+    std::size_t collisionCount{};
+    std::size_t gapViolationCount{};
+    std::size_t marginViolationCount{};
+    std::size_t duplicateIdCount{};
+    std::size_t missingIdCount{};
+    std::size_t unknownIdCount{};
+    std::vector<ProductionValidationIssue> issues;
+};
+
+ProductionValidationReport validateProductionResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const Result& result
+);
+
+const char* productionValidationIssueTypeName(
+    ProductionValidationIssueType type
+);
+
+} // namespace sheetnest
