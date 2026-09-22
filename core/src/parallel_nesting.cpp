@@ -1,4 +1,5 @@
 #include "sheetnest/parallel_nesting.hpp"
+#include "sheetnest/production_validator.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -30,6 +31,9 @@ const char* phaseMessage(NestingProgressPhase phase) {
     case NestingProgressPhase::Starting: return "Запуск";
     case NestingProgressPhase::WorkerStarted: return "Worker запущен";
     case NestingProgressPhase::IterationFinished: return "Итерация завершена";
+    case NestingProgressPhase::CandidatesCollected: return "Кандидаты собраны";
+    case NestingProgressPhase::GlobalOptimization: return "Глобальная оптимизация";
+    case NestingProgressPhase::ProductionValidation: return "Production Validator";
     case NestingProgressPhase::Completed: return "Расчёт завершён";
     case NestingProgressPhase::Cancelled: return "Расчёт отменён";
     case NestingProgressPhase::TimedOut: return "Достигнут лимит времени";
@@ -260,6 +264,7 @@ Result ParallelNestingController::run(
                 static_cast<std::uint32_t>(workerIndex);
             iterationOptions.control = control;
             iterationOptions.enableOptimizer = false;
+            iterationOptions.enableProductionValidation = false;
 
             const Result candidate =
                 nest(
@@ -394,6 +399,50 @@ Result ParallelNestingController::run(
 
     if (best.utilization < 0.0) {
         best.utilization = 0.0;
+    }
+
+    if (nestingOptions.enableProductionValidation) {
+        const auto validation = validateProductionResult(
+            instances,
+            sheet,
+            nestingOptions,
+            best
+        );
+
+        best.productionValidated = true;
+        best.productionValid = validation.valid;
+        best.productionIssueCount = validation.issues.size();
+
+        std::string message =
+            "Production Validator: " +
+            std::string(validation.valid ? "PASS" : "FAIL") +
+            "; collision=" +
+            std::to_string(validation.collisionCount) +
+            ", gap=" +
+            std::to_string(validation.gapCount) +
+            ", margin=" +
+            std::to_string(validation.marginCount) +
+            ", duplicateIds=" +
+            std::to_string(validation.duplicateIdCount) +
+            ", missingIds=" +
+            std::to_string(validation.missingIdCount);
+
+        publish({
+            NestingProgressPhase::ProductionValidation,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - best.unplaced.size(),
+            best.unplaced.size(),
+            best.sheets.size(),
+            best.utilization,
+            0,
+            0,
+            std::move(message)
+        });
     }
 
     if (control->timeoutObserved.load(
