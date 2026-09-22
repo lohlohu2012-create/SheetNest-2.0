@@ -1022,7 +1022,6 @@ void testClearanceCornerSampling() {
 }
 
 void testNfpMinkowski() {
-    const Polygon fixed = rectangle(20, 10);void testNfpMinkowski() {
     const Polygon fixed = rectangle(20, 10);
     const Polygon moving = rectangle(5, 4);
 
