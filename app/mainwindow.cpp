@@ -1128,6 +1128,16 @@ CalculationOutput MainWindow::performCalculation(
 ) const {
     CalculationOutput output;
     output.technology = technology;
+    bool controllerProvidedValidation = false;
+
+    parallelOptions.onValidation =
+        [&output, &controllerProvidedValidation](
+            const sheetnest::ProductionValidationReport& report
+        ) {
+            output.validation = report;
+            controllerProvidedValidation = true;
+        };
+
     output.result = nestingController_
         ? nestingController_->run(
             instances,
@@ -1140,6 +1150,16 @@ CalculationOutput MainWindow::performCalculation(
             sheet,
             options
         );
+
+    if (!controllerProvidedValidation) {
+        output.validation = validateProductionResult(
+            instances,
+            sheet,
+            options,
+            output.result
+        );
+    }
+
     output.cutting = estimateWholeResult(
         output.result,
         instances,
@@ -1147,12 +1167,6 @@ CalculationOutput MainWindow::performCalculation(
     );
     output.diagnostics = diagnoseNest(
         instances,
-        output.result
-    );
-    output.validation = validateProductionResult(
-        instances,
-        sheet,
-        options,
         output.result
     );
     return output;
