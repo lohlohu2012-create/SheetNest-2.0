@@ -8,7 +8,7 @@
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/parallel_nesting.hpp"
 #include "sheetnest/production_validation.hpp"
-#include "sheetnest/production_validator.hpp"
+#include "sheetnest/production_validation.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -1192,9 +1192,9 @@ void testProductionValidator() {
     Result valid;
     valid.sheets = {{
         {"p1", 2.0, 2.0, 0},
-        {"p2", 14.0, 2.0, 0}
+        {"p2", 14.0, 2.0, 0},
+        {"p3", 26.0, 2.0, 0}
     }};
-    valid.unplaced = {"p3"};
 
     const auto validReport =
         validateProductionResult(
@@ -1206,8 +1206,8 @@ void testProductionValidator() {
 
     assert(validReport.valid);
     assert(validReport.collisionCount == 0);
-    assert(validReport.gapCount == 0);
-    assert(validReport.marginCount == 0);
+    assert(validReport.gapViolationCount == 0);
+    assert(validReport.marginViolationCount == 0);
     assert(validReport.duplicateIdCount == 0);
     assert(validReport.missingIdCount == 0);
 
@@ -1232,9 +1232,9 @@ void testProductionValidator() {
     Result gap = valid;
     gap.sheets = {{
         {"p1", 2.0, 2.0, 0},
-        {"p2", 13.0, 2.0, 0}
+        {"p2", 13.0, 2.0, 0},
+        {"p3", 26.0, 2.0, 0}
     }};
-    gap.unplaced = {"p3"};
 
     const auto gapReport =
         validateProductionResult(
@@ -1249,9 +1249,10 @@ void testProductionValidator() {
 
     Result margin = valid;
     margin.sheets = {{
-        {"p1", 0.0, 2.0, 0}
+        {"p1", 0.0, 2.0, 0},
+        {"p2", 14.0, 2.0, 0},
+        {"p3", 26.0, 2.0, 0}
     }};
-    margin.unplaced = {"p2", "p3"};
 
     const auto marginReport =
         validateProductionResult(
@@ -1267,9 +1268,9 @@ void testProductionValidator() {
     Result duplicate = valid;
     duplicate.sheets = {{
         {"p1", 2.0, 2.0, 0},
-        {"p1", 14.0, 2.0, 0}
+        {"p1", 14.0, 2.0, 0},
+        {"p3", 26.0, 2.0, 0}
     }};
-    duplicate.unplaced = {"p2", "p3"};
 
     const auto duplicateReport =
         validateProductionResult(
@@ -1286,7 +1287,6 @@ void testProductionValidator() {
     missing.sheets = {{
         {"p1", 2.0, 2.0, 0}
     }};
-    missing.unplaced.clear();
 
     const auto missingReport =
         validateProductionResult(
@@ -1302,9 +1302,9 @@ void testProductionValidator() {
     Result unexpected = valid;
     unexpected.sheets = {{
         {"p1", 2.0, 2.0, 0},
-        {"unknown", 20.0, 2.0, 0}
+        {"unknown", 20.0, 2.0, 0},
+        {"p3", 26.0, 2.0, 0}
     }};
-    unexpected.unplaced = {"p2", "p3"};
 
     const auto unexpectedReport =
         validateProductionResult(
@@ -1315,7 +1315,7 @@ void testProductionValidator() {
         );
 
     assert(!unexpectedReport.valid);
-    assert(unexpectedReport.missingIdCount > 0);
+    assert(unexpectedReport.unknownIdCount > 0);
 }
 
 void testCandidateCollectorAndGlobalOptimizer() {
