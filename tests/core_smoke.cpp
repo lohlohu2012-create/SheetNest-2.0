@@ -1511,6 +1511,26 @@ void testPerPartQuantitiesAndUnitIds() {
     assert(instances[1].unitId == "PART_A:unit-2");
     assert(instances[2].unitId == "PART_B:unit-1");
     assert(instances[4].unitId == "PART_B:unit-3");
+
+    Sheet sheet{100.0, 100.0, 1.0};
+    Options options;
+    options.iterations = 1;
+    options.enableOptimizer = false;
+    options.enableProductionValidation = false;
+    options.enableAutoRepair = false;
+    options.enableAdaptiveDestroyRepair = false;
+    options.gapMm = 1.0;
+
+    const auto result = nest(instances, sheet, options);
+    assert(result.instanceTelemetry.size() == instances.size());
+    for (const auto& telemetry : result.instanceTelemetry) {
+        assert(!telemetry.instanceId.empty());
+        assert(!telemetry.unitId.empty());
+        assert(telemetry.elapsedMs >= 0);
+        if (telemetry.placed) {
+            assert(telemetry.reason == NestingFailureReason::None);
+        }
+    }
 }
 
 void testInstanceDiagnostics() {
