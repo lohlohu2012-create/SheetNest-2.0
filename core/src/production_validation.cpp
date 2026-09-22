@@ -747,11 +747,6 @@ bool repairProductionResult(
         }
 
         struct CandidateNeighbor {
-            double distance{};
-            std::string id;
-        };
-
-        struct CandidateNeighbor {
             int priority{};
             double severity{};
             double distance{};
@@ -839,10 +834,6 @@ bool repairProductionResult(
                 return a < b;
             }
         );
-
-        if (ids.size() > maxNeighbors) {
-            ids.resize(maxNeighbors);
-        }
 
         const double roundScale =
             0.35 + 0.35 * static_cast<double>(
