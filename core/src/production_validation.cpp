@@ -567,4 +567,126 @@ ProductionValidationReport validateProductionResult(
     return report;
 }
 
+
+bool repairProductionResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result,
+    ProductionValidationReport* reportOut
+) {
+    ProductionValidationReport initial =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            result
+        );
+
+    if (reportOut) {
+        *reportOut = initial;
+    }
+
+    if (initial.valid) {
+        return false;
+    }
+
+    Options repairOptions = options;
+    repairOptions.enableOptimizer = true;
+    repairOptions.enableProductionValidation = true;
+    repairOptions.iterations = std::clamp<std::size_t>(
+        std::max<std::size_t>(
+            32,
+            options.iterations * 2
+        ),
+        32,
+        128
+    );
+
+    const std::uint32_t baseSeed = options.seed;
+
+    Result bestCandidate;
+    ProductionValidationReport bestReport = initial;
+    bool foundValid = false;
+
+    // Three bounded independent repairs are deliberate: a single greedy
+    // restart can reproduce the same bad packing, while a small seed set
+    // usually recovers a valid layout without turning the Repair button into
+    // an unbounded optimizer.
+    for (std::size_t attempt = 0; attempt < 3; ++attempt) {
+        if (repairOptions.control &&
+            repairOptions.control->shouldStop()) {
+            break;
+        }
+
+        repairOptions.seed =
+            baseSeed +
+            static_cast<std::uint32_t>(
+                attempt * 0x9E3779B9u
+            );
+
+        Result candidate =
+            nest(
+                instances,
+                sheet,
+                repairOptions
+            );
+
+        const auto validation =
+            validateProductionResult(
+                instances,
+                sheet,
+                repairOptions,
+                candidate
+            );
+
+        if (validation.valid) {
+            bestCandidate = std::move(candidate);
+            bestReport = validation;
+            foundValid = true;
+            break;
+        }
+
+        const auto candidateScore =
+            std::tuple{
+                validation.issues.size(),
+                candidate.unplaced.size(),
+                candidate.sheets.size(),
+                -candidate.utilization
+            };
+
+        const auto bestScore =
+            std::tuple{
+                bestReport.issues.size(),
+                bestCandidate.unplaced.size(),
+                bestCandidate.sheets.size(),
+                -bestCandidate.utilization
+            };
+
+        if (bestCandidate.utilization < 0.0 ||
+            candidateScore < bestScore) {
+            bestCandidate = std::move(candidate);
+            bestReport = validation;
+        }
+    }
+
+    if (!foundValid) {
+        if (reportOut) {
+            *reportOut = bestReport;
+        }
+        return false;
+    }
+
+    result = std::move(bestCandidate);
+    result.productionValidated = true;
+    result.productionValid = true;
+    result.productionIssueCount = 0;
+
+    if (reportOut) {
+        *reportOut = bestReport;
+    }
+
+    return true;
+}
+
 } // namespace sheetnest
