@@ -6,6 +6,7 @@
 #include "sheetnest/geometry.hpp"
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
+#include "sheetnest/parallel_nesting.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <atomic>
 
 using namespace sheetnest;
 
@@ -1173,6 +1175,52 @@ void testNestingBenchmark() {
     );
 }
 
+void testParallelNestingController() {
+    std::vector<Instance> instances;
+    for (int i = 0; i < 8; ++i) {
+        instances.push_back({
+            "parallel-" + std::to_string(i),
+            Part{"parallel", rectangle(20, 20), {}}
+        });
+    }
+
+    Sheet sheet{100, 100, 0};
+    Options options;
+    options.rotations = {0, 90, 180, 270};
+    options.gapMm = 1.0;
+
+    ParallelNestingController controller;
+    ParallelNestingOptions parallel;
+    parallel.workers = 2;
+    parallel.iterations = 6;
+    parallel.timeBudgetMs = 10000;
+
+    std::atomic<std::size_t> progressEvents{0};
+    std::atomic<bool> completed{false};
+
+    parallel.onProgress =
+        [&](const NestingProgress& progress) {
+            ++progressEvents;
+            if (progress.phase ==
+                NestingProgressPhase::Completed) {
+                completed.store(true);
+            }
+        };
+
+    const auto result = controller.run(
+        instances,
+        sheet,
+        options,
+        parallel
+    );
+
+    assert(progressEvents.load() > 0);
+    assert(completed.load());
+    assert(result.unplaced.empty());
+    assert(result.sheets.size() <= 2);
+    assert(controller.cancelRequested() == false);
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -1255,6 +1303,7 @@ int main() {
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
+    testParallelNestingController();
     testInstanceDiagnostics();
     testNestingBenchmark();
     testInterlockIntoHole();
