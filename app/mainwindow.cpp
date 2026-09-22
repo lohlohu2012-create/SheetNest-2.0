@@ -420,7 +420,8 @@ void MainWindow::buildUi() {
     log_->setMinimumHeight(160);
     controlLayout->addWidget(log_, 1);
 
-    view_ = new NestView;\n    view_->setCuttingRouteVisible(true);
+    view_ = new NestView;
+    view_->setCuttingRouteVisible(true);
 
     auto* repairViewPanel = new QWidget;
     auto* repairViewLayout = new QVBoxLayout(repairViewPanel);
