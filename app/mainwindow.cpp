@@ -18,7 +18,6 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
-#include <QFileInfo>
 #include <QSaveFile>
 #include <QDateTime>
 #include <QJsonArray>
@@ -651,6 +650,11 @@ void MainWindow::importDxf() {
 }
 
 void MainWindow::refreshInstances() {
+    hasBenchmarkResult_ = false;
+    if (benchmarkExportButton_) {
+        benchmarkExportButton_->setEnabled(false);
+    }
+
     if (parts_.empty()) {
         instances_.clear();
         partCountLabel_->setText("Деталей: 0");
@@ -1018,7 +1022,7 @@ void MainWindow::exportBenchmarkResults() {
 
     auto appendCsvField = [](QString& row, const QString& value) {
         QString escaped = value;
-        escaped.replace('"', """");
+        escaped.replace('"', "\"\"" );
         row += '"';
         row += escaped;
         row += '"';
@@ -1065,8 +1069,7 @@ void MainWindow::exportBenchmarkResults() {
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses
-";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -1095,8 +1098,7 @@ void MainWindow::exportBenchmarkResults() {
                 if (i > 0) row += ',';
                 appendCsvField(row, values[i]);
             }
-            row += '
-';
+            row += '\n';
             csv += row;
         }
 
