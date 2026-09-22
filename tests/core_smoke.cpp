@@ -1922,3 +1922,4 @@ int main() {
     testAdaptiveDestroyAndRepair();
     testAdaptiveRepairLocalityAndDeduplication();
     testAutomaticProductionRepair();
+}
