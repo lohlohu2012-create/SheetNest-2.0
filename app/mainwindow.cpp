@@ -317,9 +317,10 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 6);
+    benchmarkTable_ = new QTableWidget(0, 9);
     benchmarkTable_->setHorizontalHeaderLabels({
-        "Режим", "Время, мс", "Листов", "Размещено", "Пропущено", "Использование"
+        "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
+        "Использование", "Кандидаты", "Collision checks", "NFP checks"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -530,11 +531,15 @@ void MainWindow::connectUi() {
                 const auto benchmarkResult = benchmarkWatcher_->result();
                 populateBenchmark(benchmarkResult);
                 appendLog(
-                    QString("Benchmark: базовый %1 мс / %2 листов; оптимизированный %3 мс / %4 листов.")
+                    QString("Benchmark: базовый %1 мс / %2 листов / %3 кандидатов / %4 NFP; оптимизированный %5 мс / %6 листов / %7 кандидатов / %8 NFP.")
                         .arg(benchmarkResult.baseline.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.baseline.sheets))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.candidateChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.nfpChecks))
                         .arg(benchmarkResult.optimized.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.optimized.sheets))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.candidateChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.nfpChecks))
                 );
             } catch (const std::exception& error) {
                 QMessageBox::critical(
@@ -776,10 +781,13 @@ void MainWindow::populateBenchmark(
             QString::number(static_cast<qulonglong>(b.sheets)),
             QString::number(static_cast<qulonglong>(b.placed)),
             QString::number(static_cast<qulonglong>(b.skipped)),
-            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2)
+            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2),
+            QString::number(static_cast<qulonglong>(b.candidateChecks)),
+            QString::number(static_cast<qulonglong>(b.collisionChecks)),
+            QString::number(static_cast<qulonglong>(b.nfpChecks))
         };
 
-        for (int column = 0; column < 6; ++column) {
+        for (int column = 0; column < 9; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
