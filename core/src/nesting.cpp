@@ -8,6 +8,7 @@
 #include <numeric>
 #include <random>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -611,6 +612,270 @@ bool betterResult(
     return candidate.utilization > best.utilization + kEps;
 }
 
+const Instance* findInstance(
+    const std::vector<Instance>& instances,
+    const std::string& id
+) {
+    for (const auto& instance : instances) {
+        if (instance.id == id) return &instance;
+    }
+    return nullptr;
+}
+
+SheetState stateFromPlacements(
+    const std::vector<Placement>& placements,
+    const std::vector<Instance>& instances
+) {
+    SheetState state;
+    state.shapes.reserve(placements.size());
+    state.placements = placements;
+
+    for (const auto& placement : placements) {
+        const auto* instance =
+            findInstance(instances, placement.id);
+        if (!instance) continue;
+
+        state.shapes.push_back(
+            transformed(
+                *instance,
+                placement.rotation,
+                placement.x,
+                placement.y
+            )
+        );
+        state.placedArea += materialArea(instance->part);
+    }
+
+    return state;
+}
+
+bool compactResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result
+) {
+    if (result.sheets.size() <= 1) return false;
+
+    std::vector<SheetState> states;
+    states.reserve(result.sheets.size());
+
+    for (const auto& placements : result.sheets) {
+        states.push_back(
+            stateFromPlacements(placements, instances)
+        );
+    }
+
+    bool changed = false;
+
+    // Work backwards. If every part from the last sheet can be reinserted
+    // into earlier sheets, that sheet is redundant and is removed entirely.
+    // This directly targets the previous failure mode where a greedy pass
+    // opened a new sheet even though an earlier sheet still had usable space.
+    for (std::size_t sourceIndex = states.size();
+         sourceIndex-- > 1;) {
+
+        SheetState source = states[sourceIndex];
+        if (source.shapes.empty()) {
+            states.erase(
+                states.begin() +
+                static_cast<std::ptrdiff_t>(sourceIndex)
+            );
+            changed = true;
+            continue;
+        }
+
+        std::vector<std::size_t> order(source.shapes.size());
+        std::iota(order.begin(), order.end(), 0);
+
+        std::sort(
+            order.begin(),
+            order.end(),
+            [&](std::size_t a, std::size_t b) {
+                const auto* ia =
+                    findInstance(instances, source.placements[a].id);
+                const auto* ib =
+                    findInstance(instances, source.placements[b].id);
+
+                const double aa =
+                    ia ? materialArea(ia->part) : 0.0;
+                const double ab =
+                    ib ? materialArea(ib->part) : 0.0;
+
+                return aa > ab;
+            }
+        );
+
+        struct Snapshot {
+            std::size_t sheetIndex{};
+            std::size_t shapeCount{};
+            std::size_t placementCount{};
+            double placedArea{};
+        };
+
+        std::vector<Snapshot> snapshots;
+        snapshots.reserve(order.size());
+
+        bool allMoved = true;
+
+        for (const auto sourceShapeIndex : order) {
+            const auto& sourcePlacement =
+                source.placements[sourceShapeIndex];
+
+            const auto* instance =
+                findInstance(instances, sourcePlacement.id);
+
+            if (!instance) {
+                allMoved = false;
+                break;
+            }
+
+            std::size_t bestSheet = states.size();
+            PlacedShape bestShape;
+            Placement bestPlacement{};
+            double bestEnvelopeArea =
+                std::numeric_limits<double>::infinity();
+
+            for (std::size_t targetIndex = 0;
+                 targetIndex < sourceIndex;
+                 ++targetIndex) {
+
+                auto& target = states[targetIndex];
+
+                const std::size_t oldShapeCount =
+                    target.shapes.size();
+                const std::size_t oldPlacementCount =
+                    target.placements.size();
+                const double oldPlacedArea =
+                    target.placedArea;
+
+                std::vector<int> rotations = options.rotations;
+                if (rotations.empty()) rotations.push_back(0);
+
+                if (!placeOnSheet(
+                        *instance,
+                        sheet,
+                        options,
+                        target,
+                        rotations
+                    )) {
+                    continue;
+                }
+
+                const auto candidateShape =
+                    target.shapes.back();
+
+                Bounds envelope =
+                    bounds(candidateShape.outer);
+
+                for (std::size_t i = 0;
+                     i + 1 < target.shapes.size();
+                     ++i) {
+
+                    const auto b =
+                        bounds(target.shapes[i].outer);
+
+                    envelope.minX =
+                        std::min(envelope.minX, b.minX);
+                    envelope.minY =
+                        std::min(envelope.minY, b.minY);
+                    envelope.maxX =
+                        std::max(envelope.maxX, b.maxX);
+                    envelope.maxY =
+                        std::max(envelope.maxY, b.maxY);
+                }
+
+                const double area =
+                    envelope.width() * envelope.height();
+
+                if (bestSheet == states.size() ||
+                    area + kEps < bestEnvelopeArea) {
+
+                    bestSheet = targetIndex;
+                    bestShape = candidateShape;
+                    bestPlacement =
+                        target.placements.back();
+                    bestEnvelopeArea = area;
+                }
+
+                target.shapes.resize(oldShapeCount);
+                target.placements.resize(oldPlacementCount);
+                target.placedArea = oldPlacedArea;
+            }
+
+            if (bestSheet == states.size()) {
+                allMoved = false;
+                break;
+            }
+
+            auto& target = states[bestSheet];
+
+            snapshots.push_back({
+                bestSheet,
+                target.shapes.size(),
+                target.placements.size(),
+                target.placedArea
+            });
+
+            target.shapes.push_back(
+                std::move(bestShape)
+            );
+            target.placements.push_back(bestPlacement);
+            target.placedArea +=
+                materialArea(instance->part);
+        }
+
+        if (!allMoved) {
+            for (const auto& snapshot : snapshots) {
+                auto& target =
+                    states[snapshot.sheetIndex];
+
+                target.shapes.resize(
+                    snapshot.shapeCount
+                );
+                target.placements.resize(
+                    snapshot.placementCount
+                );
+                target.placedArea =
+                    snapshot.placedArea;
+            }
+            states[sourceIndex] = std::move(source);
+            continue;
+        }
+
+        states.erase(
+            states.begin() +
+            static_cast<std::ptrdiff_t>(sourceIndex)
+        );
+        changed = true;
+    }
+
+    if (!changed) return false;
+
+    result.sheets.clear();
+    result.sheets.reserve(states.size());
+
+    double placedArea = 0.0;
+
+    for (auto& state : states) {
+        result.sheets.push_back(
+            std::move(state.placements)
+        );
+        placedArea += state.placedArea;
+    }
+
+    const double sheetArea =
+        std::max(0.0, sheet.width * sheet.height);
+
+    result.utilization =
+        (sheetArea > 0.0 && !result.sheets.empty())
+            ? placedArea /
+              (sheetArea * result.sheets.size())
+            : 0.0;
+
+    return true;
+}
+
 Result runAttempt(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
@@ -722,6 +987,13 @@ Result runAttempt(
         (sheetArea > 0.0 && !result.sheets.empty())
             ? placedArea / (sheetArea * result.sheets.size())
             : 0.0;
+
+    compactResult(
+        instances,
+        sheet,
+        options,
+        result
+    );
 
     return result;
 }
