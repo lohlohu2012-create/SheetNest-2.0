@@ -865,8 +865,8 @@ void MainWindow::populateProductionValidation() {
             ),
             QString::fromStdString(issue.instanceId),
             QString::fromStdString(issue.relatedInstanceId),
-            QString::number(issue.measured, 'f', 3),
-            QString::number(issue.required, 'f', 3),
+            QString::number(issue.measuredMm, 'f', 3),
+            QString::number(issue.requiredMm, 'f', 3),
             QString::fromStdString(issue.message)
         };
 
