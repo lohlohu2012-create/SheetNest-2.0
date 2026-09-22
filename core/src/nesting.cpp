@@ -2024,7 +2024,8 @@ bool adaptiveDestroyAndRepairResult(
     const Sheet& sheet,
     const Options& options,
     const std::vector<std::string>& seedIds,
-    Result& result
+    Result& result,
+    std::vector<std::string>* extractedIdsOut
 ) {
     if (result.sheets.empty() ||
         seedIds.empty() ||
@@ -2427,6 +2428,17 @@ bool adaptiveDestroyAndRepairResult(
 
     if (!foundComplete) {
         return false;
+    }
+
+    if (extractedIdsOut) {
+        extractedIdsOut->assign(
+            extractedIds.begin(),
+            extractedIds.end()
+        );
+        std::sort(
+            extractedIdsOut->begin(),
+            extractedIdsOut->end()
+        );
     }
 
     // Preserve the original unplaced set: this operation only rearranges
