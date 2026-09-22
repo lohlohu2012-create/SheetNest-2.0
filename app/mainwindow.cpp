@@ -866,6 +866,7 @@ void MainWindow::connectUi() {
             technology_ = output.technology;
             validation_ = output.validation;
             cuttingRoute_ = output.cuttingRoute;
+            populateLaserOperationSelector();
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
 
@@ -2436,13 +2437,15 @@ void MainWindow::populateLaserOperationSelector() {
                     .arg(static_cast<qulonglong>(op.contourIndex + 1))
                     .arg(type)
                     .arg(op.cutLengthMm, 0, 'f', 1)
+                    .arg(op.totalSeconds, 0, 'f', 1)
                 : QString(
                     "Операция %1 • лист %2 • %3 • внешний контур • %4 мм"
                 )
                     .arg(static_cast<qulonglong>(op.operation + 1))
                     .arg(static_cast<qulonglong>(op.sheetIndex + 1))
                     .arg(detail)
-                    .arg(op.cutLengthMm, 0, 'f', 1);
+                    .arg(op.cutLengthMm, 0, 'f', 1)
+                    .arg(op.totalSeconds, 0, 'f', 1);
 
         laserOperationCombo_->addItem(
             label,
