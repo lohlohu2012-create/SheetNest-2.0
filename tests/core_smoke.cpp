@@ -1,7 +1,9 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
-#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"
-#include "sheetnest/dxf_export.hpp"\n#include "sheetnest/cutting.hpp"
+#include "sheetnest/benchmark.hpp"
+#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/dxf_export.hpp"
+#include "sheetnest/cutting.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
@@ -19,7 +21,8 @@
 #include <string>
 #include <vector>
 #include <atomic>
-#include <cstdlib>\n#include <chrono>
+#include <cstdlib>
+#include <chrono>
 
 using namespace sheetnest;
 
@@ -2937,7 +2940,9 @@ int main(int argc, char** argv) {
     testDegenerateArc();
     testDxfModelPipeline();
     testPerPartQuantitiesAndUnitIds();
-    testDxfExportRoundTrip();\n    testCuttingPathInnerContoursFirst();\n    testLaserTechnologyInterpolation();
+    testDxfExportRoundTrip();
+    testCuttingPathInnerContoursFirst();
+    testLaserTechnologyInterpolation();
     testCollinearConcaveNfpRegression();
     testClearanceCornerSampling();
     testNfpMinkowski();
