@@ -1637,6 +1637,14 @@ void testNestingBenchmark() {
         benchmark.optimized.optimizerPasses ==
         optimizedDirect.stats.optimizerPasses
     );
+    assert(
+        benchmark.optimized.nfpTimeouts ==
+        optimizedDirect.stats.nfpTimeouts
+    );
+    assert(
+        benchmark.optimized.nfpComplexityFallbacks ==
+        optimizedDirect.stats.nfpComplexityFallbacks
+    );
 }
 
 void testSpatialIndexBroadPhase() {
