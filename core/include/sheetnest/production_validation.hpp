@@ -53,6 +53,10 @@ struct AdaptiveRepairRound {
     std::vector<std::string> movedIds;
     std::vector<std::string> stationaryIds;
     std::vector<std::vector<std::string>> conflictLevels;
+    std::size_t collisionCountAfter{};
+    std::size_t gapViolationCountAfter{};
+    std::size_t marginViolationCountAfter{};
+    bool validAfter{false};
 };
 
 struct ProductionValidationReport {
