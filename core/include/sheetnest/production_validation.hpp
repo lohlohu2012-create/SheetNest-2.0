@@ -34,6 +34,7 @@ struct ProductionValidationIssue {
 
 struct AdaptiveRepairChange {
     std::size_t sheetIndex{};
+    std::size_t afterSheetIndex{};
     Placement before{};
     Placement after{};
     bool conflictGroup{};
