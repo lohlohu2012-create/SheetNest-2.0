@@ -26,12 +26,14 @@ public:
     void clearResult();
 
     void setCuttingRouteVisible(bool visible);
+    void setCuttingAnimationProgress(double progress);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
     bool cuttingRouteVisible_{false};
+    double cuttingAnimationProgress_{1.0};
 
     void addCuttingRoute(
         const sheetnest::Result& result,
