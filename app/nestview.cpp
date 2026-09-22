@@ -206,44 +206,93 @@ void NestView::clearResult() {
     scene()->setSceneRect(QRectF());
 }
 
+void NestView::setCuttingAnimationProgress(double progress) {
+    cuttingAnimationProgress_ = std::clamp(progress, 0.0, 1.0);
+}
+
 void NestView::addCuttingRoute(
     const Result& result,
     const std::vector<Instance>& instances,
     const Sheet& sheet
 ) {
     std::unordered_map<std::string, const Instance*> byId;
-    for (const auto& instance : instances) byId.emplace(instance.id, &instance);
+    for (const auto& instance : instances) {
+        byId.emplace(instance.id, &instance);
+    }
+
     const QColor rapidColor("#f59e0b");
     const QColor holeColor("#22d3ee");
     const QColor outerColor("#22c55e");
     const QColor pierceColor("#f43f5e");
+    const QColor inactiveColor("#475569");
+    const QColor headColor("#ffffff");
     const double pi = std::acos(-1.0);
 
-    // One route overlay per sheet. The order is the same nearest-contour
-    // strategy used by the CAM planner; every operation is still drawn from
-    // the exact transformed nesting geometry.
-    for (std::size_t sheetIndex = 0; sheetIndex < result.sheets.size(); ++sheetIndex) {
+    struct RouteEvent {
+        enum class Kind { Rapid, Pierce, Cut };
+        Kind kind{};
+        QGraphicsItem* parent{};
+        Point from{};
+        Point to{};
+        double durationSec{};
+        double lengthMm{};
+        bool inner{};
+        std::size_t operation{};
+    };
+
+    std::vector<RouteEvent> events;
+    events.reserve(256);
+
+    // Build the exact same deterministic contour order as the visible CAM
+    // route: all inner contours first, then outer contours, nearest first.
+    for (std::size_t sheetIndex = 0;
+         sheetIndex < result.sheets.size();
+         ++sheetIndex) {
         const auto& placements = result.sheets[sheetIndex];
         if (placements.empty()) continue;
-        struct RouteContour { Polygon polygon; bool inner{}; };
+
+        struct RouteContour {
+            Polygon polygon;
+            bool inner{};
+        };
         std::vector<RouteContour> contours;
+
         for (const auto& placement : placements) {
             const auto it = byId.find(placement.id);
             if (it == byId.end()) continue;
-            const auto& inst = *it->second;
-            contours.push_back({translate(rotate(inst.part.outer, placement.rotation), placement.x, placement.y), false});
-            for (const auto& hole : inst.part.holes) {
-                contours.push_back({translate(rotate(hole, placement.rotation), placement.x, placement.y), true});
+
+            const auto& instance = *it->second;
+            contours.push_back({
+                translate(
+                    rotate(instance.part.outer, placement.rotation),
+                    placement.x,
+                    placement.y
+                ),
+                false
+            });
+
+            for (const auto& hole : instance.part.holes) {
+                contours.push_back({
+                    translate(
+                        rotate(hole, placement.rotation),
+                        placement.x,
+                        placement.y
+                    ),
+                    true
+                });
             }
         }
+
         if (contours.empty()) continue;
 
-        // Locate the sheet rectangle by its stable vertical position.
         QGraphicsItem* sheetItem = nullptr;
-        const double expectedY = sheetIndex * (sheet.height + 120.0);
+        const double expectedY =
+            sheetIndex * (sheet.height + 120.0);
+
         for (auto* item : scene()->items()) {
             auto* rect = dynamic_cast<QGraphicsRectItem*>(item);
             if (!rect || rect->parentItem() != nullptr) continue;
+
             if (std::abs(rect->rect().width() - sheet.width) < 1e-6 &&
                 std::abs(rect->rect().height() - sheet.height) < 1e-6 &&
                 std::abs(rect->pos().y() - expectedY) < 1e-6) {
@@ -251,78 +300,344 @@ void NestView::addCuttingRoute(
                 break;
             }
         }
+
         if (!sheetItem) continue;
 
         Point head{};
         std::vector<bool> used(contours.size(), false);
-        for (std::size_t operation = 0; operation < contours.size(); ++operation) {
+        std::size_t operation = 0;
+
+        for (std::size_t step = 0; step < contours.size(); ++step) {
             std::size_t best = contours.size();
-            double bestDistance = std::numeric_limits<double>::infinity();
+            double bestDistance =
+                std::numeric_limits<double>::infinity();
+
             bool hasUnusedInner = false;
             for (std::size_t i = 0; i < contours.size(); ++i) {
-                if (!used[i] && contours[i].inner && !contours[i].polygon.empty()) {
+                if (!used[i] &&
+                    contours[i].inner &&
+                    !contours[i].polygon.empty()) {
                     hasUnusedInner = true;
                     break;
                 }
             }
+
             for (std::size_t i = 0; i < contours.size(); ++i) {
                 if (used[i] || contours[i].polygon.empty()) continue;
                 if (hasUnusedInner && !contours[i].inner) continue;
-                const auto& p = contours[i].polygon.front();
-                const double distance = std::hypot(head.x - p.x, head.y - p.y);
-                if (distance < bestDistance) { bestDistance = distance; best = i; }
+
+                const Point& candidate = contours[i].polygon.front();
+                const double distance =
+                    std::hypot(
+                        head.x - candidate.x,
+                        head.y - candidate.y
+                    );
+
+                if (distance < bestDistance - 1e-9 ||
+                    (std::abs(distance - bestDistance) <= 1e-9 &&
+                     i < best)) {
+                    bestDistance = distance;
+                    best = i;
+                }
             }
+
             if (best == contours.size()) break;
+
             used[best] = true;
             const auto& contour = contours[best];
             const Point start = contour.polygon.front();
 
             if (bestDistance > 1e-9) {
-                auto* rapid = new QGraphicsLineItem(
-                    QLineF(QPointF(head.x, head.y), QPointF(start.x, start.y)), sheetItem);
-                QPen pen(rapidColor, 1.4, Qt::DashLine);
-                pen.setCosmetic(true);
-                rapid->setPen(pen);
-                rapid->setZValue(40.0);
-                rapid->setToolTip(QString("RAPID-переход • %1 мм").arg(bestDistance, 0, 'f', 1));
-                const QPointF mid((head.x + start.x) * .5, (head.y + start.y) * .5);
-                auto* arrow = new QGraphicsSimpleTextItem("➜", sheetItem);
-                arrow->setBrush(QBrush(rapidColor));
-                arrow->setPos(mid);
-                arrow->setRotation(std::atan2(start.y - head.y, start.x - head.x) * 180.0 / pi);
-                arrow->setZValue(42.0);
+                events.push_back({
+                    RouteEvent::Kind::Rapid,
+                    sheetItem,
+                    head,
+                    start,
+                    bestDistance / (120.0 * 1000.0 / 60.0),
+                    bestDistance,
+                    contour.inner,
+                    operation + 1
+                });
             }
 
-            auto* pierce = new QGraphicsEllipseItem(start.x - 2.4, start.y - 2.4, 4.8, 4.8, sheetItem);
-            pierce->setPen(QPen(pierceColor, 1.2));
-            pierce->setBrush(QBrush(pierceColor));
-            pierce->setZValue(45.0);
-            pierce->setToolTip(QString("Пробивка №%1 • %2").arg(operation + 1).arg(contour.inner ? "отверстие" : "внешний контур"));
+            events.push_back({
+                RouteEvent::Kind::Pierce,
+                sheetItem,
+                start,
+                start,
+                0.25,
+                0.0,
+                contour.inner,
+                operation + 1
+            });
 
-            const QColor color = contour.inner ? holeColor : outerColor;
             for (std::size_t i = 0; i < contour.polygon.size(); ++i) {
-                const auto& a = contour.polygon[i];
-                const auto& b = contour.polygon[(i + 1) % contour.polygon.size()];
-                auto* cut = new QGraphicsLineItem(QLineF(QPointF(a.x, a.y), QPointF(b.x, b.y)), sheetItem);
-                QPen pen(color, 2.0);
-                pen.setCosmetic(true);
-                cut->setPen(pen);
-                cut->setZValue(41.0);
-                cut->setToolTip(QString("CUT • %1 • операция %2")
-                    .arg(contour.inner ? "внутренний контур" : "внешний контур")
-                    .arg(operation + 1));
+                const Point from = contour.polygon[i];
+                const Point to =
+                    contour.polygon[(i + 1) % contour.polygon.size()];
+                const double length =
+                    std::hypot(
+                        from.x - to.x,
+                        from.y - to.y
+                    );
+
+                events.push_back({
+                    RouteEvent::Kind::Cut,
+                    sheetItem,
+                    from,
+                    to,
+                    length > 0.0
+                        ? length / (sheetnest::CuttingParameters{}.speedMMin *
+                                    1000.0 / 60.0)
+                        : 0.0,
+                    length,
+                    contour.inner,
+                    operation + 1
+                });
             }
-            auto* number = new QGraphicsSimpleTextItem(QString::number(operation + 1), sheetItem);
-            number->setBrush(QBrush(color));
-            number->setPos(start.x + 5.0, start.y + 5.0);
-            number->setZValue(46.0);
+
             head = start;
+            ++operation;
         }
     }
 
+    // Use the current technology speed for a better visual time scale when
+    // available through the generated route; the fixed fallback above keeps
+    // the renderer independent from MainWindow state.
+    double totalDuration = 0.0;
+    for (const auto& event : events) {
+        totalDuration += std::max(0.0, event.durationSec);
+    }
+
+    if (events.empty()) return;
+
+    // Avoid an invisible zero-duration route and keep the animation stable
+    // for degenerate contours.
+    totalDuration = std::max(totalDuration, 1e-6);
+
+    const double targetTime =
+        std::clamp(cuttingAnimationProgress_, 0.0, 1.0) *
+        totalDuration;
+
+    double elapsed = 0.0;
+    Point currentHead{};
+    QGraphicsItem* currentParent = nullptr;
+    std::size_t currentOperation = 0;
+    QString currentLabel = "Готово";
+    double currentAngle = 0.0;
+
+    for (const auto& event : events) {
+        const double duration =
+            std::max(0.0, event.durationSec);
+        const double nextElapsed = elapsed + duration;
+        const bool complete =
+            targetTime >= nextElapsed - 1e-9;
+        const double local =
+            duration > 1e-9
+                ? std::clamp(
+                    (targetTime - elapsed) / duration,
+                    0.0,
+                    1.0
+                )
+                : (complete ? 1.0 : 0.0);
+
+        const QColor cutColor =
+            event.inner ? holeColor : outerColor;
+
+        if (event.kind == RouteEvent::Kind::Rapid) {
+            auto* line = new QGraphicsLineItem(
+                QLineF(
+                    QPointF(event.from.x, event.from.y),
+                    QPointF(event.to.x, event.to.y)
+                ),
+                event.parent
+            );
+            QPen pen(
+                complete || local > 0.0
+                    ? rapidColor
+                    : inactiveColor,
+                1.6,
+                Qt::DashLine
+            );
+            pen.setCosmetic(true);
+            line->setPen(pen);
+            line->setOpacity(
+                complete || local > 0.0 ? 1.0 : 0.35
+            );
+            line->setZValue(40.0);
+
+            if (complete || local > 0.0) {
+                const Point pos{
+                    event.from.x +
+                        (event.to.x - event.from.x) * local,
+                    event.from.y +
+                        (event.to.y - event.from.y) * local
+                };
+                currentHead = pos;
+                currentParent = event.parent;
+                currentOperation = event.operation;
+                currentAngle =
+                    std::atan2(
+                        event.to.y - event.from.y,
+                        event.to.x - event.from.x
+                    ) * 180.0 / pi;
+                currentLabel =
+                    QString("Операция %1 • RAPID-переход")
+                        .arg(
+                            static_cast<qulonglong>(
+                                event.operation
+                            )
+                        );
+            }
+        } else if (event.kind == RouteEvent::Kind::Pierce) {
+            auto* pierce = new QGraphicsEllipseItem(
+                event.from.x - 2.8,
+                event.from.y - 2.8,
+                5.6,
+                5.6,
+                event.parent
+            );
+            pierce->setPen(QPen(pierceColor, 1.3));
+            pierce->setBrush(
+                QBrush(
+                    complete
+                        ? pierceColor
+                        : QColor(244, 63, 94, 70)
+                )
+            );
+            pierce->setZValue(45.0);
+
+            if (targetTime >= elapsed - 1e-9 &&
+                targetTime <= nextElapsed + 1e-9) {
+                currentHead = event.from;
+                currentParent = event.parent;
+                currentOperation = event.operation;
+                currentLabel =
+                    QString("Операция %1 • ПРОБИВКА • %2")
+                        .arg(
+                            static_cast<qulonglong>(
+                                event.operation
+                            )
+                        )
+                        .arg(
+                            event.inner
+                                ? "внутренний контур"
+                                : "внешний контур"
+                        );
+            }
+        } else {
+            const Point drawTo{
+                event.from.x +
+                    (event.to.x - event.from.x) * local,
+                event.from.y +
+                    (event.to.y - event.from.y) * local
+            };
+
+            auto* path = new QGraphicsPathItem(event.parent);
+            QPainterPath painterPath;
+            painterPath.moveTo(event.from.x, event.from.y);
+            painterPath.lineTo(drawTo.x, drawTo.y);
+            path->setPath(painterPath);
+
+            QPen pen(
+                complete || local > 0.0
+                    ? cutColor
+                    : inactiveColor,
+                2.3,
+                Qt::SolidLine
+            );
+            pen.setCosmetic(true);
+            path->setPen(pen);
+            path->setOpacity(
+                complete || local > 0.0 ? 1.0 : 0.28
+            );
+            path->setZValue(41.0);
+
+            if (complete || local > 0.0) {
+                currentHead = drawTo;
+                currentParent = event.parent;
+                currentOperation = event.operation;
+                currentAngle =
+                    std::atan2(
+                        event.to.y - event.from.y,
+                        event.to.x - event.from.x
+                    ) * 180.0 / pi;
+                currentLabel =
+                    QString(
+                        "Операция %1 • %2 • движение"
+                    )
+                        .arg(
+                            static_cast<qulonglong>(
+                                event.operation
+                            )
+                        )
+                        .arg(
+                            event.inner
+                                ? "ВНУТРЕННИЙ КОНТУР"
+                                : "ВНЕШНИЙ КОНТУР"
+                        );
+            }
+        }
+
+        elapsed = nextElapsed;
+        if (targetTime < nextElapsed - 1e-9) {
+            break;
+        }
+    }
+
+    if (currentParent) {
+        auto* head = new QGraphicsEllipseItem(
+            currentHead.x - 5.0,
+            currentHead.y - 5.0,
+            10.0,
+            10.0,
+            currentParent
+        );
+        head->setPen(QPen(headColor, 2.0));
+        head->setBrush(QBrush(QColor(255, 255, 255, 190)));
+        head->setZValue(80.0);
+        head->setToolTip(
+            QString("Лазерная головка • операция %1")
+                .arg(
+                    static_cast<qulonglong>(
+                        currentOperation
+                    )
+                )
+        );
+
+        auto* arrow = new QGraphicsSimpleTextItem(
+            "➜",
+            currentParent
+        );
+        arrow->setBrush(QBrush(headColor));
+        arrow->setPos(
+            currentHead.x + 7.0,
+            currentHead.y - 9.0
+        );
+        arrow->setRotation(currentAngle);
+        arrow->setZValue(81.0);
+
+        auto* status = scene()->addSimpleText(
+            QString(
+                "LASER • %1 • прогресс %2%"
+            )
+                .arg(currentLabel)
+                .arg(
+                    static_cast<int>(
+                        cuttingAnimationProgress_ * 100.0
+                    )
+                )
+        );
+        status->setBrush(QBrush(headColor));
+        status->setZValue(1201.0);
+        status->setPos(18.0, -22.0);
+    }
+
     auto* legend = scene()->addSimpleText(
-        "LASER ROUTE  |  ● пробивка  |  голубой внутренний  |  зелёный внешний  |  - - rapid  |  ➜ направление");
-    legend->setBrush(QBrush(QColor("#f8fafc")));
+        "● пробивка  |  голубой внутренний  |  зелёный внешний  |  "
+        "- - rapid  |  ➜ направление  |  ○ лазерная головка"
+    );
+    legend->setBrush(QBrush(QColor("#cbd5e1")));
     legend->setZValue(1200.0);
     legend->setPos(18.0, -42.0);
 }
