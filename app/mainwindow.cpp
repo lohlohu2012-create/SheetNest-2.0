@@ -695,8 +695,9 @@ void MainWindow::connectUi() {
             resetAdaptiveRepairAnimation();
 
             {
-                const blocker =
-                    QSignalBlocker(repairRoundCombo_);
+                const QSignalBlocker blocker(
+                    repairRoundCombo_
+                );
                 repairRoundCombo_->clear();
                 repairRoundCombo_->addItem(
                     "Итоговая раскладка",
@@ -711,7 +712,7 @@ void MainWindow::connectUi() {
                         static_cast<int>(round.roundIndex)
                     );
                 }
-                const hasHistory =
+                const bool hasHistory =
                     !validation_.adaptiveHistory.empty();
                 repairRoundCombo_->setEnabled(hasHistory);
                 if (repairConflictLayer_) {
@@ -2116,7 +2117,7 @@ void MainWindow::setBusy(bool busy) {
     );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
 
-    const hasRepairHistory =
+    const bool hasRepairHistory =
         !validation_.adaptiveHistory.empty();
     if (repairPlayButton_) {
         repairPlayButton_->setEnabled(
