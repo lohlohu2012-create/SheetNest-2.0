@@ -963,8 +963,7 @@ bool repairProductionResult(
                     // Center proximity alone is not sufficient for Adaptive
                     // Repair. A neighbor is extracted only when its exact
                     // geometry can actually block the seed: overlap or a
-                    // boundary clearance violation. This prevents unrelated
-                    // nearby parts from being repeatedly disturbed.
+                    // boundary clearance violation.
                     const bool exactOverlap =
                         materialOverlap(seedShape, shape);
                     const double exactBoundaryDistance =
@@ -1172,10 +1171,8 @@ bool repairProductionResult(
                 repairGroupSignature.push_back('\n');
             }
 
-            // Do not spend another repair round on an identical conflict
-            // neighborhood. If geometry and diagnostics lead us back to the
-            // same group, the previous attempt already exhausted that local
-            // repair opportunity.
+            // Never spend another adaptive round on the exact same
+            // conflict neighborhood.
             if (!attemptedRepairGroups.insert(
                     std::move(repairGroupSignature)
                 ).second) {
@@ -1529,3 +1526,38 @@ bool repairProductionResult(
                 change.stationary = !moved;
 
                 completedReport.adaptiveChanges.push_back(change);
+
+                if (moved) {
+                    completedReport.adaptiveMovedIds.push_back(
+                        before.id
+                    );
+                } else {
+                    completedReport.adaptiveStationaryIds.push_back(
+                        before.id
+                    );
+                }
+            }
+        }
+
+        std::sort(
+            completedReport.adaptiveExtractedIds.begin(),
+            completedReport.adaptiveExtractedIds.end()
+        );
+        std::sort(
+            completedReport.adaptiveMovedIds.begin(),
+            completedReport.adaptiveMovedIds.end()
+        );
+        std::sort(
+            completedReport.adaptiveStationaryIds.begin(),
+            completedReport.adaptiveStationaryIds.end()
+        );
+    }
+
+    if (reportOut) {
+        *reportOut = completedReport;
+    }
+
+    return true;
+}
+
+} // namespace sheetnest
