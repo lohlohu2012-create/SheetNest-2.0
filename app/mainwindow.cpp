@@ -333,7 +333,47 @@ void MainWindow::buildUi() {
     benchmarkExportButton_->setEnabled(false);
     controlLayout->addWidget(benchmarkExportButton_);
 
-    cuttingRouteCheck_ = new QCheckBox("Показать маршрут лазера");\n    cuttingRouteCheck_->setChecked(true);\n    cuttingRouteCheck_->setToolTip("Пробивка, внутренние и внешние контуры, rapid-переходы и направление движения");\n    controlLayout->addWidget(cuttingRouteCheck_);\n\n    controlLayout->addWidget(exportButton_);
+    cuttingRouteCheck_ = new QCheckBox("Показать маршрут лазера");
+    cuttingRouteCheck_->setChecked(true);
+    cuttingRouteCheck_->setToolTip(
+        "Пробивка, внутренние и внешние контуры, rapid-переходы и направление движения"
+    );
+    controlLayout->addWidget(cuttingRouteCheck_);
+
+    auto* laserControls = new QGroupBox("Анимация лазерной головки");
+    auto* laserLayout = new QGridLayout(laserControls);
+
+    laserPlayButton_ = new QPushButton("▶ Запуск");
+    laserPauseButton_ = new QPushButton("⏸ Пауза");
+    laserResetButton_ = new QPushButton("↺ В начало");
+
+    laserSpeedCombo_ = new QComboBox;
+    laserSpeedCombo_->addItem("0.5×", 0.5);
+    laserSpeedCombo_->addItem("1×", 1.0);
+    laserSpeedCombo_->addItem("2×", 2.0);
+    laserSpeedCombo_->addItem("4×", 4.0);
+    laserSpeedCombo_->setCurrentIndex(1);
+
+    laserStageLabel_ = new QLabel("Готово • маршрут завершён");
+    laserStageLabel_->setWordWrap(true);
+
+    laserAnimationTimer_ = new QTimer(this);
+    laserAnimationTimer_->setInterval(100);
+
+    laserLayout->addWidget(laserPlayButton_, 0, 0);
+    laserLayout->addWidget(laserPauseButton_, 0, 1);
+    laserLayout->addWidget(laserResetButton_, 0, 2);
+    laserLayout->addWidget(new QLabel("Скорость:"), 1, 0);
+    laserLayout->addWidget(laserSpeedCombo_, 1, 1);
+    laserLayout->addWidget(laserStageLabel_, 1, 2);
+
+    laserPauseButton_->setEnabled(false);
+    laserResetButton_->setEnabled(false);
+    laserSpeedCombo_->setEnabled(false);
+
+    controlLayout->addWidget(laserControls);
+
+    controlLayout->addWidget(exportButton_);
 
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
@@ -664,6 +704,60 @@ void MainWindow::connectUi() {
         }
     );
 
+    connect(
+        cuttingRouteCheck_,
+        &QCheckBox::toggled,
+        this,
+        [this](bool visible) {
+            view_->setCuttingRouteVisible(visible);
+            if (!visible) {
+                pauseLaserAnimation();
+            }
+            updateLaserAnimationUi();
+            refreshAdaptiveRepairView();
+        }
+    );
+    connect(
+        laserPlayButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            toggleLaserAnimation();
+        }
+    );
+    connect(
+        laserPauseButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            pauseLaserAnimation();
+        }
+    );
+    connect(
+        laserResetButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            resetLaserAnimation();
+        }
+    );
+    connect(
+        laserSpeedCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            updateLaserAnimationUi();
+        }
+    );
+    connect(
+        laserAnimationTimer_,
+        &QTimer::timeout,
+        this,
+        [this] {
+            advanceLaserAnimation();
+        }
+    );
+
     connect(exportButton_, &QPushButton::clicked, this, [this] {
         exportDxf();
     });
@@ -704,6 +798,7 @@ void MainWindow::connectUi() {
             technology_ = output.technology;
             validation_ = output.validation;
             resetAdaptiveRepairAnimation();
+            resetLaserAnimation();
 
             {
                 const QSignalBlocker blocker(
@@ -2202,6 +2297,10 @@ void MainWindow::refreshAdaptiveRepairView() {
             repairAnimationFrame_ % 4;
     }
 
+    view_->setCuttingAnimationProgress(
+        laserAnimationProgress_
+    );
+
     view_->showResult(
         result_,
         instances_,
@@ -2222,6 +2321,153 @@ void MainWindow::refreshAdaptiveRepairView() {
             : true,
         animationStage
     );
+}
+
+void MainWindow::toggleLaserAnimation() {
+    if (!cuttingRouteCheck_ ||
+        !cuttingRouteCheck_->isChecked() ||
+        result_.sheets.empty()) {
+        return;
+    }
+
+    if (laserAnimationProgress_ >= 1.0 - 1e-9) {
+        laserAnimationProgress_ = 0.0;
+    }
+
+    laserAnimationPlaying_ = true;
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->start();
+    }
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::pauseLaserAnimation() {
+    laserAnimationPlaying_ = false;
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->stop();
+    }
+    updateLaserAnimationUi();
+}
+
+void MainWindow::resetLaserAnimation() {
+    laserAnimationPlaying_ = false;
+    laserAnimationProgress_ = 1.0;
+
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->stop();
+    }
+
+    if (view_) {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
+
+    updateLaserAnimationUi();
+}
+
+void MainWindow::advanceLaserAnimation() {
+    if (!laserAnimationPlaying_ ||
+        result_.sheets.empty() ||
+        !cuttingRouteCheck_ ||
+        !cuttingRouteCheck_->isChecked()) {
+        pauseLaserAnimation();
+        return;
+    }
+
+    const double speed =
+        laserSpeedCombo_
+            ? std::max(
+                0.25,
+                laserSpeedCombo_->currentData().toDouble()
+            )
+            : 1.0;
+
+    // About 20 seconds for a complete route at 1×. The animation is a
+    // visual replay; the real CAM cutting time is shown separately in the
+    // technology/result panel.
+    laserAnimationProgress_ +=
+        0.005 * speed;
+
+    if (laserAnimationProgress_ >= 1.0) {
+        laserAnimationProgress_ = 1.0;
+        laserAnimationPlaying_ = false;
+        if (laserAnimationTimer_) {
+            laserAnimationTimer_->stop();
+        }
+    }
+
+    if (view_) {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::updateLaserAnimationUi() {
+    const bool hasRoute =
+        cuttingRouteCheck_ &&
+        cuttingRouteCheck_->isChecked() &&
+        !result_.sheets.empty();
+
+    if (laserPlayButton_) {
+        laserPlayButton_->setEnabled(
+            hasRoute && !laserAnimationPlaying_
+        );
+    }
+    if (laserPauseButton_) {
+        laserPauseButton_->setEnabled(
+            hasRoute && laserAnimationPlaying_
+        );
+    }
+    if (laserResetButton_) {
+        laserResetButton_->setEnabled(
+            hasRoute
+        );
+    }
+    if (laserSpeedCombo_) {
+        laserSpeedCombo_->setEnabled(hasRoute);
+    }
+
+    if (!hasRoute) {
+        if (laserStageLabel_) {
+            laserStageLabel_->setText(
+                "Нет готовой раскладки для анимации"
+            );
+        }
+        return;
+    }
+
+    const int percent =
+        static_cast<int>(
+            std::round(
+                laserAnimationProgress_ * 100.0
+            )
+        );
+
+    QString stage;
+    if (percent >= 100) {
+        stage = "Готово • маршрут завершён";
+    } else if (percent <= 0) {
+        stage = "Старт • лазерная головка готова";
+    } else if (laserAnimationPlaying_) {
+        stage = "Выполнение маршрута";
+    } else {
+        stage = "Пауза";
+    }
+
+    if (laserStageLabel_) {
+        laserStageLabel_->setText(
+            QString("%1 • %2%")
+                .arg(stage)
+                .arg(percent)
+        );
+    }
 }
 
 void MainWindow::stopCalculation(bool watchdogTriggered) {
@@ -2335,6 +2581,37 @@ void MainWindow::setBusy(bool busy) {
     }
 
     stopButton_->setEnabled(busy && nestingController_ != nullptr);
+
+    if (laserPlayButton_) {
+        laserPlayButton_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty() &&
+            !laserAnimationPlaying_
+        );
+    }
+    if (laserPauseButton_) {
+        laserPauseButton_->setEnabled(
+            !busy && laserAnimationPlaying_
+        );
+    }
+    if (laserResetButton_) {
+        laserResetButton_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty()
+        );
+    }
+    if (laserSpeedCombo_) {
+        laserSpeedCombo_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty()
+        );
+    }
 
     if (busy) {
         progress_->setRange(0, 0);
