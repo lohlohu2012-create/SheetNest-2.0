@@ -561,8 +561,8 @@ void MainWindow::connectUi() {
                 QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6.")
                     .arg(validation_.valid ? "OK" : "ОШИБКА")
                     .arg(static_cast<qulonglong>(validation_.collisionCount))
-                    .arg(static_cast<qulonglong>(validation_.gapCount))
-                    .arg(static_cast<qulonglong>(validation_.marginCount))
+                    .arg(static_cast<qulonglong>(validation_.gapViolationCount))
+                    .arg(static_cast<qulonglong>(validation_.marginViolationCount))
                     .arg(static_cast<qulonglong>(validation_.duplicateIdCount))
                     .arg(static_cast<qulonglong>(validation_.missingIdCount))
             );
