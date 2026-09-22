@@ -237,7 +237,8 @@ std::vector<Candidate> candidatesFor(
     const SheetState& sheet,
     const Sheet& sheetSize,
     double gap,
-    double margin
+    double margin,
+    NestingStats* stats
 ) {
     const Polygon rotatedPart = rotate(part, rotation);
     const auto pb = bounds(rotatedPart);
@@ -344,14 +345,11 @@ std::vector<Candidate> candidatesFor(
 
     auto addMovingHoleCandidates = [&](const Polygon& movingHole,
                                    const Polygon& fixedRing) {
-        if (movingHole.size() < 3 || fixedRing.size() < 3) {
-            return;
-        }
+        if (movingHole.size() < 3 || fixedRing.size() < 3) return;
 
         constexpr std::size_t kMaxPairs = 256;
         const std::size_t pairCount =
             std::min(kMaxPairs, movingHole.size() * fixedRing.size());
-
         if (pairCount == 0) return;
 
         const std::size_t stride =
@@ -401,9 +399,6 @@ std::vector<Candidate> candidatesFor(
     for (const auto& placed : sheet.shapes) {
         addRingCandidates(placed.outer);
 
-        // Symmetric interlocking: align the boundary of each hole in the
-        // moving part with the already placed outer contour. Exact material
-        // overlap and clearance checks remain authoritative.
         for (const auto& hole : holes) {
             addMovingHoleCandidates(
                 rotate(hole, rotation),
@@ -421,6 +416,8 @@ std::vector<Candidate> candidatesFor(
 
         if (placementMaxX >= placementMinX &&
             placementMaxY >= placementMinY) {
+            if (stats) ++stats->nfpChecks;
+
             const auto region = nfp::feasibilityRegion(
                 placed.outer,
                 part,
@@ -453,9 +450,6 @@ std::vector<Candidate> candidatesFor(
                     ? 72
                     : (part.size() > 128 ? 96 : 128);
 
-            // Include both obstacle/NFP boundaries and the four sheet
-            // placement boundaries. The latter is essential when the only
-            // valid location lies along an edge of the usable sheet region.
             for (const auto& point :
                  nfp::pointsOnFeasibilityBoundary(
                      region,
@@ -557,7 +551,8 @@ bool placeOnSheet(
     const Sheet& sheet,
     const Options& options,
     SheetState& state,
-    std::vector<int> rotations
+    std::vector<int> rotations,
+    NestingStats* stats
 ) {
     Candidate best{};
     bool found = false;
@@ -587,7 +582,10 @@ bool placeOnSheet(
                  state,
                  sheet,
                  options.gapMm,
-                 sheet.edgeMarginMm)) {
+                 sheet.edgeMarginMm,
+                 stats)) {
+            if (stats) ++stats->candidateChecks;
+
             const auto shape =
                 transformed(instance, rotation, candidate.x, candidate.y);
 
@@ -595,6 +593,7 @@ bool placeOnSheet(
 
             bool collision = false;
             for (const auto& existing : state.shapes) {
+                if (stats) ++stats->collisionChecks;
                 if (conflict(shape, existing, options.gapMm)) {
                     collision = true;
                     break;
@@ -626,6 +625,7 @@ bool placeOnSheet(
                      rotation,
                      sheet,
                      sheet.edgeMarginMm)) {
+                if (stats) ++stats->candidateChecks;
 
                 const auto shape =
                     transformed(instance, rotation, candidate.x, candidate.y);
@@ -634,6 +634,7 @@ bool placeOnSheet(
 
                 bool collision = false;
                 for (const auto& existing : state.shapes) {
+                    if (stats) ++stats->collisionChecks;
                     if (conflict(shape, existing, options.gapMm)) {
                         collision = true;
                         break;
@@ -721,7 +722,8 @@ bool compactResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
     const Options& options,
-    Result& result
+    Result& result,
+    NestingStats* stats
 ) {
     if (result.sheets.size() <= 1) return false;
 
@@ -825,7 +827,8 @@ bool compactResult(
                         sheet,
                         options,
                         target,
-                        rotations
+                        rotations,
+                        stats
                     )) {
                     continue;
                 }
@@ -894,9 +897,6 @@ bool compactResult(
         }
 
         if (!allMoved) {
-            // Roll back in reverse mutation order. A target sheet can receive
-            // several source parts, so later snapshots refer to larger
-            // temporary states than earlier snapshots.
             for (auto it = snapshots.rbegin();
                  it != snapshots.rend();
                  ++it) {
@@ -954,7 +954,8 @@ Result runAttempt(
     const Sheet& sheet,
     const Options& options,
     std::vector<std::size_t> order,
-    std::mt19937& rng
+    std::mt19937& rng,
+    NestingStats& stats
 ) {
     Result result;
     std::vector<SheetState> states;
@@ -993,7 +994,14 @@ Result runAttempt(
             const std::size_t oldPlacementCount = state.placements.size();
             const double oldPlacedArea = state.placedArea;
 
-            if (!placeOnSheet(instance, sheet, options, state, trialRotations)) {
+            if (!placeOnSheet(
+                    instance,
+                    sheet,
+                    options,
+                    state,
+                    trialRotations,
+                    &stats
+                )) {
                 continue;
             }
 
@@ -1041,7 +1049,8 @@ Result runAttempt(
                 sheet,
                 options,
                 state,
-                rotations
+                rotations,
+                &stats
             );
             if (placed) states.push_back(std::move(state));
         }
@@ -1065,7 +1074,85 @@ Result runAttempt(
         instances,
         sheet,
         options,
-        result
+        result,
+        &stats
     );
 
+    result.stats = stats;
+
     return result;
+}
+
+} // namespace
+
+Result nest(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options
+) {
+    Result best;
+    best.unplaced.reserve(instances.size());
+    for (const auto& instance : instances) {
+        best.unplaced.push_back(instance.id);
+    }
+    best.utilization = -1.0;
+
+    if (sheet.width <= 0.0 || sheet.height <= 0.0) {
+        best.unplaced.reserve(instances.size());
+        for (const auto& instance : instances) best.unplaced.push_back(instance.id);
+        best.utilization = 0.0;
+        return best;
+    }
+
+    std::vector<std::size_t> order(instances.size());
+    std::iota(order.begin(), order.end(), 0);
+
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        const double areaA = materialArea(instances[a].part);
+        const double areaB = materialArea(instances[b].part);
+        if (std::abs(areaA - areaB) > kEps) return areaA > areaB;
+
+        const auto ba = bounds(instances[a].part.outer);
+        const auto bb = bounds(instances[b].part.outer);
+        return std::max(ba.width(), ba.height()) >
+               std::max(bb.width(), bb.height());
+    });
+
+    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(options.iterations, 128u));
+    std::mt19937 rng(options.seed);
+
+    for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
+        auto attemptOrder = order;
+
+        if (attempt > 0) {
+            std::shuffle(attemptOrder.begin(), attemptOrder.end(), rng);
+        }
+
+        NestingStats attemptStats;
+        auto candidate = runAttempt(
+            instances,
+            sheet,
+            options,
+            std::move(attemptOrder),
+            rng,
+            attemptStats
+        );
+        candidate.stats = attemptStats;
+
+        if (best.utilization < 0.0 || betterResult(candidate, best)) {
+            best = std::move(candidate);
+        }
+
+        // A feasible single-sheet result with every requested instance is a
+        // hard lower bound on the primary objective, so further restarts can
+        // only improve secondary utilization.
+        if (best.unplaced.empty() && best.sheets.size() == 1) {
+            // Keep searching when explicitly requested; the utilization
+            // comparison still decides whether another restart is better.
+        }
+    }
+
+    return best;
+}
+
+} // namespace sheetnest
