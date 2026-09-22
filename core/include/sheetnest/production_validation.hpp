@@ -4,6 +4,7 @@
 #include "nesting.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,9 @@ struct ProductionValidationReport {
     std::size_t duplicateIdCount{};
     std::size_t missingIdCount{};
     std::size_t unknownIdCount{};
+    std::size_t repairAttempts{};
+    std::uint64_t repairElapsedMs{};
+    bool repaired{};
     std::vector<ProductionValidationIssue> issues;
 };
 
