@@ -215,7 +215,8 @@ void NestView::showResult(
     bool showConflict,
     bool showExtracted,
     bool showMoved,
-    bool showStationary
+    bool showStationary,
+    int animationStage
 ) {
     clearResult();
 
