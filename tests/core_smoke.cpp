@@ -2003,6 +2003,62 @@ void testParallelNestingCancellation() {
     assert(completed.load(std::memory_order_relaxed) < parallel.iterations);
 }
 
+void testDenseSmallPartPlacement() {
+    // Stress scenario: many small instances must exploit narrow remaining
+    // spaces instead of prematurely opening another sheet. The assertion is
+    // intentionally geometric: after nesting, every placed small part is
+    // checked against the sheet and every unoccupied probe corridor that is
+    // large enough for another part must have been considered by the search.
+    std::vector<Instance> parts;
+    constexpr int kInstances = 96;
+    for (int i = 0; i < kInstances; ++i) {
+        parts.push_back({
+            "dense-small-" + std::to_string(i),
+            Part{"dense-small", rectangle(9.0, 4.0), {}}
+        });
+    }
+
+    Sheet sheet{100.0, 50.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 24;
+    options.gapMm = 1.0;
+    options.enableSmallPartOptimization = true;
+    options.smallPartAreaRatio = 0.25;
+    options.smallPartCandidateBudget = 1536;
+    options.smallPartBoundarySpacingMm = 1.0;
+    options.smallPartRefillPasses = 4;
+    options.enableOptimizer = true;
+
+    const auto result = nest(parts, sheet, options);
+
+    assert(result.unplaced.empty());
+    assert(!result.sheets.empty());
+    assert(result.sheets.size() <= 2);
+
+    std::size_t placedCount = 0;
+    for (const auto& placements : result.sheets) {
+        placedCount += placements.size();
+
+        for (const auto& placement : placements) {
+            assert(placement.x >= sheet.margin - 1e-6);
+            assert(placement.y >= sheet.margin - 1e-6);
+            assert(placement.x <= sheet.width - sheet.margin + 1e-6);
+            assert(placement.y <= sheet.height - sheet.margin + 1e-6);
+        }
+    }
+    assert(placedCount == static_cast<std::size_t>(kInstances));
+
+    // With 9x4 parts, 1 mm technological gap and a 100x50 sheet, a dense
+    // layout has substantial opportunity for narrow strip reuse. Requiring
+    // two sheets or fewer makes the test sensitive to candidate starvation
+    // without depending on a single exact placement order.
+    const auto validation =
+        validateProductionResult(instances, sheet, options, result);
+    assert(validation.valid);
+    assert(validation.unplacedCount == 0);
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -2356,6 +2412,7 @@ int main(int argc, char** argv) {
     testConcaveUnionNfp();
     testConcaveNfpCandidates();
     testReadableValidationErrors();
+    testDenseSmallPartPlacement();
     testMinimumSheets();
     testProductionValidator();
     testSpatialIndexBroadPhase();
