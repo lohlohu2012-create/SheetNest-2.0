@@ -109,7 +109,7 @@ private:
     QCheckBox* rotation0_{};
     QCheckBox* rotation90_{};
     QCheckBox* rotation180_{};
-    QCheckBox* rotation270_{};
+    QCheckBox* rotation270_{};\n    QCheckBox* cuttingRouteCheck_{};
 
     QLabel* fileLabel_{};
     QLabel* partCountLabel_{};
