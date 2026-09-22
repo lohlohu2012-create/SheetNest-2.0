@@ -15,6 +15,9 @@ struct BenchmarkCase {
     std::size_t placed{};
     std::size_t skipped{};
     double utilization{};
+    std::size_t candidateChecks{};
+    std::size_t collisionChecks{};
+    std::size_t nfpChecks{};
 };
 
 struct BenchmarkResult {
