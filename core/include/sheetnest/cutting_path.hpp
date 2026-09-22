@@ -30,7 +30,7 @@ struct CuttingOperation {
     std::size_t contourIndex{};
     bool inner{};
     Polygon contour;
-    Point start{}, end{};
+    Point rapidFrom{}, start{}, end{};
     double cutLengthMm{};
     double rapidLengthMm{};
     double pierceSeconds{};
