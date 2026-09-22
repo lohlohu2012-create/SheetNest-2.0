@@ -909,6 +909,58 @@ void testFeasibilitySamplingBudget() {
     assert(sawInterior);
 }
 
+void testFeasibilitySegmentCoverage() {
+    nfp::FeasibilityRegion region;
+
+    // Deliberately create many short segments and two long segments. With a
+    // tight budget, the old longest-only policy could discard the isolated
+    // short regions entirely. The stratified policy must expose candidates
+    // from more than one spatial part of the boundary.
+    for (int i = 0; i < 12; ++i) {
+        const double x = static_cast<double>(i) * 10.0;
+        region.boundary.push_back({
+            {x, 0.0},
+            {x + 2.0, 0.0}
+        });
+    }
+
+    region.boundary.push_back({
+        {0.0, 20.0},
+        {80.0, 20.0}
+    });
+    region.boundary.push_back({
+        {0.0, 30.0},
+        {80.0, 30.0}
+    });
+
+    const auto sampled = nfp::pointsOnFeasibilityBoundary(
+        region,
+        1.0,
+        12,
+        false
+    );
+
+    assert(!sampled.empty());
+    assert(sampled.size() <= 12);
+
+    bool sawEarly = false;
+    bool sawLate = false;
+    bool sawLong = false;
+
+    for (const auto& point : sampled) {
+        if (point.x < 20.0) sawEarly = true;
+        if (point.x > 80.0) sawLate = true;
+        if (std::abs(point.y - 20.0) < 1e-6 ||
+            std::abs(point.y - 30.0) < 1e-6) {
+            sawLong = true;
+        }
+    }
+
+    assert(sawEarly);
+    assert(sawLate);
+    assert(sawLong);
+}
+
 void testFeasibilityGap() {
     Polygon fixed = rectangle(20, 20);
     Polygon moving = rectangle(10, 10);
@@ -2298,6 +2350,7 @@ int main(int argc, char** argv) {
     testNfpMinkowski();
     testContinuousConcaveFeasibilityRegion();
     testFeasibilitySamplingBudget();
+    testFeasibilitySegmentCoverage();
     testFeasibilityGap();
     testNfpUnionAndCache();
     testConcaveUnionNfp();
