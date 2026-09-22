@@ -2213,6 +2213,12 @@ void MainWindow::updateProgress(
         );
         break;
 
+    case sheetnest::NestingProgressPhase::NfpSearch:
+        appendLog(
+            QString("NFP Search: %1").arg(QString::fromStdString(progress.message))
+        );
+        break;
+
     case sheetnest::NestingProgressPhase::GlobalOptimization:
         appendLog(
             QString("Global Optimizer: %1")
@@ -2224,6 +2230,18 @@ void MainWindow::updateProgress(
         appendLog(
             QString("Production Validator: %1")
                 .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::AutoRepair:
+        appendLog(
+            QString("Adaptive Auto Repair: %1").arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::Finalizing:
+        appendLog(
+            QString("Finalizing: %1").arg(QString::fromStdString(progress.message))
         );
         break;
 
