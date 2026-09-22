@@ -1505,6 +1505,9 @@ void MainWindow::calculate() {
             );
         };
 
+    pauseLaserAnimation();
+    resetLaserAnimation();
+
     setBusy(true);
     calculationStartedMs_ = QDateTime::currentMSecsSinceEpoch();
     lastProgressMs_ = calculationStartedMs_;
