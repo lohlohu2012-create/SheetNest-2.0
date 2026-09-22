@@ -2319,6 +2319,7 @@ bool adaptiveDestroyAndRepairResult(
             1,
             8
         );
+    NestingStats adaptiveStats = result.stats;
 
     for (std::size_t attempt = 0;
          attempt < attempts;
@@ -2352,7 +2353,7 @@ bool adaptiveDestroyAndRepairResult(
                         options,
                         trial,
                         effectiveRotations(options),
-                        &trialStates[sheetIndex].stats
+                        &adaptiveStats
                     )) {
                     continue;
                 }
@@ -2417,8 +2418,7 @@ bool adaptiveDestroyAndRepairResult(
                       (sheetArea * bestResult.sheets.size())
                     : 0.0;
 
-            bestResult.stats =
-                result.stats;
+            bestResult.stats = adaptiveStats;
             ++bestResult.stats.refillMoves;
             ++bestResult.stats.optimizerPasses;
         }
