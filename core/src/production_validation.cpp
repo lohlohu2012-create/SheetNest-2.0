@@ -659,8 +659,117 @@ bool repairProductionResult(
 
     Result bestFailure = result;
     ProductionValidationReport bestFailureReport = initial;
+    std::size_t actualAdaptiveRounds = 0;
+    std::size_t largestAdaptiveGroup = 0;
 
-    // Stage 0: repair the incumbent in-place. This is cheap and mirrors the
+    auto seedIdsFromReport = [](
+        const ProductionValidationReport& report
+    ) {
+        std::vector<std::string> ids;
+        std::unordered_set<std::string> seen;
+
+        for (const auto& issue : report.issues) {
+            if (!issue.instanceId.empty() &&
+                seen.insert(issue.instanceId).second) {
+                ids.push_back(issue.instanceId);
+            }
+
+            if (!issue.relatedInstanceId.empty() &&
+                seen.insert(issue.relatedInstanceId).second) {
+                ids.push_back(issue.relatedInstanceId);
+            }
+        }
+
+        return ids;
+    };
+
+    // Stage 0: adaptive destroy-and-repair. Only the conflict-driven local
+    // group is extracted; unrelated placements remain fixed. Each round is
+    // immediately checked by the Production Validator, and a new conflict
+    // group is derived from any remaining issues.
+    if (options.enableAdaptiveDestroyRepair &&
+        !timeExpired()) {
+        Result adaptiveCandidate = result;
+        ProductionValidationReport adaptiveReport = initial;
+
+        for (std::size_t round = 0;
+             round < std::max<std::size_t>(
+                 1,
+                 options.adaptiveRepairRounds
+             ) &&
+             !timeExpired();
+             ++round) {
+            if (repairOptions.control &&
+                repairOptions.control->shouldStop()) {
+                break;
+            }
+
+            const auto seedIds =
+                seedIdsFromReport(adaptiveReport);
+
+            if (seedIds.empty()) {
+                break;
+            }
+
+            largestAdaptiveGroup =
+                std::max(
+                    largestAdaptiveGroup,
+                    seedIds.size()
+                );
+
+            Result localCandidate = adaptiveCandidate;
+
+            if (!adaptiveDestroyAndRepairResult(
+                    instances,
+                    sheet,
+                    repairOptions,
+                    seedIds,
+                    localCandidate
+                )) {
+                break;
+            }
+
+            ++actualAdaptiveRounds;
+
+            adaptiveReport =
+                validateProductionResult(
+                    instances,
+                    sheet,
+                    repairOptions,
+                    localCandidate
+                );
+
+            if (adaptiveReport.valid) {
+                if (!foundValid ||
+                    validScore(localCandidate) <
+                        validScore(bestValid)) {
+                    bestValid =
+                        std::move(localCandidate);
+                    foundValid = true;
+                }
+                break;
+            }
+
+            if (failureScore(
+                    adaptiveReport,
+                    localCandidate
+                ) <
+                failureScore(
+                    bestFailureReport,
+                    bestFailure
+                )) {
+                bestFailure =
+                    localCandidate;
+                bestFailureReport =
+                    adaptiveReport;
+            }
+
+            adaptiveCandidate =
+                std::move(localCandidate);
+        }
+    }
+
+    // Stage 1: repair the incumbent in-place. This is cheap and mirrors the
     // "relax/repack" style used by industrial nesting systems before a full
     // restart.
     {
@@ -783,6 +892,8 @@ bool repairProductionResult(
 
     if (!foundValid) {
         bestFailureReport.repairAttempts = actualAttempts;
+        bestFailureReport.adaptiveRepairRounds = actualAdaptiveRounds;
+        bestFailureReport.adaptiveRepairGroupSize = largestAdaptiveGroup;
         bestFailureReport.repairElapsedMs = totalElapsedMs;
         bestFailureReport.repaired = false;
 
@@ -807,6 +918,8 @@ bool repairProductionResult(
 
     auto completedReport = finalReport;
     completedReport.repairAttempts = actualAttempts;
+    completedReport.adaptiveRepairRounds = actualAdaptiveRounds;
+    completedReport.adaptiveRepairGroupSize = largestAdaptiveGroup;
     completedReport.repairElapsedMs = totalElapsedMs;
     completedReport.repaired = true;
 
