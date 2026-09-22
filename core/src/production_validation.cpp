@@ -1139,8 +1139,31 @@ bool repairProductionResult(
                 repairGroupSignature.push_back('\n');
             }
 
+            // The same instances can form a new conflict after repair.
+            // Include the current issue graph so only an identical issue
+            // state is deduplicated.
+            for (const auto& issue : adaptiveReport.issues) {
+                if (!std::binary_search(
+                        signatureIds.begin(), signatureIds.end(), issue.instanceId) &&
+                    !std::binary_search(
+                        signatureIds.begin(), signatureIds.end(), issue.relatedInstanceId)) {
+                    continue;
+                }
+                repairGroupSignature +=
+                    std::to_string(static_cast<int>(issue.type));
+                repairGroupSignature.push_back(':');
+                repairGroupSignature += issue.instanceId;
+                repairGroupSignature.push_back(':');
+                repairGroupSignature += issue.relatedInstanceId;
+                repairGroupSignature.push_back(':');
+                repairGroupSignature += std::to_string(issue.measuredMm);
+                repairGroupSignature.push_back(':');
+                repairGroupSignature += std::to_string(issue.requiredMm);
+                repairGroupSignature.push_back('\n');
+            }
+
             // Never spend another adaptive round on the exact same
-            // conflict neighborhood.
+            // conflict neighborhood and issue state.
             if (!attemptedRepairGroups.insert(
                     std::move(repairGroupSignature)
                 ).second) {
