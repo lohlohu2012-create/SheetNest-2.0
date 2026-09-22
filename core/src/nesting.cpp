@@ -207,6 +207,18 @@ bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
     return false;
 }
 
+double boundsDistance(const Bounds& a, const Bounds& b) {
+    const double dx =
+        (a.maxX < b.minX) ? (b.minX - a.maxX) :
+        (b.maxX < a.minX) ? (a.minX - b.maxX) :
+        0.0;
+    const double dy =
+        (a.maxY < b.minY) ? (b.minY - a.maxY) :
+        (b.maxY < a.minY) ? (a.minY - b.maxY) :
+        0.0;
+    return std::hypot(dx, dy);
+}
+
 bool conflict(const PlacedShape& a, const PlacedShape& b, double gap) {
     const double requiredGap = std::max(0.0, gap);
 
@@ -2146,6 +2158,16 @@ bool adaptiveDestroyAndRepairResult(
                 options.adaptiveRepairMaxNeighbors
             );
 
+        std::vector<bool> selectedFlags(
+            state.placements.size(),
+            false
+        );
+        for (const auto index : selected) {
+            if (index < selectedFlags.size()) {
+                selectedFlags[index] = true;
+            }
+        }
+
         struct Nearby {
             std::size_t index{};
             double distance{};
@@ -2156,11 +2178,7 @@ bool adaptiveDestroyAndRepairResult(
         for (std::size_t i = 0;
              i < state.placements.size();
              ++i) {
-            if (std::find(
-                    selected.begin(),
-                    selected.end(),
-                    i
-                ) != selected.end()) {
+            if (selectedFlags[i]) {
                 continue;
             }
 
@@ -2173,11 +2191,32 @@ bool adaptiveDestroyAndRepairResult(
                 const auto& selectedShape =
                     state.shapes[selectedIndex];
 
-                if (conflict(
+                // Cheap AABB-radius rejection avoids the O(V^2) true-shape
+                // boundary walk for distant placements.
+                if (boundsDistance(
+                        candidateShape.outerBounds,
+                        selectedShape.outerBounds
+                    ) > localRadius + kEps) {
+                    continue;
+                }
+
+                const bool materialConflict =
+                    materialOverlap(
                         candidateShape,
-                        selectedShape,
-                        gap
-                    )) {
+                        selectedShape
+                    );
+
+                const double exactDistance =
+                    minBoundaryDistance(
+                        candidateShape,
+                        selectedShape
+                    );
+
+                const bool pairConflict =
+                    materialConflict ||
+                    exactDistance + kEps < gap;
+
+                if (pairConflict) {
                     directConflict = true;
                     bestDistance = 0.0;
                     break;
@@ -2185,10 +2224,7 @@ bool adaptiveDestroyAndRepairResult(
 
                 bestDistance = std::min(
                     bestDistance,
-                    minBoundaryDistance(
-                        candidateShape,
-                        selectedShape
-                    )
+                    exactDistance
                 );
             }
 
@@ -2217,6 +2253,9 @@ bool adaptiveDestroyAndRepairResult(
         for (const auto& item : nearby) {
             if (added >= maxNeighbors) break;
             selected.push_back(item.index);
+            if (item.index < selectedFlags.size()) {
+                selectedFlags[item.index] = true;
+            }
             extractedIds.insert(
                 state.placements[item.index].id
             );
