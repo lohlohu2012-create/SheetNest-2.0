@@ -35,10 +35,17 @@ struct Placement {
     int rotation{};
 };
 
+struct NestingStats {
+    std::size_t candidateChecks{};
+    std::size_t collisionChecks{};
+    std::size_t nfpChecks{};
+};
+
 struct Result {
     std::vector<std::vector<Placement>> sheets;
     std::vector<std::string> unplaced;
     double utilization{};
+    NestingStats stats{};
 };
 
 struct Options {
