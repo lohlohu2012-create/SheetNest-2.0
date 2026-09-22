@@ -3,7 +3,7 @@
 #include <QGraphicsView>
 
 #include "sheetnest/nesting.hpp"
-#include "sheetnest/production_validation.hpp"
+#include "sheetnest/production_validation.hpp"\n#include "sheetnest/cutting.hpp"
 
 class NestView final : public QGraphicsView {
 public:
@@ -22,13 +22,13 @@ public:
         int animationStage = -1
     );
 
-    void clearResult();
+    void clearResult();\n\n    void setCuttingRouteVisible(bool visible);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
-    QGraphicsPathItem* addPartItem(
+    void addCuttingRoute(\n        const sheetnest::Result& result,\n        const std::vector<sheetnest::Instance>& instances,\n        const sheetnest::Sheet& sheet\n    );\n\n    QGraphicsPathItem* addPartItem(
         QGraphicsItem* parent,
         const sheetnest::Instance& instance,
         const sheetnest::Placement& placement,
