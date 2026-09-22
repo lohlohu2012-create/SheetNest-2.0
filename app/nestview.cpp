@@ -208,6 +208,11 @@ void NestView::clearResult() {
 
 void NestView::setCuttingAnimationProgress(double progress) {
     cuttingAnimationProgress_ = std::clamp(progress, 0.0, 1.0);
+    cuttingAnimationOperation_ = -1;
+}
+
+void NestView::setCuttingAnimationOperation(int operation) {
+    cuttingAnimationOperation_ = std::max(-1, operation);
 }
 
 void NestView::addCuttingRoute(
@@ -243,6 +248,7 @@ void NestView::addCuttingRoute(
 
     std::vector<RouteEvent> events;
     events.reserve(256);
+    cuttingRouteOperations_.clear();
 
     // Build the exact same deterministic contour order as the visible CAM
     // route: all inner contours first, then outer contours, nearest first.
@@ -398,6 +404,42 @@ void NestView::addCuttingRoute(
             }
 
             head = start;
+            cuttingRouteOperations_.push_back({
+                operation,
+                sheetIndex,
+                contour.inner
+                    ? (it->second->id)
+                    : (it->second->id),
+                contour.inner,
+                contour.inner
+                    ? [&] {
+                        std::size_t holeIndex = 0;
+                        if (!instance.part.holes.empty()) {
+                            double bestDistance = std::numeric_limits<double>::infinity();
+                            for (std::size_t h = 0; h < instance.part.holes.size(); ++h) {
+                                const auto transformed = translate(
+                                    rotate(
+                                        instance.part.holes[h],
+                                        placement.rotation
+                                    ),
+                                    placement.x,
+                                    placement.y
+                                );
+                                if (transformed.empty()) continue;
+                                const double distance = std::hypot(
+                                    transformed.front().x - contour.polygon.front().x,
+                                    transformed.front().y - contour.polygon.front().y
+                                );
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    holeIndex = h;
+                                }
+                            }
+                        }
+                        return holeIndex;
+                    }()
+                    : 0
+            });
             ++operation;
         }
     }
@@ -416,9 +458,25 @@ void NestView::addCuttingRoute(
     // for degenerate contours.
     totalDuration = std::max(totalDuration, 1e-6);
 
-    const double targetTime =
+    double targetTime =
         std::clamp(cuttingAnimationProgress_, 0.0, 1.0) *
         totalDuration;
+
+    if (cuttingAnimationOperation_ >= 0 &&
+        static_cast<std::size_t>(cuttingAnimationOperation_) <
+            cuttingRouteOperations_.size()) {
+        const std::size_t selected =
+            static_cast<std::size_t>(cuttingAnimationOperation_);
+        std::size_t seenOperation = 0;
+        double operationStartTime = 0.0;
+        for (const auto& event : events) {
+            if (event.operation == selected + 1) {
+                targetTime = operationStartTime;
+                break;
+            }
+            operationStartTime += std::max(0.0, event.durationSec);
+        }
+    }
 
     double elapsed = 0.0;
     Point currentHead{};
