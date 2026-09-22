@@ -985,13 +985,12 @@ bool repairProductionResult(
                             priorityIt == seedPriority.end()
                                 ? 0.0
                                 : priorityIt->second.second;
-                        neighbors.push_back({
-                            priority,
-                            severity,
-                            exactOverlap ? 0.0 : exactBoundaryDistance,
-                            placement.id
-                        });
-                    }
+                    neighbors.push_back({
+                        priority,
+                        severity,
+                        exactOverlap ? 0.0 : exactBoundaryDistance,
+                        placement.id
+                    });
                 }
             }
         }
