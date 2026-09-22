@@ -59,6 +59,8 @@ private:
     void appendLog(const QString& text);
     void updateProgress(const sheetnest::NestingProgress& progress);
     void setBusy(bool busy);
+    void stopCalculation(bool watchdogTriggered = false);
+    void calculationWatchdogTick();
     void refreshAdaptiveRepairView();
     void resetAdaptiveRepairAnimation();
     void toggleAdaptiveRepairAnimation();
@@ -72,7 +74,8 @@ private:
         sheetnest::Sheet sheet,
         sheetnest::Options options,
         sheetnest::CuttingParameters technology,
-        sheetnest::ParallelNestingOptions parallelOptions
+        sheetnest::ParallelNestingOptions parallelOptions,
+        std::shared_ptr<sheetnest::ParallelNestingController> controller
     ) const;
 
     sheetnest::BenchmarkResult performBenchmark(
@@ -149,6 +152,11 @@ private:
     sheetnest::ProductionValidationReport validation_{};
 
     QTimer* repairAnimationTimer_{};
+    QTimer* calculationWatchdog_{};
+    qint64 calculationStartedMs_{0};
+    qint64 lastProgressMs_{0};
+    bool watchdogTriggered_{false};
+    bool userCancelRequested_{false};
 
     std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
     QFutureWatcher<CalculationOutput>* watcher_{};
