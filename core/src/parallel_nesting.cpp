@@ -476,12 +476,96 @@ Result ParallelNestingController::run(
 
     // Production Validator is deliberately executed after all workers and
     // after Global Optimizer. It never participates in the search hot path.
-    const auto validation = validateProductionResult(
+    auto validation = validateProductionResult(
         instances,
         sheet,
         nestingOptions,
         best
     );
+
+    if (!validation.valid &&
+        nestingOptions.enableAutoRepair &&
+        !control->shouldStop()) {
+        publish({
+            NestingProgressPhase::ProductionValidation,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - best.unplaced.size(),
+            best.unplaced.size(),
+            best.sheets.size(),
+            best.utilization,
+            0,
+            0,
+            "Production Validator: FAIL → Auto Repair (" +
+                std::to_string(
+                    std::max<std::size_t>(
+                        1,
+                        nestingOptions.autoRepairAttempts
+                    )
+                ) +
+                " попыток)"
+        });
+
+        Result repaired = best;
+        ProductionValidationReport repairedReport = validation;
+
+        const bool repairedOk = repairProductionResult(
+            instances,
+            sheet,
+            nestingOptions,
+            repaired,
+            &repairedReport
+        );
+
+        if (repairedOk) {
+            best = std::move(repaired);
+            validation = repairedReport;
+
+            publish({
+                NestingProgressPhase::ProductionValidation,
+                0,
+                workerCount,
+                completedIterations.load(
+                    std::memory_order_relaxed
+                ),
+                totalIterations,
+                instances.size() - best.unplaced.size(),
+                best.unplaced.size(),
+                best.sheets.size(),
+                best.utilization,
+                0,
+                0,
+                "Production Validator: Auto Repair завершён успешно"
+            });
+        } else {
+            validation = repairedReport;
+
+            publish({
+                NestingProgressPhase::ProductionValidation,
+                0,
+                workerCount,
+                completedIterations.load(
+                    std::memory_order_relaxed
+                ),
+                totalIterations,
+                instances.size() - best.unplaced.size(),
+                best.unplaced.size(),
+                best.sheets.size(),
+                best.utilization,
+                0,
+                0,
+                "Production Validator: Auto Repair не нашёл валидную раскладку"
+            });
+        }
+    }
+
+    best.productionValidated = true;
+    best.productionValid = validation.valid;
+    best.productionIssueCount = validation.issues.size();
 
     if (options.onValidation) {
         options.onValidation(validation);
