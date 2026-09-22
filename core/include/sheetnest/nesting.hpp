@@ -53,6 +53,9 @@ struct Result {
     std::vector<std::string> unplaced;
     double utilization{};
     NestingStats stats{};
+    bool productionValidated{};
+    bool productionValid{};
+    std::size_t productionIssueCount{};
 };
 
 struct NestingRunControl {
@@ -84,6 +87,7 @@ struct Options {
     double gapMm{2.0};
     std::uint32_t seed{0x534E4553u};
     bool enableOptimizer{true};
+    bool enableProductionValidation{true};
     std::shared_ptr<NestingRunControl> control{};
 };
 
