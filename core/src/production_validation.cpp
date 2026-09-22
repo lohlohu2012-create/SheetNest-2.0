@@ -842,6 +842,10 @@ bool repairProductionResult(
 
             ++actualAdaptiveRounds;
 
+            for (const auto& id : roundExtractedIds) {
+                adaptiveExtractedSet.insert(id);
+            }
+
             adaptiveHistory.push_back(
                 makeRoundSnapshot(
                     round + 1,
