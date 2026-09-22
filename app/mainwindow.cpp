@@ -1719,25 +1719,45 @@ void MainWindow::exportDxf() {
         sheet_
     );
 
-    QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    const QByteArray payload(
+        text.data(),
+        static_cast<int>(text.size())
+    );
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly)) {
         QMessageBox::critical(
             this,
             "Экспорт DXF",
-            "Не удалось записать файл."
+            "Не удалось открыть файл для безопасной записи."
         );
         return;
     }
 
-    file.write(
-        QByteArray(
-            text.data(),
-            static_cast<int>(text.size())
-        )
-    );
+    const qint64 written = file.write(payload);
+    if (written != payload.size()) {
+        file.cancelWriting();
+        QMessageBox::critical(
+            this,
+            "Экспорт DXF",
+            "Не удалось полностью записать DXF-файл."
+        );
+        return;
+    }
+
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт DXF",
+            "Не удалось завершить безопасную запись DXF-файла."
+        );
+        return;
+    }
 
     appendLog(
-        QString("Раскладка сохранена: %1").arg(fileName)
+        QString("Раскладка сохранена: %1 • %2 байт")
+            .arg(fileName)
+            .arg(payload.size())
     );
     statusBar()->showMessage(
         "DXF экспортирован",
