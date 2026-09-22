@@ -574,7 +574,7 @@ std::vector<Polygon> unionPolygons(
     if (cleaned.empty()) return {};
     if (cleaned.size() == 1) return cleaned;
 
-    const auto boundary = unionBoundaryPieces(cleaned);
+    const auto boundary = unionBoundaryPieces(cleaned, control);
     return assembleBoundaryLoops(boundary);
 }
 
