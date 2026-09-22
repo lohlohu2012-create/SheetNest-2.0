@@ -1,5 +1,5 @@
 #include "sheetnest/parallel_nesting.hpp"
-#include "sheetnest/production_validator.hpp"
+#include "sheetnest/production_validation.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -483,10 +483,6 @@ Result ParallelNestingController::run(
         best
     );
 
-    best.productionValidated = true;
-    best.productionValid = validation.valid;
-    best.productionIssueCount = validation.issues.size();
-
     if (options.onValidation) {
         options.onValidation(validation);
     }
@@ -497,9 +493,9 @@ Result ParallelNestingController::run(
         "; collision=" +
         std::to_string(validation.collisionCount) +
         ", gap=" +
-        std::to_string(validation.gapCount) +
+        std::to_string(validation.gapViolationCount) +
         ", margin=" +
-        std::to_string(validation.marginCount) +
+        std::to_string(validation.marginViolationCount) +
         ", duplicateIds=" +
         std::to_string(validation.duplicateIdCount) +
         ", missingIds=" +
