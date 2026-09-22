@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nesting.hpp"
+#include "production_validation.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -62,6 +63,7 @@ struct ParallelNestingOptions {
     std::uint64_t timeBudgetMs{120000};
     std::uint32_t seed{0x534E4553u};
     std::function<void(const NestingProgress&)> onProgress;
+    std::function<void(const ProductionValidationReport&)> onValidation;
 };
 
 class ParallelNestingController {
