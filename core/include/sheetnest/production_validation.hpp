@@ -42,6 +42,8 @@ struct ProductionValidationReport {
     std::size_t missingIdCount{};
     std::size_t unknownIdCount{};
     std::size_t repairAttempts{};
+    std::size_t adaptiveRepairRounds{};
+    std::size_t adaptiveRepairGroupSize{};
     std::uint64_t repairElapsedMs{};
     bool repaired{};
     std::vector<ProductionValidationIssue> issues;
