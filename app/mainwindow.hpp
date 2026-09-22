@@ -58,6 +58,7 @@ private:
     void appendLog(const QString& text);
     void updateProgress(const sheetnest::NestingProgress& progress);
     void setBusy(bool busy);
+    void refreshAdaptiveRepairView();
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
