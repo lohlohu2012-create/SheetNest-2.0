@@ -22,6 +22,8 @@ struct BenchmarkCase {
     std::size_t exchangeAttempts{};
     std::size_t sheetsEliminated{};
     std::size_t optimizerPasses{};
+    std::size_t nfpTimeouts{};
+    std::size_t nfpComplexityFallbacks{};
 };
 
 struct BenchmarkResult {
