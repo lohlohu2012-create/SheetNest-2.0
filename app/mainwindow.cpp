@@ -517,7 +517,8 @@ void MainWindow::connectUi() {
             view_->showResult(
                 result_,
                 instances_,
-                sheet_
+                sheet_,
+                &validation_
             );
 
             const auto minutes = output.cutting.totalMinutes;
