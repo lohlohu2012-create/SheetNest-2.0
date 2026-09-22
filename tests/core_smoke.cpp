@@ -1455,6 +1455,18 @@ void testConcaveNfpCandidates() {
 }
 
 void testLaserTechnologyInterpolation() {
+    const auto technologyTable = bodor3kWTechnologyTable();
+    const auto technologyReport = validateBodor3kWTechnology();
+    assert(technologyReport.valid);
+    assert(technologyReport.rows == technologyTable.size());
+    assert(technologyReport.invalidRows == 0);
+    assert(technologyReport.duplicateRows == 0);
+    for (const auto& row : technologyTable) {
+        assert(row.thicknessMm > 0.0);
+        assert(row.speedMMin > 0.0);
+        assert(!row.assistGas.empty());
+    }
+
     const auto lower = bodor3kWParameters(Material::CarbonSteel, 2.0);
     const auto mid = bodor3kWParameters(Material::CarbonSteel, 2.5);
     const auto upper = bodor3kWParameters(Material::CarbonSteel, 3.0);
