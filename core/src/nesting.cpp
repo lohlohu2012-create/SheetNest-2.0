@@ -1245,6 +1245,193 @@ bool refillExistingSheets(
     return changed;
 }
 
+double sheetEnvelopeScore(const SheetState& state) {
+    if (state.shapes.empty()) {
+        return 0.0;
+    }
+
+    Bounds envelope = bounds(state.shapes.front().outer);
+    for (std::size_t i = 1; i < state.shapes.size(); ++i) {
+        const auto b = bounds(state.shapes[i].outer);
+        envelope.minX = std::min(envelope.minX, b.minX);
+        envelope.minY = std::min(envelope.minY, b.minY);
+        envelope.maxX = std::max(envelope.maxX, b.maxX);
+        envelope.maxY = std::max(envelope.maxY, b.maxY);
+    }
+
+    return envelope.width() * envelope.height();
+}
+
+bool betterLocalRepack(
+    const SheetState& candidate,
+    const SheetState& current
+) {
+    const double candidateArea = sheetEnvelopeScore(candidate);
+    const double currentArea = sheetEnvelopeScore(current);
+
+    if (candidateArea + kEps < currentArea) {
+        return true;
+    }
+
+    if (std::abs(candidateArea - currentArea) <= kEps) {
+        Bounds cb = bounds(candidate.shapes.front().outer);
+        Bounds ob = bounds(current.shapes.front().outer);
+
+        for (std::size_t i = 1; i < candidate.shapes.size(); ++i) {
+            const auto b = bounds(candidate.shapes[i].outer);
+            cb.minX = std::min(cb.minX, b.minX);
+            cb.minY = std::min(cb.minY, b.minY);
+            cb.maxX = std::max(cb.maxX, b.maxX);
+            cb.maxY = std::max(cb.maxY, b.maxY);
+        }
+
+        for (std::size_t i = 1; i < current.shapes.size(); ++i) {
+            const auto b = bounds(current.shapes[i].outer);
+            ob.minX = std::min(ob.minX, b.minX);
+            ob.minY = std::min(ob.minY, b.minY);
+            ob.maxX = std::max(ob.maxX, b.maxX);
+            ob.maxY = std::max(ob.maxY, b.maxY);
+        }
+
+        if (cb.maxY + kEps < ob.maxY) return true;
+        if (std::abs(cb.maxY - ob.maxY) <= kEps &&
+            cb.maxX + kEps < ob.maxX) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool localRepack(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result,
+    NestingStats* stats
+) {
+    if (result.sheets.empty() || shouldStop(options)) {
+        return false;
+    }
+
+    std::vector<SheetState> states;
+    states.reserve(result.sheets.size());
+
+    for (const auto& placements : result.sheets) {
+        states.push_back(
+            stateFromPlacements(placements, instances)
+        );
+    }
+
+    bool changed = false;
+    constexpr int kMaxRepackPasses = 2;
+
+    for (int pass = 0; pass < kMaxRepackPasses; ++pass) {
+        if (shouldStop(options)) break;
+
+        bool passChanged = false;
+
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < states.size();
+             ++sheetIndex) {
+            if (shouldStop(options)) break;
+
+            auto& current = states[sheetIndex];
+            if (current.placements.size() < 2) continue;
+
+            std::vector<std::string> ids;
+            ids.reserve(current.placements.size());
+            for (const auto& placement : current.placements) {
+                ids.push_back(placement.id);
+            }
+
+            std::sort(
+                ids.begin(),
+                ids.end(),
+                [&](const std::string& a, const std::string& b) {
+                    const auto* ia = findInstance(instances, a);
+                    const auto* ib = findInstance(instances, b);
+
+                    const double aa =
+                        ia ? materialArea(ia->part) : 0.0;
+                    const double ab =
+                        ib ? materialArea(ib->part) : 0.0;
+
+                    if (std::abs(aa - ab) > kEps) {
+                        return aa > ab;
+                    }
+
+                    return a < b;
+                }
+            );
+
+            SheetState trial;
+            trial.shapes.reserve(current.shapes.size());
+            trial.placements.reserve(current.placements.size());
+
+            bool success = true;
+
+            for (const auto& id : ids) {
+                if (shouldStop(options)) {
+                    success = false;
+                    break;
+                }
+
+                const auto* instance = findInstance(instances, id);
+                if (!instance ||
+                    !placeOnSheet(
+                        *instance,
+                        sheet,
+                        options,
+                        trial,
+                        effectiveRotations(options),
+                        stats
+                    )) {
+                    success = false;
+                    break;
+                }
+            }
+
+            if (!success ||
+                trial.placements.size() != current.placements.size()) {
+                continue;
+            }
+
+            if (betterLocalRepack(trial, current)) {
+                current = std::move(trial);
+                if (stats) ++stats->refillMoves;
+                passChanged = true;
+                changed = true;
+            }
+        }
+
+        if (!passChanged) break;
+        if (stats) ++stats->optimizerPasses;
+    }
+
+    if (!changed) return false;
+
+    result.sheets.clear();
+    result.sheets.reserve(states.size());
+
+    double placedArea = 0.0;
+    for (auto& state : states) {
+        result.sheets.push_back(std::move(state.placements));
+        placedArea += state.placedArea;
+    }
+
+    const double sheetArea =
+        std::max(0.0, sheet.width * sheet.height);
+
+    result.utilization =
+        (sheetArea > 0.0 && !result.sheets.empty())
+            ? placedArea /
+              (sheetArea * result.sheets.size())
+            : 0.0;
+
+    return true;
+}
+
 bool compactResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
@@ -1659,13 +1846,15 @@ Result runAttempt(
             ? placedArea / (sheetArea * result.sheets.size())
             : 0.0;
 
-    compactResult(
-        instances,
-        sheet,
-        options,
-        result,
-        &stats
-    );
+    if (options.enableOptimizer) {
+        compactResult(
+            instances,
+            sheet,
+            options,
+            result,
+            &stats
+        );
+    }
 
     result.stats = stats;
     return result;
@@ -1746,6 +1935,73 @@ Result nest(
     }
 
     return best;
+}
+
+bool optimizeNestingResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result
+) {
+    NestingStats stats = result.stats;
+    bool changed = false;
+
+    if (shouldStop(options)) {
+        result.stats = stats;
+        return false;
+    }
+
+    changed |= compactResult(
+        instances,
+        sheet,
+        options,
+        result,
+        &stats
+    );
+
+    if (!shouldStop(options)) {
+        changed |= localRepack(
+            instances,
+            sheet,
+            options,
+            result,
+            &stats
+        );
+    }
+
+    if (!shouldStop(options)) {
+        changed |= compactResult(
+            instances,
+            sheet,
+            options,
+            result,
+            &stats
+        );
+    }
+
+    if (!shouldStop(options)) {
+        changed |= localRepack(
+            instances,
+            sheet,
+            options,
+            result,
+            &stats
+        );
+    }
+
+    if (!shouldStop(options)) {
+        changed |= compactResult(
+            instances,
+            sheet,
+            options,
+            result,
+            &stats
+        );
+    }
+
+    stats.optimizerPasses += 1;
+    result.stats = stats;
+    return changed;
 }
 
 } // namespace sheetnest
