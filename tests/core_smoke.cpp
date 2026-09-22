@@ -7,6 +7,7 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/parallel_nesting.hpp"
+#include "sheetnest/production_validator.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -1175,6 +1176,147 @@ void testNestingBenchmark() {
     );
 }
 
+void testProductionValidator() {
+    std::vector<Instance> instances{
+        {"p1", Part{"part-a", rectangle(10, 10), {}}},
+        {"p2", Part{"part-b", rectangle(10, 10), {}}},
+        {"p3", Part{"part-c", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{100, 100, 2.0};
+    Options options;
+    options.rotations = {0};
+    options.gapMm = 2.0;
+
+    Result valid;
+    valid.sheets = {{
+        {"p1", 2.0, 2.0, 0},
+        {"p2", 14.0, 2.0, 0}
+    }};
+    valid.unplaced = {"p3"};
+
+    const auto validReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            valid
+        );
+
+    assert(validReport.valid);
+    assert(validReport.collisionCount == 0);
+    assert(validReport.gapCount == 0);
+    assert(validReport.marginCount == 0);
+    assert(validReport.duplicateIdCount == 0);
+    assert(validReport.missingIdCount == 0);
+
+    Result collision = valid;
+    collision.sheets = {{
+        {"p1", 2.0, 2.0, 0},
+        {"p2", 5.0, 2.0, 0}
+    }};
+    collision.unplaced = {"p3"};
+
+    const auto collisionReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            collision
+        );
+
+    assert(!collisionReport.valid);
+    assert(collisionReport.collisionCount > 0);
+
+    Result gap = valid;
+    gap.sheets = {{
+        {"p1", 2.0, 2.0, 0},
+        {"p2", 13.0, 2.0, 0}
+    }};
+    gap.unplaced = {"p3"};
+
+    const auto gapReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            gap
+        );
+
+    assert(!gapReport.valid);
+    assert(gapReport.gapCount > 0);
+
+    Result margin = valid;
+    margin.sheets = {{
+        {"p1", 0.0, 2.0, 0}
+    }};
+    margin.unplaced = {"p2", "p3"};
+
+    const auto marginReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            margin
+        );
+
+    assert(!marginReport.valid);
+    assert(marginReport.marginCount > 0);
+
+    Result duplicate = valid;
+    duplicate.sheets = {{
+        {"p1", 2.0, 2.0, 0},
+        {"p1", 14.0, 2.0, 0}
+    }};
+    duplicate.unplaced = {"p2", "p3"};
+
+    const auto duplicateReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            duplicate
+        );
+
+    assert(!duplicateReport.valid);
+    assert(duplicateReport.duplicateIdCount > 0);
+
+    Result missing = valid;
+    missing.sheets = {{
+        {"p1", 2.0, 2.0, 0}
+    }};
+    missing.unplaced.clear();
+
+    const auto missingReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            missing
+        );
+
+    assert(!missingReport.valid);
+    assert(missingReport.missingIdCount == 2);
+
+    Result unexpected = valid;
+    unexpected.sheets = {{
+        {"p1", 2.0, 2.0, 0},
+        {"unknown", 20.0, 2.0, 0}
+    }};
+    unexpected.unplaced = {"p2", "p3"};
+
+    const auto unexpectedReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            unexpected
+        );
+
+    assert(!unexpectedReport.valid);
+    assert(unexpectedReport.missingIdCount > 0);
+}
+
 void testCandidateCollectorAndGlobalOptimizer() {
     NestingCandidateCollector collector(2);
 
@@ -1412,6 +1554,7 @@ int main() {
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
+    testProductionValidator();
     testCandidateCollectorAndGlobalOptimizer();
     testParallelNestingController();
     testParallelNestingCancellation();
