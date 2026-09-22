@@ -1165,6 +1165,7 @@ void MainWindow::importDxf() {
 
     document_ = sheetnest::importDxf(text, 0.25);
     parts_ = partsFromDxf(document_);
+    const auto preflight = preflightDxf(document_);
     currentFile_ = fileName;
     populatePartTable();
 
@@ -1191,6 +1192,25 @@ void MainWindow::importDxf() {
         );
     }
 
+    if (!preflight.valid) {
+        appendLog(
+            QString("DXF PRECHECK: FAIL • valid=%1/%2 • issues=%3")
+                .arg(static_cast<int>(preflight.validParts))
+                .arg(static_cast<int>(document_.contours.size()))
+                .arg(static_cast<int>(preflight.issues.size()))
+        );
+        for (const auto& issue : preflight.issues) {
+            appendLog(QString("DXF PRECHECK: %1").arg(QString::fromStdString(issue)));
+        }
+    } else {
+        appendLog(
+            QString("DXF PRECHECK: PASS • деталей=%1 • площадь min/max=%2/%3 мм²")
+                .arg(static_cast<int>(preflight.validParts))
+                .arg(preflight.minArea, 0, 'f', 2)
+                .arg(preflight.maxArea, 0, 'f', 2)
+        );
+    }
+
     if (document_.contours.empty()) {
         parts_.clear();
         if (partTable_) partTable_->setRowCount(0);
@@ -1205,8 +1225,18 @@ void MainWindow::importDxf() {
         return;
     }
 
-    calculateButton_->setEnabled(true);
+    calculateButton_->setEnabled(preflight.valid);
     refreshInstances();
+
+    if (!preflight.valid) {
+        QMessageBox::warning(
+            this,
+            "DXF preflight",
+            QString("DXF найден, но часть контуров не прошла предварительную проверку. "
+                    "Расчёт заблокирован до исправления геометрии.\n\n%1")
+                .arg(static_cast<int>(preflight.issues.size()))
+        );
+    }
 }
 
 void MainWindow::refreshInstances() {
