@@ -2018,4 +2018,425 @@ bool optimizeNestingResult(
     return changed;
 }
 
+bool adaptiveDestroyAndRepairResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const std::vector<std::string>& seedIds,
+    Result& result
+) {
+    if (result.sheets.empty() ||
+        seedIds.empty() ||
+        shouldStop(options)) {
+        return false;
+    }
+
+    std::unordered_set<std::string> seedSet(
+        seedIds.begin(),
+        seedIds.end()
+    );
+
+    std::vector<SheetState> baseStates;
+    baseStates.reserve(result.sheets.size());
+    for (const auto& placements : result.sheets) {
+        baseStates.push_back(
+            stateFromPlacements(placements, instances)
+        );
+    }
+
+    std::vector<std::size_t> affectedSheets;
+    affectedSheets.reserve(baseStates.size());
+
+    // Start with the validator's concrete conflict IDs.
+    for (std::size_t sheetIndex = 0;
+         sheetIndex < baseStates.size();
+         ++sheetIndex) {
+        bool affected = false;
+        for (const auto& placement : baseStates[sheetIndex].placements) {
+            if (seedSet.contains(placement.id)) {
+                affected = true;
+                break;
+            }
+        }
+        if (affected) {
+            affectedSheets.push_back(sheetIndex);
+        }
+    }
+
+    if (affectedSheets.empty()) {
+        return false;
+    }
+
+    const double gap =
+        std::max(0.0, options.gapMm);
+
+    std::unordered_set<std::string> extractedIds;
+    std::vector<std::vector<std::size_t>> extractedIndices(
+        baseStates.size()
+    );
+
+    // Build a small local conflict neighborhood on each affected sheet.
+    // Direct geometric conflicts are always included first. Then include
+    // nearby blockers by true-shape boundary distance, with a hard cap so a
+    // local repair cannot accidentally become a full-sheet repack.
+    for (const auto sheetIndex : affectedSheets) {
+        auto& state = baseStates[sheetIndex];
+        auto& selected = extractedIndices[sheetIndex];
+
+        for (std::size_t i = 0; i < state.placements.size(); ++i) {
+            if (seedSet.contains(state.placements[i].id)) {
+                selected.push_back(i);
+                extractedIds.insert(state.placements[i].id);
+            }
+        }
+
+        if (selected.empty()) continue;
+
+        auto regionBounds = bounds(
+            state.shapes[selected.front()].outer
+        );
+        for (std::size_t k = 1; k < selected.size(); ++k) {
+            const auto b =
+                bounds(state.shapes[selected[k]].outer);
+            regionBounds.minX =
+                std::min(regionBounds.minX, b.minX);
+            regionBounds.minY =
+                std::min(regionBounds.minY, b.minY);
+            regionBounds.maxX =
+                std::max(regionBounds.maxX, b.maxX);
+            regionBounds.maxY =
+                std::max(regionBounds.maxY, b.maxY);
+        }
+
+        double maxDimension = std::max(
+            regionBounds.width(),
+            regionBounds.height()
+        );
+
+        const double localRadius = std::clamp(
+            std::max({
+                4.0 * gap,
+                5.0,
+                0.25 * maxDimension
+            }),
+            5.0,
+            250.0
+        );
+
+        const std::size_t maxNeighbors =
+            std::max<std::size_t>(
+                0,
+                options.adaptiveRepairMaxNeighbors
+            );
+
+        struct Nearby {
+            std::size_t index{};
+            double distance{};
+            bool directConflict{};
+        };
+
+        std::vector<Nearby> nearby;
+        for (std::size_t i = 0;
+             i < state.placements.size();
+             ++i) {
+            if (std::find(
+                    selected.begin(),
+                    selected.end(),
+                    i
+                ) != selected.end()) {
+                continue;
+            }
+
+            const auto& candidateShape = state.shapes[i];
+            double bestDistance =
+                std::numeric_limits<double>::infinity();
+            bool directConflict = false;
+
+            for (const auto selectedIndex : selected) {
+                const auto& selectedShape =
+                    state.shapes[selectedIndex];
+
+                if (conflict(
+                        candidateShape,
+                        selectedShape,
+                        gap
+                    )) {
+                    directConflict = true;
+                    bestDistance = 0.0;
+                    break;
+                }
+
+                bestDistance = std::min(
+                    bestDistance,
+                    minBoundaryDistance(
+                        candidateShape,
+                        selectedShape
+                    )
+                );
+            }
+
+            if (directConflict ||
+                bestDistance <= localRadius + kEps) {
+                nearby.push_back({
+                    i,
+                    bestDistance,
+                    directConflict
+                });
+            }
+        }
+
+        std::sort(
+            nearby.begin(),
+            nearby.end(),
+            [](const Nearby& a, const Nearby& b) {
+                if (a.directConflict != b.directConflict) {
+                    return a.directConflict > b.directConflict;
+                }
+                return a.distance < b.distance;
+            }
+        );
+
+        std::size_t added = 0;
+        for (const auto& item : nearby) {
+            if (added >= maxNeighbors) break;
+            selected.push_back(item.index);
+            extractedIds.insert(
+                state.placements[item.index].id
+            );
+            ++added;
+        }
+    }
+
+    if (extractedIds.empty()) {
+        return false;
+    }
+
+    // The group is intentionally compact: we do not touch unrelated sheets
+    // or placements outside the affected local neighborhoods.
+    std::vector<SheetState> strippedStates = baseStates;
+    for (const auto sheetIndex : affectedSheets) {
+        auto& state = strippedStates[sheetIndex];
+
+        std::vector<std::size_t> indices =
+            extractedIndices[sheetIndex];
+
+        std::sort(
+            indices.rbegin(),
+            indices.rend()
+        );
+
+        for (const auto index : indices) {
+            if (index >= state.placements.size()) continue;
+
+            const auto* instance =
+                findInstance(
+                    instances,
+                    state.placements[index].id
+                );
+
+            if (!instance) continue;
+            erasePlacement(state, index, *instance);
+        }
+    }
+
+    std::vector<const Instance*> groupInstances;
+    groupInstances.reserve(extractedIds.size());
+    for (const auto& id : extractedIds) {
+        const auto* instance =
+            findInstance(instances, id);
+        if (instance) {
+            groupInstances.push_back(instance);
+        }
+    }
+
+    if (groupInstances.empty()) {
+        return false;
+    }
+
+    auto makeOrder = [&](std::size_t attempt) {
+        std::vector<const Instance*> ordered =
+            groupInstances;
+
+        std::sort(
+            ordered.begin(),
+            ordered.end(),
+            [&](const Instance* a, const Instance* b) {
+                const double aa = materialArea(a->part);
+                const double ab = materialArea(b->part);
+
+                if (attempt % 3 == 1) {
+                    if (std::abs(aa - ab) > kEps) {
+                        return aa < ab;
+                    }
+                } else if (attempt % 3 == 2) {
+                    const auto ba = bounds(a->part.outer);
+                    const auto bb = bounds(b->part.outer);
+                    const double da =
+                        std::max(ba.width(), ba.height());
+                    const double db =
+                        std::max(bb.width(), bb.height());
+
+                    if (std::abs(da - db) > kEps) {
+                        return da > db;
+                    }
+                } else if (std::abs(aa - ab) > kEps) {
+                    return aa > ab;
+                }
+
+                return a->id < b->id;
+            }
+        );
+
+        if (attempt >= 3) {
+            std::mt19937 localRng(
+                options.seed +
+                static_cast<std::uint32_t>(
+                    0x9E3779B9u *
+                    static_cast<std::uint32_t>(attempt + 1)
+                )
+            );
+            std::shuffle(
+                ordered.begin(),
+                ordered.end(),
+                localRng
+            );
+        }
+
+        return ordered;
+    };
+
+    Result bestResult = result;
+    bool foundComplete = false;
+    double bestLocalScore =
+        std::numeric_limits<double>::infinity();
+
+    const std::size_t attempts =
+        std::clamp<std::size_t>(
+            std::max<std::size_t>(
+                1,
+                options.adaptiveRepairAttempts
+            ),
+            1,
+            8
+        );
+
+    for (std::size_t attempt = 0;
+         attempt < attempts;
+         ++attempt) {
+        if (shouldStop(options)) break;
+
+        auto trialStates = strippedStates;
+        const auto ordered = makeOrder(attempt);
+        bool success = true;
+
+        for (const auto* instance : ordered) {
+            if (shouldStop(options)) {
+                success = false;
+                break;
+            }
+
+            bool placed = false;
+            std::size_t bestSheetIndex =
+                trialStates.size();
+            SheetState bestSheetState;
+            double bestSheetScore =
+                std::numeric_limits<double>::infinity();
+
+            for (const auto sheetIndex : affectedSheets) {
+                SheetState trial =
+                    trialStates[sheetIndex];
+
+                if (!placeOnSheet(
+                        *instance,
+                        sheet,
+                        options,
+                        trial,
+                        effectiveRotations(options),
+                        &trialStates[sheetIndex].stats
+                    )) {
+                    continue;
+                }
+
+                const double score =
+                    sheetEnvelopeScore(trial);
+
+                if (!placed ||
+                    score + kEps < bestSheetScore) {
+                    placed = true;
+                    bestSheetIndex = sheetIndex;
+                    bestSheetState = std::move(trial);
+                    bestSheetScore = score;
+                }
+            }
+
+            if (!placed) {
+                success = false;
+                break;
+            }
+
+            trialStates[bestSheetIndex] =
+                std::move(bestSheetState);
+        }
+
+        if (!success) continue;
+
+        double localScore = 0.0;
+        for (const auto sheetIndex : affectedSheets) {
+            localScore +=
+                sheetEnvelopeScore(trialStates[sheetIndex]);
+        }
+
+        if (!foundComplete ||
+            localScore + kEps < bestLocalScore) {
+            foundComplete = true;
+            bestLocalScore = localScore;
+
+            bestResult.sheets.clear();
+            bestResult.sheets.reserve(
+                trialStates.size()
+            );
+
+            double placedArea = 0.0;
+            for (const auto& state : trialStates) {
+                bestResult.sheets.push_back(
+                    state.placements
+                );
+                placedArea += state.placedArea;
+            }
+
+            const double sheetArea =
+                std::max(
+                    0.0,
+                    sheet.width * sheet.height
+                );
+
+            bestResult.utilization =
+                (sheetArea > 0.0 &&
+                 !bestResult.sheets.empty())
+                    ? placedArea /
+                      (sheetArea * bestResult.sheets.size())
+                    : 0.0;
+
+            bestResult.stats =
+                result.stats;
+            ++bestResult.stats.refillMoves;
+            ++bestResult.stats.optimizerPasses;
+        }
+    }
+
+    if (!foundComplete) {
+        return false;
+    }
+
+    // Preserve the original unplaced set: this operation only rearranges
+    // already-placed instances. The Production Validator decides whether the
+    // resulting layout is safe.
+    bestResult.productionValidated = false;
+    bestResult.productionValid = false;
+    bestResult.productionIssueCount = 0;
+
+    result = std::move(bestResult);
+    return true;
+}
+
 } // namespace sheetnest
