@@ -82,62 +82,58 @@ QVector<Polygon> placementPolygons(
     return result;
 }
 
-CuttingEstimate estimateWholeResult(
+CuttingPath planWholeResultRoute(
     const Result& result,
     const std::vector<Instance>& instances,
     const CuttingParameters& technology
 ) {
     std::unordered_map<std::string, const Instance*> byId;
     byId.reserve(instances.size());
-    for (const auto& instance : instances) {
-        byId.emplace(instance.id, &instance);
-    }
+    for (const auto& instance : instances) byId.emplace(instance.id, &instance);
 
-    CuttingEstimate total;
-    total.parameters = technology;
+    std::vector<CuttingContour> contours;
+    for (std::size_t sheetIndex = 0; sheetIndex < result.sheets.size(); ++sheetIndex) {
+        for (const auto& placement : result.sheets[sheetIndex]) {
+            const auto it = byId.find(placement.id);
+            if (it == byId.end()) continue;
+
+            contours.push_back({
+                sheetIndex, placement.id, 0, false,
+                translate(rotate(it->second->part.outer, placement.rotation),
+                          placement.x, placement.y)
+            });
+
+            for (std::size_t holeIndex = 0;
+                 holeIndex < it->second->part.holes.size();
+                 ++holeIndex) {
+                contours.push_back({
+                    sheetIndex, placement.id, holeIndex, true,
+                    translate(
+                        rotate(it->second->part.holes[holeIndex], placement.rotation),
+                        placement.x, placement.y
+                    )
+                });
+            }
+        }
+    }
 
     PathOptions pathOptions;
     pathOptions.rapidSpeedMMin = 120.0;
     pathOptions.pierceSeconds = 0.25;
+    pathOptions.innerContoursFirst = true;
+    return planCuttingRoute(contours, technology, pathOptions);
+}
 
-    for (const auto& sheetPlacements : result.sheets) {
-        std::vector<Polygon> contours;
-
-        for (const auto& placement : sheetPlacements) {
-            const auto it = byId.find(placement.id);
-            if (it == byId.end()) continue;
-
-            const auto polygons = placementPolygons(
-                *it->second,
-                placement
-            );
-            for (const auto& polygon : polygons) {
-                contours.push_back(polygon);
-            }
-        }
-
-        if (contours.empty()) continue;
-
-        const auto path = planCuttingPath(
-            contours,
-            technology,
-            pathOptions
-        );
-        const auto estimate = estimateCuttingPath(
-            path,
-            technology,
-            pathOptions
-        );
-
-        total.contourLengthMm += estimate.contourLengthMm;
-        total.cuttingMinutes += estimate.cuttingMinutes;
-        total.piercingMinutes += estimate.piercingMinutes;
-        total.rapidMinutes += estimate.rapidMinutes;
-        total.totalMinutes += estimate.totalMinutes;
-        total.pierces += estimate.pierces;
-    }
-
-    return total;
+CuttingEstimate estimateWholeResult(
+    const Result& result,
+    const std::vector<Instance>& instances,
+    const CuttingParameters& technology
+) {
+    const auto route = planWholeResultRoute(result, instances, technology);
+    PathOptions options;
+    options.rapidSpeedMMin = 120.0;
+    options.pierceSeconds = 0.25;
+    return estimateCuttingPath(route, technology, options);
 }
 
 QDoubleSpinBox* makeDouble(
@@ -867,6 +863,7 @@ void MainWindow::connectUi() {
             result_ = output.result;
             technology_ = output.technology;
             validation_ = output.validation;
+            cuttingRoute_ = output.cuttingRoute;
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
 
@@ -1755,11 +1752,11 @@ CalculationOutput MainWindow::performCalculation(
         );
     }
 
-    output.cutting = estimateWholeResult(
-        output.result,
-        instances,
-        technology
-    );
+    output.cuttingRoute = planWholeResultRoute(output.result, instances, technology);
+    PathOptions routeOptions;
+    routeOptions.rapidSpeedMMin = 120.0;
+    routeOptions.pierceSeconds = 0.25;
+    output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
     output.diagnostics = diagnoseNest(
         instances,
         output.result
