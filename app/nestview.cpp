@@ -258,8 +258,16 @@ void NestView::addCuttingRoute(
         for (std::size_t operation = 0; operation < contours.size(); ++operation) {
             std::size_t best = contours.size();
             double bestDistance = std::numeric_limits<double>::infinity();
+            bool hasUnusedInner = false;
+            for (std::size_t i = 0; i < contours.size(); ++i) {
+                if (!used[i] && contours[i].inner && !contours[i].polygon.empty()) {
+                    hasUnusedInner = true;
+                    break;
+                }
+            }
             for (std::size_t i = 0; i < contours.size(); ++i) {
                 if (used[i] || contours[i].polygon.empty()) continue;
+                if (hasUnusedInner && !contours[i].inner) continue;
                 const auto& p = contours[i].polygon.front();
                 const double distance = std::hypot(head.x - p.x, head.y - p.y);
                 if (distance < bestDistance) { bestDistance = distance; best = i; }
@@ -316,7 +324,7 @@ void NestView::addCuttingRoute(
         "LASER ROUTE  |  ● пробивка  |  голубой внутренний  |  зелёный внешний  |  - - rapid  |  ➜ направление");
     legend->setBrush(QBrush(QColor("#f8fafc")));
     legend->setZValue(1200.0);
-    legend->setPos(scene()->sceneRect().left() + 18.0, scene()->sceneRect().bottom() - 32.0);
+    legend->setPos(18.0, -42.0);
 }
 
 void NestView::showResult(
