@@ -27,26 +27,51 @@ CuttingPath planCuttingPath(
     // Area ordering is a conservative geometry-only approximation that also
     // works when nesting metadata is unavailable. The nearest-neighbour pass
     // below still minimizes rapid travel within the same priority level.
+    std::vector<bool> inner(contours.size(), false);
     if (options.innerContoursFirst) {
-        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-            const double areaA = std::abs(polygonArea(contours[a]));
-            const double areaB = std::abs(polygonArea(contours[b]));
-            if (std::abs(areaA - areaB) > 1e-9) return areaA < areaB;
-            return a < b;
-        });
+        // A contour is internal when its first point lies inside another
+        // closed contour. This is more reliable than area sorting because
+        // nearest-neighbour selection must never pull an outer contour ahead
+        // of a hole simply because the outer contour is closer to the head.
+        for (std::size_t i = 0; i < contours.size(); ++i) {
+            if (contours[i].size() < 3) continue;
+            const Point probe = contours[i].front();
+            for (std::size_t j = 0; j < contours.size(); ++j) {
+                if (i == j || contours[j].size() < 3) continue;
+                if (pointInPolygon(probe, contours[j])) {
+                    inner[i] = true;
+                    break;
+                }
+            }
+        }
     }
 
     for (std::size_t k = 0; k < order.size(); ++k) {
         std::size_t bestPos = k;
         double bestDistance = std::numeric_limits<double>::infinity();
         const std::size_t candidateCount = order.size();
+
+        bool hasInnerRemaining = false;
+        if (options.innerContoursFirst) {
+            for (std::size_t pos = k; pos < candidateCount; ++pos) {
+                const auto index = order[pos];
+                if (inner[index] && !contours[index].empty()) {
+                    hasInnerRemaining = true;
+                    break;
+                }
+            }
+        }
+
         for (std::size_t pos = k; pos < candidateCount; ++pos) {
             const auto index = order[pos];
             const auto& contour = contours[index];
             if (contour.empty()) continue;
+            if (hasInnerRemaining && !inner[index]) continue;
+
             const double distance = d(head, contour.front());
             if (distance < bestDistance - 1e-9 ||
-                (std::abs(distance - bestDistance) <= 1e-9 && index < order[bestPos])) {
+                (std::abs(distance - bestDistance) <= 1e-9 &&
+                 index < order[bestPos])) {
                 bestDistance = distance;
                 bestPos = pos;
             }
