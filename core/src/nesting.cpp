@@ -2686,7 +2686,7 @@ bool adaptiveDestroyAndRepairResult(
     double bestLocalScore =
         std::numeric_limits<double>::infinity();
 
-    const std::size_t attempts =
+    const std::size_t attemptsPerRound =
         std::clamp<std::size_t>(
             std::max<std::size_t>(
                 1,
@@ -2695,6 +2695,24 @@ bool adaptiveDestroyAndRepairResult(
             1,
             8
         );
+    const std::size_t repairRounds =
+        std::clamp<std::size_t>(
+            std::max<std::size_t>(
+                1,
+                options.adaptiveRepairRounds
+            ),
+            1,
+            8
+        );
+    // A round is a complete local destroy/repair search. Later rounds reuse
+    // the same compact conflict neighborhood but explore different packing
+    // orders, allowing a failed first repair to be recovered without opening
+    // a new sheet or touching unrelated placements.
+    const std::size_t attempts =
+        std::min<std::size_t>(
+            32,
+            attemptsPerRound * repairRounds
+        );
     NestingStats adaptiveStats = result.stats;
 
     for (std::size_t attempt = 0;
@@ -2702,8 +2720,15 @@ bool adaptiveDestroyAndRepairResult(
          ++attempt) {
         if (shouldStop(options)) break;
 
+        const std::size_t round =
+            attempt / attemptsPerRound;
+        const std::size_t attemptInRound =
+            attempt % attemptsPerRound;
+
         auto trialStates = strippedStates;
-        const auto ordered = makeOrder(attempt);
+        const auto ordered = makeOrder(
+            round * attemptsPerRound + attemptInRound
+        );
         bool success = true;
 
         for (const auto* instance : ordered) {
