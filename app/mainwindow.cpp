@@ -561,11 +561,10 @@ void MainWindow::connectUi() {
                 QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6, unknown ID=%7.")
                     .arg(validation_.valid ? "OK" : "ОШИБКА")
                     .arg(static_cast<qulonglong>(validation_.collisionCount))
-                    .arg(static_cast<qulonglong>(validation_.gapViolationCount))
-                    .arg(static_cast<qulonglong>(validation_.marginViolationCount))
+                    .arg(static_cast<qulonglong>(validation_.gapCount))
+                    .arg(static_cast<qulonglong>(validation_.marginCount))
                     .arg(static_cast<qulonglong>(validation_.duplicateIdCount))
                     .arg(static_cast<qulonglong>(validation_.missingIdCount))
-                    .arg(static_cast<qulonglong>(validation_.unknownIdCount))
             );
 
             exportButton_->setEnabled(
@@ -861,8 +860,8 @@ void MainWindow::populateProductionValidation() {
             ),
             QString::fromStdString(issue.instanceId),
             QString::fromStdString(issue.relatedInstanceId),
-            QString::number(issue.measuredMm, 'f', 3),
-            QString::number(issue.requiredMm, 'f', 3),
+            QString::number(issue.measured, 'f', 3),
+            QString::number(issue.required, 'f', 3),
             QString::fromStdString(issue.message)
         };
 
