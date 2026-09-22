@@ -34,6 +34,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QSignalBlocker>
+#include <QSlider>
 #include <QAbstractItemView>
 #include <QtConcurrent>
 
@@ -348,11 +349,25 @@ void MainWindow::buildUi() {
     laserResetButton_ = new QPushButton("↺ В начало");
     laserPrevButton_ = new QPushButton("◀ Предыдущая");
     laserNextButton_ = new QPushButton("Следующая ▶");
+    laserContourStartButton_ = new QPushButton("⏮ Начало контура");
+    laserContourMiddleButton_ = new QPushButton("⏺ 50%");
+    laserContourEndButton_ = new QPushButton("Конец ⏭");
+    laserContourStepBackButton_ = new QPushButton("− Шаг");
+    laserContourStepForwardButton_ = new QPushButton("Шаг +");
 
     laserOperationCombo_ = new QComboBox;
     laserOperationCombo_->setMinimumWidth(260);
     laserOperationCombo_->setToolTip(
         "Выберите деталь или контур для перехода к нему"
+    );
+
+    laserContourProgressSlider_ = new QSlider(Qt::Horizontal);
+    laserContourProgressSlider_->setRange(0, 100);
+    laserContourProgressSlider_->setValue(0);
+    laserContourProgressSlider_->setSingleStep(5);
+    laserContourProgressSlider_->setPageStep(10);
+    laserContourProgressSlider_->setToolTip(
+        "Положение внутри выбранного контура: 0% — начало, 50% — середина, 100% — конец"
     );
 
     laserSpeedCombo_ = new QComboBox;
@@ -374,15 +389,28 @@ void MainWindow::buildUi() {
     laserLayout->addWidget(laserPrevButton_, 0, 3);
     laserLayout->addWidget(laserNextButton_, 0, 4);
     laserLayout->addWidget(new QLabel("Операция:"), 1, 0);
-    laserLayout->addWidget(laserOperationCombo_, 1, 1, 1, 2);
-    laserLayout->addWidget(new QLabel("Скорость:"), 1, 3);
-    laserLayout->addWidget(laserSpeedCombo_, 1, 4);
-    laserLayout->addWidget(laserStageLabel_, 2, 0, 1, 5);
+    laserLayout->addWidget(laserOperationCombo_, 1, 1, 1, 4);
+    laserLayout->addWidget(new QLabel("Контур:"), 2, 0);
+    laserLayout->addWidget(laserContourStartButton_, 2, 1);
+    laserLayout->addWidget(laserContourMiddleButton_, 2, 2);
+    laserLayout->addWidget(laserContourEndButton_, 2, 3);
+    laserLayout->addWidget(laserContourStepBackButton_, 3, 0);
+    laserLayout->addWidget(laserContourProgressSlider_, 3, 1, 1, 3);
+    laserLayout->addWidget(laserContourStepForwardButton_, 3, 4);
+    laserLayout->addWidget(new QLabel("Скорость:"), 4, 0);
+    laserLayout->addWidget(laserSpeedCombo_, 4, 1);
+    laserLayout->addWidget(laserStageLabel_, 4, 2, 1, 3);
 
     laserPauseButton_->setEnabled(false);
     laserResetButton_->setEnabled(false);
     laserPrevButton_->setEnabled(false);
     laserNextButton_->setEnabled(false);
+    laserContourStartButton_->setEnabled(false);
+    laserContourMiddleButton_->setEnabled(false);
+    laserContourEndButton_->setEnabled(false);
+    laserContourStepBackButton_->setEnabled(false);
+    laserContourStepForwardButton_->setEnabled(false);
+    laserContourProgressSlider_->setEnabled(false);
     laserOperationCombo_->setEnabled(false);
     laserSpeedCombo_->setEnabled(false);
 
@@ -2408,8 +2436,13 @@ void MainWindow::populateLaserOperationSelector() {
     }
 
     laserAnimationOperation_ = -1;
+    laserContourProgress_ = 0.0;
     if (!operations.empty()) {
         laserOperationCombo_->setCurrentIndex(0);
+    }
+    if (laserContourProgressSlider_) {
+        QSignalBlocker sliderBlocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(0);
     }
     updateLaserAnimationUi();
 }
@@ -2427,11 +2460,59 @@ void MainWindow::laserSelectOperation(int index) {
 
     laserAnimationOperation_ = index;
     laserAnimationProgress_ = 0.0;
-    view_->setCuttingAnimationOperation(index);
+    laserContourProgress_ = 0.0;
     view_->setCuttingAnimationProgress(0.0);
+    view_->setCuttingAnimationOperationProgress(index, 0.0);
+    if (laserContourProgressSlider_) {
+        QSignalBlocker blocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(0);
+    }
 
     updateLaserAnimationUi();
     refreshAdaptiveRepairView();
+}
+
+void MainWindow::laserSetContourProgress(double progress) {
+    if (!view_ || laserAnimationPlaying_) return;
+    if (laserAnimationOperation_ < 0 ||
+        static_cast<std::size_t>(laserAnimationOperation_) >=
+            view_->cuttingRouteOperations().size()) {
+        return;
+    }
+
+    laserContourProgress_ = std::clamp(progress, 0.0, 1.0);
+    if (laserContourProgressSlider_) {
+        QSignalBlocker blocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(
+            static_cast<int>(std::lround(laserContourProgress_ * 100.0))
+        );
+    }
+
+    view_->setCuttingAnimationOperationProgress(
+        laserAnimationOperation_,
+        laserContourProgress_
+    );
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::laserContourStart() {
+    laserSetContourProgress(0.0);
+}
+
+void MainWindow::laserContourMiddle() {
+    laserSetContourProgress(0.5);
+}
+
+void MainWindow::laserContourEnd() {
+    laserSetContourProgress(1.0);
+}
+
+void MainWindow::laserContourStep(int direction) {
+    constexpr double step = 0.05;
+    laserSetContourProgress(
+        laserContourProgress_ + direction * step
+    );
 }
 
 void MainWindow::laserPreviousOperation() {
@@ -2505,6 +2586,7 @@ void MainWindow::resetLaserAnimation() {
     laserAnimationPlaying_ = false;
     laserAnimationProgress_ = 1.0;
     laserAnimationOperation_ = -1;
+    laserContourProgress_ = 0.0;
 
     if (view_) {
         view_->setCuttingAnimationOperation(-1);
@@ -2602,6 +2684,22 @@ void MainWindow::updateLaserAnimationUi() {
             hasRoute && !laserAnimationPlaying_
         );
     }
+    const bool hasSelectedContour =
+        hasRoute &&
+        laserAnimationOperation_ >= 0 &&
+        static_cast<std::size_t>(laserAnimationOperation_) <
+            view_->cuttingRouteOperations().size();
+    const auto setContourControl = [hasSelectedContour](QWidget* widget) {
+        if (widget) widget->setEnabled(hasSelectedContour);
+    };
+    setContourControl(laserContourStartButton_);
+    setContourControl(laserContourMiddleButton_);
+    setContourControl(laserContourEndButton_);
+    setContourControl(laserContourStepBackButton_);
+    setContourControl(laserContourStepForwardButton_);
+    if (laserContourProgressSlider_) {
+        laserContourProgressSlider_->setEnabled(hasSelectedContour);
+    }
     if (laserResetButton_) {
         laserResetButton_->setEnabled(
             hasRoute
@@ -2628,7 +2726,14 @@ void MainWindow::updateLaserAnimationUi() {
         );
 
     QString stage;
-    if (percent >= 100) {
+    if (laserAnimationOperation_ >= 0 &&
+        laserContourProgressSlider_) {
+        const int contourPercent =
+            static_cast<int>(std::lround(laserContourProgress_ * 100.0));
+        stage = QString("Операция %1 • контур %2%")
+            .arg(laserAnimationOperation_ + 1)
+            .arg(contourPercent);
+    } else if (percent >= 100) {
         stage = "Готово • маршрут завершён";
     } else if (percent <= 0) {
         stage = "Старт • лазерная головка готова";
