@@ -2719,39 +2719,27 @@ void MainWindow::updateLaserAnimationUi() {
     const bool hasRoute =
         cuttingRouteCheck_ &&
         cuttingRouteCheck_->isChecked() &&
-        !result_.sheets.empty();
+        !result_.sheets.empty() &&
+        !cuttingRoute_.operations.empty();
 
-    if (laserPlayButton_) {
-        laserPlayButton_->setEnabled(
-            hasRoute && !laserAnimationPlaying_
-        );
-    }
-    if (laserPauseButton_) {
-        laserPauseButton_->setEnabled(
-            hasRoute && laserAnimationPlaying_
-        );
-    }
-    if (laserPrevButton_) {
-        laserPrevButton_->setEnabled(
-            hasRoute && !laserAnimationPlaying_
-        );
-    }
-    if (laserNextButton_) {
-        laserNextButton_->setEnabled(
-            hasRoute && !laserAnimationPlaying_
-        );
-    }
-    if (laserOperationCombo_) {
-        laserOperationCombo_->setEnabled(
-            hasRoute && !laserAnimationPlaying_
-        );
-    }
+    if (laserPlayButton_) laserPlayButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserPauseButton_) laserPauseButton_->setEnabled(
+        hasRoute && laserAnimationPlaying_);
+    if (laserPrevButton_) laserPrevButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserNextButton_) laserNextButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserOperationCombo_) laserOperationCombo_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+
     const bool hasSelectedContour =
         hasRoute &&
         !laserAnimationPlaying_ &&
         laserAnimationOperation_ >= 0 &&
         static_cast<std::size_t>(laserAnimationOperation_) <
-            view_->cuttingRouteOperations().size();
+            cuttingRoute_.operations.size();
+
     const auto setContourControl = [hasSelectedContour](QWidget* widget) {
         if (widget) widget->setEnabled(hasSelectedContour);
     };
@@ -2763,36 +2751,78 @@ void MainWindow::updateLaserAnimationUi() {
     if (laserContourProgressSlider_) {
         laserContourProgressSlider_->setEnabled(hasSelectedContour);
     }
-    if (laserResetButton_) {
-        laserResetButton_->setEnabled(
-            hasRoute
-        );
-    }
-    if (laserSpeedCombo_) {
-        laserSpeedCombo_->setEnabled(hasRoute);
-    }
+    if (laserResetButton_) laserResetButton_->setEnabled(hasRoute);
+    if (laserSpeedCombo_) laserSpeedCombo_->setEnabled(hasRoute);
 
     if (!hasRoute) {
         if (laserStageLabel_) {
-            laserStageLabel_->setText(
-                "Нет готовой раскладки для анимации"
-            );
+            laserStageLabel_->setText("Нет готовой раскладки для анимации");
         }
         return;
     }
 
-    const int percent =
-        static_cast<int>(
-            std::round(
-                laserAnimationProgress_ * 100.0
+    double elapsedSeconds = 0.0;
+    std::size_t activeOperation = 0;
+    if (laserAnimationOperation_ >= 0 &&
+        static_cast<std::size_t>(laserAnimationOperation_) <
+            cuttingRoute_.operations.size()) {
+        activeOperation =
+            static_cast<std::size_t>(laserAnimationOperation_);
+        for (std::size_t i = 0; i < activeOperation; ++i) {
+            elapsedSeconds += cuttingRoute_.operations[i].totalSeconds;
+        }
+        const auto& op = cuttingRoute_.operations[activeOperation];
+        const double p = std::clamp(laserContourProgress_, 0.0, 1.0);
+        elapsedSeconds += op.rapidSeconds +
+            op.pierceSeconds +
+            op.cuttingSeconds * p;
+    } else {
+        const double p = std::clamp(laserAnimationProgress_, 0.0, 1.0);
+        const double total = cuttingRoute_.totalSeconds;
+        elapsedSeconds = total * p;
+        activeOperation = std::min(
+            cuttingRoute_.operations.empty()
+                ? std::size_t(0)
+                : cuttingRoute_.operations.size() - 1,
+            static_cast<std::size_t>(
+                std::floor(
+                    p * static_cast<double>(
+                        std::max<std::size_t>(1, cuttingRoute_.operations.size())
+                    )
+                )
             )
         );
+    }
+
+    const double remainingSeconds =
+        std::max(0.0, cuttingRoute_.totalSeconds - elapsedSeconds);
+    const int percent =
+        static_cast<int>(std::lround(
+            std::clamp(laserAnimationProgress_, 0.0, 1.0) * 100.0
+        ));
+
+    const auto formatSeconds = [](double seconds) {
+        const auto whole = static_cast<long long>(std::llround(
+            std::max(0.0, seconds)
+        ));
+        const long long h = whole / 3600;
+        const long long m = (whole % 3600) / 60;
+        const long long sec = whole % 60;
+        if (h > 0) {
+            return QString("%1 ч %2 мин %3 с").arg(h).arg(m).arg(sec);
+        }
+        if (m > 0) {
+            return QString("%1 мин %2 с").arg(m).arg(sec);
+        }
+        return QString("%1 с").arg(sec);
+    };
 
     QString stage;
-    if (laserAnimationOperation_ >= 0 &&
-        laserContourProgressSlider_) {
+    if (laserAnimationOperation_ >= 0) {
         const int contourPercent =
-            static_cast<int>(std::lround(laserContourProgress_ * 100.0));
+            static_cast<int>(std::lround(
+                std::clamp(laserContourProgress_, 0.0, 1.0) * 100.0
+            ));
         stage = QString("Операция %1 • контур %2%")
             .arg(laserAnimationOperation_ + 1)
             .arg(contourPercent);
@@ -2808,9 +2838,12 @@ void MainWindow::updateLaserAnimationUi() {
 
     if (laserStageLabel_) {
         laserStageLabel_->setText(
-            QString("%1 • %2%")
+            QString("%1 • %2% • прошло %3 • осталось %4 • текущая операция %5")
                 .arg(stage)
                 .arg(percent)
+                .arg(formatSeconds(elapsedSeconds))
+                .arg(formatSeconds(remainingSeconds))
+                .arg(static_cast<qulonglong>(activeOperation + 1))
         );
     }
 }
