@@ -44,9 +44,21 @@ BenchmarkResult benchmarkNest(
 ) {
     Options baseline = optimizedOptions;
 
-    // Baseline intentionally represents a minimal-search configuration:
-    // one deterministic pass with the same geometry, gap, sheet and rotations.
+    // Baseline is intentionally a true greedy reference:
+    // one deterministic nesting pass with post-optimization and automatic
+    // repair disabled. Geometry, sheet, gap and permitted rotations remain
+    // identical so the delta measures search/optimization work rather than
+    // different manufacturing constraints.
     baseline.iterations = 1;
+    baseline.enableOptimizer = false;
+    baseline.enableProductionValidation = false;
+    baseline.enableAutoRepair = false;
+    baseline.enableAdaptiveDestroyRepair = false;
+    baseline.autoRepairAttempts = 0;
+    baseline.autoRepairTimeBudgetMs = 0;
+    baseline.adaptiveRepairAttempts = 0;
+    baseline.adaptiveRepairMaxNeighbors = 0;
+    baseline.adaptiveRepairRounds = 0;
 
     BenchmarkResult result;
     result.baseline = runCase(
