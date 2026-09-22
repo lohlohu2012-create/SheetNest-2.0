@@ -50,9 +50,32 @@ struct NestingStats {
     std::size_t nfpComplexityFallbacks{};
 };
 
+enum class NestingFailureReason {
+    None,
+    NoFeasiblePosition,
+    Timeout,
+    InvalidGeometry,
+    RepairExhausted,
+    Cancelled
+};
+
+struct InstanceNestingTelemetry {
+    std::string instanceId;
+    std::string unitId;
+    NestingFailureReason reason{NestingFailureReason::None};
+    std::size_t candidateChecks{};
+    std::size_t collisionChecks{};
+    std::size_t nfpChecks{};
+    std::size_t nfpTimeouts{};
+    std::size_t nfpFallbacks{};
+    std::uint64_t elapsedMs{};
+    bool placed{};
+};
+
 struct Result {
     std::vector<std::vector<Placement>> sheets;
     std::vector<std::string> unplaced;
+    std::vector<InstanceNestingTelemetry> instanceTelemetry;
     double utilization{};
     NestingStats stats{};
     bool productionValidated{};
