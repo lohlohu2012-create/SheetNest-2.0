@@ -10,6 +10,7 @@
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/parallel_nesting.hpp"
+#include "sheetnest/production_validation.hpp"
 
 class QComboBox;
 class QCheckBox;
@@ -29,6 +30,7 @@ struct CalculationOutput {
     sheetnest::CuttingEstimate cutting;
     sheetnest::CuttingParameters technology;
     std::vector<sheetnest::InstanceDiagnostic> diagnostics;
+    sheetnest::ProductionValidationReport validation;
 };
 
 Q_DECLARE_METATYPE(CalculationOutput)
@@ -48,6 +50,7 @@ private:
     void populatePartTable();
     void populateDiagnostics();
     void populateBenchmark(const sheetnest::BenchmarkResult& benchmarkResult);
+    void populateProductionValidation();
     void exportBenchmarkResults();
     void updateTechnologyPreview();
     void refreshInstances();
@@ -106,6 +109,7 @@ private:
     QTableWidget* partTable_{};
     QTableWidget* diagnosticsTable_{};
     QTableWidget* benchmarkTable_{};
+    QTableWidget* validatorTable_{};
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
@@ -116,6 +120,7 @@ private:
 
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
+    sheetnest::ProductionValidationReport validation_{};
 
     std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
     QFutureWatcher<CalculationOutput>* watcher_{};
