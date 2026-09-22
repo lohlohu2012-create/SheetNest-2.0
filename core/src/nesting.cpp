@@ -826,18 +826,23 @@ bool compactResult(
         }
 
         if (!allMoved) {
-            for (const auto& snapshot : snapshots) {
+            // Roll back in reverse mutation order. A target sheet can receive
+            // several source parts, so later snapshots refer to larger
+            // temporary states than earlier snapshots.
+            for (auto it = snapshots.rbegin();
+                 it != snapshots.rend();
+                 ++it) {
                 auto& target =
-                    states[snapshot.sheetIndex];
+                    states[it->sheetIndex];
 
                 target.shapes.resize(
-                    snapshot.shapeCount
+                    it->shapeCount
                 );
                 target.placements.resize(
-                    snapshot.placementCount
+                    it->placementCount
                 );
                 target.placedArea =
-                    snapshot.placedArea;
+                    it->placedArea;
             }
             states[sourceIndex] = std::move(source);
             continue;
@@ -997,74 +1002,3 @@ Result runAttempt(
 
     return result;
 }
-
-} // namespace
-
-Result nest(
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options
-) {
-    Result best;
-    best.unplaced.reserve(instances.size());
-    for (const auto& instance : instances) {
-        best.unplaced.push_back(instance.id);
-    }
-    best.utilization = -1.0;
-
-    if (sheet.width <= 0.0 || sheet.height <= 0.0) {
-        best.unplaced.reserve(instances.size());
-        for (const auto& instance : instances) best.unplaced.push_back(instance.id);
-        best.utilization = 0.0;
-        return best;
-    }
-
-    std::vector<std::size_t> order(instances.size());
-    std::iota(order.begin(), order.end(), 0);
-
-    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        const double areaA = materialArea(instances[a].part);
-        const double areaB = materialArea(instances[b].part);
-        if (std::abs(areaA - areaB) > kEps) return areaA > areaB;
-
-        const auto ba = bounds(instances[a].part.outer);
-        const auto bb = bounds(instances[b].part.outer);
-        return std::max(ba.width(), ba.height()) >
-               std::max(bb.width(), bb.height());
-    });
-
-    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(options.iterations, 128u));
-    std::mt19937 rng(options.seed);
-
-    for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
-        auto attemptOrder = order;
-
-        if (attempt > 0) {
-            std::shuffle(attemptOrder.begin(), attemptOrder.end(), rng);
-        }
-
-        auto candidate = runAttempt(
-            instances,
-            sheet,
-            options,
-            std::move(attemptOrder),
-            rng
-        );
-
-        if (best.utilization < 0.0 || betterResult(candidate, best)) {
-            best = std::move(candidate);
-        }
-
-        // A feasible single-sheet result with every requested instance is a
-        // hard lower bound on the primary objective, so further restarts can
-        // only improve secondary utilization.
-        if (best.unplaced.empty() && best.sheets.size() == 1) {
-            // Keep searching when explicitly requested; the utilization
-            // comparison still decides whether another restart is better.
-        }
-    }
-
-    return best;
-}
-
-} // namespace sheetnest
