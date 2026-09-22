@@ -1,6 +1,7 @@
 #include "sheetnest/production_validation.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <unordered_map>
@@ -576,6 +577,8 @@ bool repairProductionResult(
     Result& result,
     ProductionValidationReport* reportOut
 ) {
+    const auto repairStarted = std::chrono::steady_clock::now();
+
     ProductionValidationReport initial =
         validateProductionResult(
             instances,
@@ -595,35 +598,100 @@ bool repairProductionResult(
     Options repairOptions = options;
     repairOptions.enableOptimizer = true;
     repairOptions.enableProductionValidation = true;
+    repairOptions.autoRepairTimeBudgetMs = 0;
     repairOptions.iterations = std::clamp<std::size_t>(
-        std::max<std::size_t>(
-            32,
-            options.iterations * 2
-        ),
+        std::max<std::size_t>(32, options.iterations),
         32,
         128
     );
 
     const std::uint32_t baseSeed = options.seed;
-
-    Result bestCandidate;
-    bestCandidate.utilization = -1.0;
-    ProductionValidationReport bestReport = initial;
-    bool foundValid = false;
-
-    const std::size_t repairAttempts =
+    const std::size_t maxAttempts =
         std::clamp<std::size_t>(
             std::max<std::size_t>(1, options.autoRepairAttempts),
             1,
-            8
+            16
+        );
+    const auto timeBudget =
+        std::chrono::milliseconds(options.autoRepairTimeBudgetMs);
+
+    auto elapsedMs = [&]() -> std::uint64_t {
+        return static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - repairStarted
+            ).count()
+        );
+    };
+
+    auto timeExpired = [&]() -> bool {
+        if (options.autoRepairTimeBudgetMs == 0) {
+            return false;
+        }
+        return elapsedMs() >=
+               static_cast<std::uint64_t>(timeBudget.count());
+    };
+
+    auto failureScore = [](
+        const ProductionValidationReport& validation,
+        const Result& candidate
+    ) {
+        return std::tuple{
+            validation.issues.size(),
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            -candidate.utilization
+        };
+    };
+
+    auto validScore = [](
+        const Result& candidate
+    ) {
+        return std::tuple{
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            -candidate.utilization
+        };
+    };
+
+    Result bestValid;
+    bool foundValid = false;
+
+    Result bestFailure = result;
+    ProductionValidationReport bestFailureReport = initial;
+
+    // Stage 0: repair the incumbent in-place. This is cheap and mirrors the
+    // "relax/repack" style used by industrial nesting systems before a full
+    // restart.
+    {
+        Result incumbent = result;
+        optimizeNestingResult(
+            instances,
+            sheet,
+            repairOptions,
+            incumbent
         );
 
-    // Several bounded independent repairs are deliberate: a single greedy
-    // restart can reproduce the same bad packing, while a small seed set
-    // usually recovers a valid layout without turning Repair into an
-    // unbounded optimizer.
+        const auto validation =
+            validateProductionResult(
+                instances,
+                sheet,
+                repairOptions,
+                incumbent
+            );
+
+        bestFailure = incumbent;
+        bestFailureReport = validation;
+
+        if (validation.valid) {
+            bestValid = std::move(incumbent);
+            foundValid = true;
+        }
+    }
+
+    // Stage 1: time-bounded multi-start. Do not stop at the first valid nest:
+    // continue while budget remains and keep the best valid candidate.
     for (std::size_t attempt = 0;
-         attempt < repairAttempts;
+         attempt < maxAttempts && !timeExpired();
          ++attempt) {
         if (repairOptions.control &&
             repairOptions.control->shouldStop()) {
@@ -633,8 +701,36 @@ bool repairProductionResult(
         repairOptions.seed =
             baseSeed +
             static_cast<std::uint32_t>(
-                attempt * 0x9E3779B9u
+                0x9E3779B9u * static_cast<std::uint32_t>(attempt + 1)
             );
+
+        repairOptions.iterations =
+            std::clamp<std::size_t>(
+                32 + attempt * 16,
+                32,
+                128
+            );
+
+        // Diversify rotation priority without changing the permitted
+        // rotation set. Different search orders can expose different
+        // interlocks in tight true-shape nests.
+        repairOptions.rotations = options.rotations;
+        if (!repairOptions.rotations.empty()) {
+            const std::size_t shift =
+                attempt % repairOptions.rotations.size();
+            std::rotate(
+                repairOptions.rotations.begin(),
+                repairOptions.rotations.begin() +
+                    static_cast<std::ptrdiff_t>(shift),
+                repairOptions.rotations.end()
+            );
+            if (attempt % 2 == 1) {
+                std::reverse(
+                    repairOptions.rotations.begin(),
+                    repairOptions.rotations.end()
+                );
+            }
+        }
 
         Result candidate =
             nest(
@@ -642,6 +738,20 @@ bool repairProductionResult(
                 sheet,
                 repairOptions
             );
+
+        // Always polish a restart before validating it. This makes repair a
+        // real two-stage search rather than just repeated greedy restarts.
+        if (!timeExpired() && !(
+            repairOptions.control &&
+            repairOptions.control->shouldStop()
+        )) {
+            optimizeNestingResult(
+                instances,
+                sheet,
+                repairOptions,
+                candidate
+            );
+        }
 
         const auto validation =
             validateProductionResult(
@@ -651,50 +761,55 @@ bool repairProductionResult(
                 candidate
             );
 
-        if (validation.valid) {
-            bestCandidate = std::move(candidate);
-            bestReport = validation;
-            foundValid = true;
-            break;
+        if (!validation.valid) {
+            if (failureScore(validation, candidate) <
+                failureScore(bestFailureReport, bestFailure)) {
+                bestFailure = std::move(candidate);
+                bestFailureReport = validation;
+            }
+            continue;
         }
 
-        const auto candidateScore =
-            std::tuple{
-                validation.issues.size(),
-                candidate.unplaced.size(),
-                candidate.sheets.size(),
-                -candidate.utilization
-            };
-
-        const auto bestScore =
-            std::tuple{
-                bestReport.issues.size(),
-                bestCandidate.unplaced.size(),
-                bestCandidate.sheets.size(),
-                -bestCandidate.utilization
-            };
-
-        if (bestCandidate.utilization < 0.0 ||
-            candidateScore < bestScore) {
-            bestCandidate = std::move(candidate);
-            bestReport = validation;
+        if (!foundValid ||
+            validScore(candidate) < validScore(bestValid)) {
+            bestValid = std::move(candidate);
+            foundValid = true;
         }
     }
 
+    const auto totalElapsedMs = elapsedMs();
+
     if (!foundValid) {
+        bestFailureReport.repairAttempts = maxAttempts;
+        bestFailureReport.repairElapsedMs = totalElapsedMs;
+        bestFailureReport.repaired = false;
+
         if (reportOut) {
-            *reportOut = bestReport;
+            *reportOut = bestFailureReport;
         }
         return false;
     }
 
-    result = std::move(bestCandidate);
+    result = std::move(bestValid);
     result.productionValidated = true;
     result.productionValid = true;
     result.productionIssueCount = 0;
 
+    const auto finalReport =
+        validateProductionResult(
+            instances,
+            sheet,
+            repairOptions,
+            result
+        );
+
+    auto completedReport = finalReport;
+    completedReport.repairAttempts = maxAttempts;
+    completedReport.repairElapsedMs = totalElapsedMs;
+    completedReport.repaired = true;
+
     if (reportOut) {
-        *reportOut = bestReport;
+        *reportOut = completedReport;
     }
 
     return true;
