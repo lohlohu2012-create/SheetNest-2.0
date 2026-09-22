@@ -76,6 +76,11 @@ private:
     void laserNextOperation();
     void laserPreviousOperation();
     void laserSelectOperation(int index);
+    void laserSetContourProgress(double progress);
+    void laserContourStart();
+    void laserContourMiddle();
+    void laserContourEnd();
+    void laserContourStep(int direction);
     void populateLaserOperationSelector();
 
     CalculationOutput performCalculation(
@@ -126,6 +131,12 @@ private:
     QComboBox* laserOperationCombo_{};
     QPushButton* laserPrevButton_{};
     QPushButton* laserNextButton_{};
+    QPushButton* laserContourStartButton_{};
+    QPushButton* laserContourMiddleButton_{};
+    QPushButton* laserContourEndButton_{};
+    QPushButton* laserContourStepBackButton_{};
+    QPushButton* laserContourStepForwardButton_{};
+    QSlider* laserContourProgressSlider_{};
     QLabel* laserStageLabel_{};
 
     QLabel* fileLabel_{};
@@ -174,6 +185,7 @@ private:
     bool laserAnimationPlaying_{false};
     double laserAnimationProgress_{1.0};
     int laserAnimationOperation_{-1};
+    double laserContourProgress_{0.0};
     qint64 calculationStartedMs_{0};
     qint64 lastProgressMs_{0};
     bool watchdogTriggered_{false};
