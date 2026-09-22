@@ -213,6 +213,15 @@ void NestView::setCuttingAnimationProgress(double progress) {
 
 void NestView::setCuttingAnimationOperation(int operation) {
     cuttingAnimationOperation_ = std::max(-1, operation);
+    cuttingAnimationOperationProgress_ = 0.0;
+}
+
+void NestView::setCuttingAnimationOperationProgress(
+    int operation,
+    double progress
+) {
+    cuttingAnimationOperation_ = std::max(-1, operation);
+    cuttingAnimationOperationProgress_ = std::clamp(progress, 0.0, 1.0);
 }
 
 void NestView::addCuttingRoute(
@@ -467,14 +476,23 @@ void NestView::addCuttingRoute(
             cuttingRouteOperations_.size()) {
         const std::size_t selected =
             static_cast<std::size_t>(cuttingAnimationOperation_);
-        std::size_t seenOperation = 0;
         double operationStartTime = 0.0;
+        double operationDuration = 0.0;
+        bool foundOperation = false;
         for (const auto& event : events) {
+            const double duration = std::max(0.0, event.durationSec);
             if (event.operation == selected + 1) {
-                targetTime = operationStartTime;
-                break;
+                foundOperation = true;
+                operationDuration += duration;
+            } else if (!foundOperation) {
+                operationStartTime += duration;
             }
-            operationStartTime += std::max(0.0, event.durationSec);
+        }
+        if (foundOperation) {
+            targetTime =
+                operationStartTime +
+                operationDuration *
+                    std::clamp(cuttingAnimationOperationProgress_, 0.0, 1.0);
         }
     }
 
