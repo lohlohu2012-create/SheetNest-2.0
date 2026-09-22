@@ -82,9 +82,19 @@ QGraphicsPathItem* addRepairOverlay(
 void addRepairLegend(
     QGraphicsScene* scene,
     const QRectF& sceneRect,
-    const sheetnest::ProductionValidationReport& report
+    const QString& roundLabel,
+    std::size_t conflictCount,
+    std::size_t extractedCount,
+    std::size_t movedCount,
+    std::size_t stationaryCount
 ) {
-    if (!scene || report.adaptiveChanges.empty()) return;
+    if (!scene ||
+        (conflictCount == 0 &&
+         extractedCount == 0 &&
+         movedCount == 0 &&
+         stationaryCount == 0)) {
+        return;
+    }
 
     auto* panel = scene->addRect(
         sceneRect.left() + 18.0,
@@ -100,7 +110,8 @@ void addRepairLegend(
     );
 
     auto* title = scene->addSimpleText(
-        "ADAPTIVE DESTROY-AND-REPAIR"
+        QString("ADAPTIVE DESTROY-AND-REPAIR • %1")
+            .arg(roundLabel)
     );
     title->setBrush(QBrush(QColor("#f8fafc")));
     title->setPos(
@@ -143,13 +154,12 @@ void addRepairLegend(
     }
 
     auto* stats = scene->addSimpleText(
-        QString("Группа: %1 • извлечено: %2 • перемещено: %3")
-            .arg(static_cast<qulonglong>(
-                report.adaptiveConflictIds.size()))
-            .arg(static_cast<qulonglong>(
-                report.adaptiveExtractedIds.size()))
-            .arg(static_cast<qulonglong>(
-                report.adaptiveMovedIds.size()))
+        QString("Группа: %1 • извлечено: %2 • перемещено: %3 • "
+                "неподвижно: %4")
+            .arg(static_cast<qulonglong>(conflictCount))
+            .arg(static_cast<qulonglong>(extractedCount))
+            .arg(static_cast<qulonglong>(movedCount))
+            .arg(static_cast<qulonglong>(stationaryCount))
     );
     stats->setBrush(QBrush(QColor("#94a3b8")));
     stats->setPos(
@@ -418,10 +428,48 @@ void NestView::showResult(
         scene()->setSceneRect(all);
 
         if (hasAdaptiveRepair) {
+            QString roundLabel = "Итог";
+            std::size_t conflictCount = 0;
+            std::size_t extractedCount = 0;
+            std::size_t movedCount = 0;
+            std::size_t stationaryCount = 0;
+
+            if (repairRound > 0) {
+                for (const auto& history :
+                     repairVisualization->adaptiveHistory) {
+                    if (static_cast<int>(history.roundIndex) !=
+                        repairRound) {
+                        continue;
+                    }
+                    roundLabel =
+                        QString("Раунд %1")
+                            .arg(repairRound);
+                    conflictCount = history.conflictIds.size();
+                    extractedCount = history.extractedIds.size();
+                    movedCount = history.movedIds.size();
+                    stationaryCount = history.stationaryIds.size();
+                    break;
+                }
+            } else {
+                roundLabel = "Итог";
+                conflictCount =
+                    repairVisualization->adaptiveConflictIds.size();
+                extractedCount =
+                    repairVisualization->adaptiveExtractedIds.size();
+                movedCount =
+                    repairVisualization->adaptiveMovedIds.size();
+                stationaryCount =
+                    repairVisualization->adaptiveStationaryIds.size();
+            }
+
             addRepairLegend(
                 scene(),
                 scene()->sceneRect(),
-                *repairVisualization
+                roundLabel,
+                conflictCount,
+                extractedCount,
+                movedCount,
+                stationaryCount
             );
         }
 
