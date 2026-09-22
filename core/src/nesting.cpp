@@ -1015,6 +1015,7 @@ bool tryExchangeEliminateSheet(
                         break;
                     }
 
+                    if (stats) ++stats->exchangeAttempts;
                     if (++attempts > kMaxExchangeAttempts) {
                         return false;
                     }
@@ -1115,6 +1116,7 @@ bool tryExchangeEliminateSheet(
                     }
 
                     working = std::move(trial);
+                    if (stats) ++stats->refillMoves;
                     return true;
                 }
             }
@@ -1222,6 +1224,7 @@ bool refillExistingSheets(
                 states.begin() +
                 static_cast<std::ptrdiff_t>(i)
             );
+            if (stats) ++stats->sheetsEliminated;
             changed = true;
         }
     }
@@ -1431,6 +1434,7 @@ bool compactResult(
             states.begin() +
             static_cast<std::ptrdiff_t>(sourceIndex)
         );
+        if (stats) ++stats->sheetsEliminated;
         changed = true;
     }
 
@@ -1450,6 +1454,7 @@ bool compactResult(
     // bounded; every successful transaction reduces the primary objective.
     constexpr int kGlobalPasses = 3;
     for (int pass = 0; pass < kGlobalPasses; ++pass) {
+        if (stats) ++stats->optimizerPasses;
         bool passChanged = false;
 
         for (std::size_t sourceIndex = states.size();
