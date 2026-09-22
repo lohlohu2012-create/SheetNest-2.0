@@ -43,6 +43,7 @@ struct Candidate {
     double y{};
     double scoreY{};
     double scoreX{};
+    double scoreContact{};
 };
 
 double signedArea(const Polygon& p) {
@@ -207,6 +208,56 @@ bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
     }
 
     return false;
+}
+
+double narrowSpaceScore(
+    const PlacedShape& shape,
+    const SheetState& state,
+    const Sheet& sheet,
+    double gap
+) {
+    const double minDimension = std::max(
+        0.5,
+        std::min(shape.outerBounds.width(), shape.outerBounds.height())
+    );
+    const double window = std::clamp(minDimension * 0.75, 0.75, 4.0);
+    const double requiredGap = std::max(0.0, gap);
+    double score = 0.0;
+
+    const auto nearby = state.spatialIndex.query(
+        shape.outerBounds,
+        requiredGap + window
+    );
+    for (const auto index : nearby) {
+        if (index >= state.shapes.size()) continue;
+        const double distance = boundsDistance(
+            shape.outerBounds,
+            state.shapes[index].outerBounds
+        );
+        const double residual = std::max(0.0, distance - requiredGap);
+        if (residual <= window + kEps) {
+            score += 1.0 + (window - residual) / window;
+        }
+    }
+
+    // Treat the sheet edge as a usable boundary too. This rewards placements
+    // that close narrow strips against the plate perimeter instead of leaving
+    // a small unusable corridor between the part and the edge.
+    const double margin = std::max(0.0, sheet.edgeMarginMm);
+    const double edgeDistances[] = {
+        shape.outerBounds.minX - margin,
+        shape.outerBounds.minY - margin,
+        sheet.width - margin - shape.outerBounds.maxX,
+        sheet.height - margin - shape.outerBounds.maxY
+    };
+    for (const double distance : edgeDistances) {
+        if (distance >= -kEps && distance <= requiredGap + window + kEps) {
+            const double residual = std::max(0.0, distance - requiredGap);
+            score += 0.5 + 0.5 * (window - std::min(window, residual)) / window;
+        }
+    }
+
+    return score;
 }
 
 double boundsDistance(const Bounds& a, const Bounds& b) {
@@ -652,6 +703,8 @@ std::vector<Candidate> candidatesFor(
 }
 
 bool betterCandidate(const Candidate& a, const Candidate& b) {
+    if (a.scoreContact > b.scoreContact + kEps) return true;
+    if (b.scoreContact > a.scoreContact + kEps) return false;
     return std::tie(a.scoreY, a.scoreX) < std::tie(b.scoreY, b.scoreX);
 }
 
@@ -789,6 +842,20 @@ bool placeOnSheet(
             Candidate score = candidate;
             score.scoreY = merged.maxY;
             score.scoreX = merged.maxX;
+            if (options.enableSmallPartOptimization &&
+                materialArea(instance.part) <=
+                    std::max(
+                        1.0,
+                        sheet.width * sheet.height *
+                        std::clamp(options.smallPartAreaRatio, 0.001, 0.25)
+                    )) {
+                score.scoreContact = narrowSpaceScore(
+                    shape,
+                    state,
+                    sheet,
+                    options.gapMm
+                );
+            }
 
             if (!found || betterCandidate(score, best)) {
                 found = true;
@@ -1354,7 +1421,13 @@ bool refillExistingSheets(
     NestingStats* stats
 ) {
     bool changed = false;
-    constexpr int kPasses = 3;
+    const int kPasses = static_cast<int>(std::clamp<std::size_t>(
+        options.enableSmallPartOptimization
+            ? options.smallPartRefillPasses
+            : 3,
+        1,
+        8
+    ));
 
     for (int pass = 0; pass < kPasses; ++pass) {
         if (shouldStop(options)) break;
