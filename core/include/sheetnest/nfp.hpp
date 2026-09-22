@@ -44,7 +44,7 @@ struct FeasibilityRegion {
     std::vector<FeasibilitySegment> sheetBoundary;
 };
 
-std::vector<Polygon> convexDecompose(const Polygon& polygon);
+std::vector<Polygon> convexDecompose(const Polygon& polygon, const NfpRunControl* control = nullptr);
 
 Polygon minkowskiConvexSum(
     const Polygon& a,
