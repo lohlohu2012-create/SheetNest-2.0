@@ -381,6 +381,9 @@ void MainWindow::buildUi() {
     repairAnimationTimer_ = new QTimer(this);
     repairAnimationTimer_->setInterval(900);
 
+    calculationWatchdog_ = new QTimer(this);
+    calculationWatchdog_->setInterval(1000);
+
     repairControlsLayout->addWidget(
         new QLabel("История:"), 0, 0
     );
@@ -548,6 +551,14 @@ void MainWindow::buildUi() {
 void MainWindow::connectUi() {
     connect(importButton_, &QPushButton::clicked, this, [this] {
         importDxf();
+    });
+
+    connect(stopButton_, &QPushButton::clicked, this, [this] {
+        stopCalculation(false);
+    });
+
+    connect(calculationWatchdog_, &QTimer::timeout, this, [this] {
+        calculationWatchdogTick();
     });
 
     connect(calculateButton_, &QPushButton::clicked, this, [this] {
@@ -768,7 +779,13 @@ void MainWindow::connectUi() {
                     .arg(mins)
             );
 
-            appendLog(
+            if (watchdogTriggered_) {
+                appendLog("Расчёт завершён после срабатывания GUI Watchdog.");
+            } else if (userCancelRequested_) {
+                appendLog("Расчёт завершён после отмены пользователем.");
+            }
+
+                        appendLog(
                 QString("Расчёт завершён: %1 листов, использование %2%.")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(result_.utilization * 100.0, 0, 'f', 1)
@@ -830,6 +847,7 @@ void MainWindow::connectUi() {
             );
         }
 
+        if (calculationWatchdog_) calculationWatchdog_->stop();
         repairRequested_ = false;
         nestingController_.reset();
         setBusy(false);
@@ -1385,6 +1403,13 @@ void MainWindow::calculate() {
         };
 
     setBusy(true);
+    calculationStartedMs_ = QDateTime::currentMSecsSinceEpoch();
+    lastProgressMs_ = calculationStartedMs_;
+    watchdogTriggered_ = false;
+    userCancelRequested_ = false;
+    if (calculationWatchdog_) {
+        calculationWatchdog_->start();
+    }
     progress_->setRange(0, 100);
     progress_->setValue(0);
     progressDetails_->setText(
@@ -1410,13 +1435,15 @@ void MainWindow::calculate() {
              sheetCopy,
              optionsCopy,
              technologyCopy,
-             parallelOptions]() {
+             parallelOptions,
+             controller]() {
                 return performCalculation(
                     instancesCopy,
                     sheetCopy,
                     optionsCopy,
                     technologyCopy,
-                    parallelOptions
+                    parallelOptions,
+                    controller
                 );
             }
         )
@@ -1512,7 +1539,8 @@ CalculationOutput MainWindow::performCalculation(
     Sheet sheet,
     Options options,
     CuttingParameters technology,
-    ParallelNestingOptions parallelOptions
+    ParallelNestingOptions parallelOptions,
+    std::shared_ptr<ParallelNestingController> controller
 ) const {
     CalculationOutput output;
     output.technology = technology;
@@ -1526,8 +1554,8 @@ CalculationOutput MainWindow::performCalculation(
             controllerProvidedValidation = true;
         };
 
-    output.result = nestingController_
-        ? nestingController_->run(
+    output.result = controller
+        ? controller->run(
             instances,
             sheet,
             options,
@@ -1812,6 +1840,7 @@ void MainWindow::appendLog(const QString& text) {
 void MainWindow::updateProgress(
     const sheetnest::NestingProgress& progress
 ) {
+    lastProgressMs_ = QDateTime::currentMSecsSinceEpoch();
     if (progress.totalIterations > 0) {
         const auto completed =
             std::min(
@@ -2185,6 +2214,61 @@ void MainWindow::refreshAdaptiveRepairView() {
             : true,
         animationStage
     );
+}
+
+void MainWindow::stopCalculation(bool watchdogTriggered) {
+    if (!nestingController_) return;
+
+    if (watchdogTriggered) {
+        watchdogTriggered_ = true;
+        appendLog("GUI Watchdog: расчёт не отвечает — отправлен запрос отмены.");
+        progressDetails_->setText("Watchdog: остановка зависшего расчёта…");
+        statusBar()->showMessage("Watchdog: остановка расчёта…");
+    } else {
+        userCancelRequested_ = true;
+        appendLog("Пользователь запросил остановку расчёта.");
+        progressDetails_->setText("Остановка расчёта… ожидается завершение worker.");
+        statusBar()->showMessage("Остановка расчёта…");
+    }
+
+    nestingController_->requestCancel();
+    stopButton_->setEnabled(false);
+}
+
+void MainWindow::calculationWatchdogTick() {
+    if (!watcher_ || !watcher_->isRunning() || !nestingController_) {
+        if (calculationWatchdog_) calculationWatchdog_->stop();
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 elapsed = now - calculationStartedMs_;
+    const qint64 sinceProgress = now - lastProgressMs_;
+    const qint64 budgetMs = static_cast<qint64>(timeBudgetSpin_->value()) * 1000;
+
+    // The engine owns its normal deadline. The GUI watchdog is deliberately a
+    // secondary safety net: it allows a small grace period for queued worker
+    // shutdown, but prevents a black/locked GUI if progress delivery stops.
+    constexpr qint64 kProgressStallMs = 15000;
+    constexpr qint64 kDeadlineGraceMs = 10000;
+
+    if (!watchdogTriggered_ &&
+        (sinceProgress >= kProgressStallMs ||
+         elapsed >= budgetMs + kDeadlineGraceMs)) {
+        stopCalculation(true);
+        return;
+    }
+
+    if (watchdogTriggered_) {
+        constexpr qint64 kCancelGraceMs = 10000;
+        if (elapsed >= budgetMs + kDeadlineGraceMs + kCancelGraceMs) {
+            appendLog("GUI Watchdog: worker не завершился после запроса отмены; UI остаётся отзывчивым, ожидается безопасное завершение.");
+            progressDetails_->setText("Worker завершает отменённый расчёт…");
+            // Do not destroy/reset the controller or future here. Qt must wait
+            // for the actual finished signal before releasing worker state.
+            calculationWatchdog_->setInterval(5000);
+        }
+    }
 }
 
 void MainWindow::setBusy(bool busy) {
