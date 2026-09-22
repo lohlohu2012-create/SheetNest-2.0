@@ -2241,6 +2241,27 @@ Result runAttempt(
         }
     }
 
+    for (auto& telemetry : result.instanceTelemetry) {
+        if (telemetry.placed ||
+            telemetry.reason != NestingFailureReason::None) {
+            continue;
+        }
+
+        if (options.control &&
+            options.control->cancelRequested.load(std::memory_order_relaxed)) {
+            telemetry.reason = NestingFailureReason::Cancelled;
+        } else if (options.control &&
+                   options.control->timeoutObserved.load(std::memory_order_relaxed)) {
+            telemetry.reason = NestingFailureReason::Timeout;
+        } else if (std::find(
+                       result.unplaced.begin(),
+                       result.unplaced.end(),
+                       telemetry.instanceId
+                   ) != result.unplaced.end()) {
+            telemetry.reason = NestingFailureReason::NoFeasiblePosition;
+        }
+    }
+
     // Targeted residual-space refill. Only small parts are retried,
     // and only against already-created sheets. No new sheet is opened by
     // this pass, so the pass can only improve packing density.
