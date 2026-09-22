@@ -1617,6 +1617,55 @@ void testAdaptiveRepairLocalityAndDeduplication() {
 }
 
 
+void testAdaptiveRepairConflictGraph() {
+    std::vector<Instance> instances{
+        {"graph-a", Part{"graph-a-part", rectangle(10, 10), {}}},
+        {"graph-b", Part{"graph-b-part", rectangle(10, 10), {}}},
+        {"graph-c", Part{"graph-c-part", rectangle(10, 10), {}}},
+        {"graph-d", Part{"graph-d-part", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{100, 100, 2.0};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 2;
+    options.gapMm = 2.0;
+    options.adaptiveRepairMaxNeighbors = 8;
+    options.adaptiveRepairRounds = 3;
+    options.autoRepairAttempts = 1;
+    options.autoRepairTimeBudgetMs = 5000;
+
+    Result broken;
+    broken.sheets = {{
+        {"graph-a", 2.0, 2.0, 0},
+        {"graph-b", 8.0, 2.0, 0},
+        {"graph-c", 14.0, 2.0, 0},
+        {"graph-d", 30.0, 2.0, 0}
+    }};
+
+    const auto initial = validateProductionResult(instances, sheet, options, broken);
+    assert(!initial.valid);
+    assert(initial.collisionCount >= 2);
+
+    ProductionValidationReport report;
+    const bool repaired = repairProductionResult(instances, sheet, options, broken, &report);
+    assert(repaired);
+    assert(report.valid);
+    assert(report.adaptiveRepairRounds >= 1);
+    assert(report.adaptiveRepairGroupSize >= 3);
+
+    bool sawDStationary = false;
+    for (const auto& change : report.adaptiveChanges) {
+        if (change.before.id == "graph-d") {
+            sawDStationary = change.stationary;
+        }
+    }
+    if (!report.adaptiveChanges.empty()) {
+        assert(sawDStationary);
+    }
+}
+
+
 void testAutomaticProductionRepair() {
     std::vector<Instance> instances{
         {"repair-1", Part{"repair-a", rectangle(10, 10), {}}},
@@ -1921,5 +1970,6 @@ int main() {
     testSpatialIndexBroadPhase();
     testAdaptiveDestroyAndRepair();
     testAdaptiveRepairLocalityAndDeduplication();
+    testAdaptiveRepairConflictGraph();
     testAutomaticProductionRepair();
 }
