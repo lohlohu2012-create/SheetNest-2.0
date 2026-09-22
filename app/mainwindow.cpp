@@ -2381,6 +2381,7 @@ void MainWindow::refreshAdaptiveRepairView() {
         );
     }
 
+    view_->setCuttingRoute(cuttingRoute_, sheet_.height);
     view_->showResult(
         result_,
         instances_,
