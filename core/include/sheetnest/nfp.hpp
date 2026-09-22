@@ -16,10 +16,14 @@ struct NfpRunControl {
     std::size_t maxUnionSegments{20000};
     std::size_t* timeoutCount{};
     std::size_t* complexityFallbackCount{};
+    mutable bool timeoutRecorded{false};
 
     bool stop() const {
         if (!shouldStop || !shouldStop()) return false;
-        if (timeoutCount) ++(*timeoutCount);
+        if (!timeoutRecorded) {
+            timeoutRecorded = true;
+            if (timeoutCount) ++(*timeoutCount);
+        }
         return true;
     }
 
