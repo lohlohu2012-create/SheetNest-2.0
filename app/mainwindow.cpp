@@ -701,6 +701,11 @@ void MainWindow::importDxf() {
 
 void MainWindow::refreshInstances() {
     hasBenchmarkResult_ = false;
+    validation_ = {};
+    validation_.valid = false;
+    if (exportButton_) {
+        exportButton_->setEnabled(false);
+    }
     if (benchmarkExportButton_) {
         benchmarkExportButton_->setEnabled(false);
     }
@@ -985,6 +990,10 @@ void MainWindow::calculate() {
         material,
         thicknessSpin_->value()
     );
+
+    validation_ = {};
+    validation_.valid = false;
+    exportButton_->setEnabled(false);
 
     const auto instancesCopy = instances_;
     const auto sheetCopy = sheet_;
