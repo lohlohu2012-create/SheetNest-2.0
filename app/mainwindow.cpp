@@ -1,6 +1,7 @@
 #include "mainwindow.hpp"
 #include "nestview.hpp"
 #include "sheetnest/cutting_path.hpp"
+#include "sheetnest/cam_export.hpp"
 #include "sheetnest/dxf_export.hpp"
 
 #include <QComboBox>
@@ -193,6 +194,8 @@ void MainWindow::buildUi() {
 
     exportButton_ = new QPushButton("Экспорт раскладки DXF");
     exportButton_->setEnabled(false);
+    exportCamButton_ = new QPushButton("Экспорт CAM программы");
+    exportCamButton_->setEnabled(false);
 
     fileLabel_ = new QLabel("Файл не загружен");
     fileLabel_->setWordWrap(true);
@@ -414,6 +417,7 @@ void MainWindow::buildUi() {
     controlLayout->addWidget(laserControls);
 
     controlLayout->addWidget(exportButton_);
+    controlLayout->addWidget(exportCamButton_);
 
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
@@ -1944,6 +1948,87 @@ void MainWindow::exportBenchmarkResults() {
 }
 
 // Production Validator: final export gate
+void MainWindow::exportCam() {
+    if (cuttingRoute_.operations.empty()) {
+        QMessageBox::information(
+            this,
+            "Экспорт CAM",
+            "Нет рассчитанного CAM-маршрута."
+        );
+        return;
+    }
+
+    const auto report = validateCuttingPath(cuttingRoute_);
+    if (!report.valid) {
+        QMessageBox::warning(
+            this,
+            "Экспорт CAM",
+            QString("CAM-маршрут не прошёл проверку: %1")
+                .arg(QString::fromStdString(report.message))
+        );
+        return;
+    }
+
+    const QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "Экспорт CAM программы",
+        currentFile_.isEmpty()
+            ? "sheetnest.nc"
+            : QFileInfo(currentFile_).completeBaseName() + ".nc",
+        "CAM / NC (*.nc *.gcode *.tap);;Все файлы (*)"
+    );
+    if (fileName.isEmpty()) return;
+
+    CamExportOptions exportOptions;
+    exportOptions.programName = "SHEETNEST";
+    exportOptions.includeComments = true;
+    exportOptions.includeSheetMarkers = true;
+
+    const std::string program =
+        exportCamProgram(
+            cuttingRoute_,
+            technology_,
+            exportOptions
+        );
+
+    if (program.empty()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось сформировать CAM программу."
+        );
+        return;
+    }
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось открыть файл для записи."
+        );
+        return;
+    }
+
+    file.write(QByteArray::fromStdString(program));
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось сохранить CAM файл."
+        );
+        return;
+    }
+
+    appendLog(
+        QString("CAM экспортирован: %1 • операций %2 • %3 с")
+            .arg(fileName)
+            .arg(static_cast<qulonglong>(cuttingRoute_.operations.size()))
+            .arg(cuttingRoute_.totalSeconds, 0, 'f', 1)
+    );
+    statusBar()->showMessage("CAM программа сохранена");
+}
+
 void MainWindow::exportDxf() {
     if (result_.sheets.empty()) {
         return;
@@ -2923,6 +3008,11 @@ void MainWindow::setBusy(bool busy) {
         !busy &&
         !result_.sheets.empty() &&
         validation_.valid
+    );
+    exportCamButton_->setEnabled(
+        !busy &&
+        validation_.valid &&
+        !cuttingRoute_.operations.empty()
     );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
 
