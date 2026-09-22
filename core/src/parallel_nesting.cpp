@@ -15,12 +15,6 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-struct ControlState {
-    std::atomic<bool> cancelRequested{false};
-    std::atomic<bool> timeoutObserved{false};
-    Clock::time_point deadline{};
-};
-
 bool betterResult(const Result& candidate, const Result& best) {
     if (candidate.unplaced.size() != best.unplaced.size()) {
         return candidate.unplaced.size() < best.unplaced.size();
@@ -46,14 +40,16 @@ const char* phaseMessage(NestingProgressPhase phase) {
 } // namespace
 
 struct ParallelNestingController::Impl {
-    std::shared_ptr<ControlState> control =
-        std::make_shared<ControlState>();
+    std::shared_ptr<NestingRunControl> control =
+        std::make_shared<NestingRunControl>();
 
     void reset(std::uint64_t timeBudgetMs) {
-        control = std::make_shared<ControlState>();
+        control = std::make_shared<NestingRunControl>();
         control->deadline =
-            Clock::now() +
-            std::chrono::milliseconds(timeBudgetMs);
+            timeBudgetMs == 0
+                ? Clock::time_point::max()
+                : Clock::now() +
+                    std::chrono::milliseconds(timeBudgetMs);
     }
 };
 
