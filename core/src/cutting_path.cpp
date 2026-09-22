@@ -105,54 +105,66 @@ CuttingPath planCuttingRoute(
     const PathOptions& options
 ) {
     CuttingPath result;
-    std::vector<std::size_t> order;
-    order.reserve(contours.size());
 
-    for (std::size_t i = 0; i < contours.size(); ++i) {
-        if (!contours[i].polygon.empty() && contours[i].polygon.size() >= 2) {
-            order.push_back(i);
+    std::size_t operationIndex = 0;
+    std::size_t sheetStart = 0;
+    while (sheetStart < contours.size()) {
+        const std::size_t sheetIndex = contours[sheetStart].sheetIndex;
+        std::size_t sheetEnd = sheetStart + 1;
+        while (sheetEnd < contours.size() &&
+               contours[sheetEnd].sheetIndex == sheetIndex) {
+            ++sheetEnd;
         }
-    }
 
-    // Stable priority: inner contours first, then nearest-neighbour within
-    // that priority class. The core owns this order; GUI never recomputes it.
-    Point head{};
-    for (std::size_t k = 0; k < order.size(); ++k) {
-        std::size_t bestPos = k;
-        double bestDistance = std::numeric_limits<double>::infinity();
+        std::vector<std::size_t> order;
+        order.reserve(sheetEnd - sheetStart);
+        for (std::size_t i = sheetStart; i < sheetEnd; ++i) {
+            if (!contours[i].polygon.empty() &&
+                contours[i].polygon.size() >= 2) {
+                order.push_back(i);
+            }
+        }
 
-        bool hasInnerRemaining = false;
-        if (options.innerContoursFirst) {
-            for (std::size_t pos = k; pos < order.size(); ++pos) {
-                if (contours[order[pos]].inner) {
-                    hasInnerRemaining = true;
-                    break;
+        Point head{};
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            std::size_t bestPos = k;
+            double bestDistance = std::numeric_limits<double>::infinity();
+
+            bool hasInnerRemaining = false;
+            if (options.innerContoursFirst) {
+                for (std::size_t pos = k; pos < order.size(); ++pos) {
+                    if (contours[order[pos]].inner) {
+                        hasInnerRemaining = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        for (std::size_t pos = k; pos < order.size(); ++pos) {
-            const auto index = order[pos];
-            if (hasInnerRemaining && !contours[index].inner) continue;
-            const double candidateDistance =
-                distance(head, contours[index].polygon.front());
-            if (candidateDistance < bestDistance - 1e-9 ||
-                (std::abs(candidateDistance - bestDistance) <= 1e-9 &&
-                 index < order[bestPos])) {
-                bestDistance = candidateDistance;
-                bestPos = pos;
+            for (std::size_t pos = k; pos < order.size(); ++pos) {
+                const auto index = order[pos];
+                if (hasInnerRemaining && !contours[index].inner) continue;
+                const double candidateDistance =
+                    distance(head, contours[index].polygon.front());
+                if (candidateDistance < bestDistance - 1e-9 ||
+                    (std::abs(candidateDistance - bestDistance) <= 1e-9 &&
+                     index < order[bestPos])) {
+                    bestDistance = candidateDistance;
+                    bestPos = pos;
+                }
             }
+
+            std::swap(order[k], order[bestPos]);
+            appendOperation(
+                result,
+                contours[order[k]],
+                operationIndex++,
+                head,
+                parameters,
+                options
+            );
         }
 
-        std::swap(order[k], order[bestPos]);
-        appendOperation(
-            result,
-            contours[order[k]],
-            k,
-            head,
-            parameters,
-            options
-        );
+        sheetStart = sheetEnd;
     }
 
     return result;
