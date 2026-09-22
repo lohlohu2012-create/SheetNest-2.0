@@ -1245,7 +1245,7 @@ void testProductionValidator() {
         );
 
     assert(!gapReport.valid);
-    assert(gapReport.gapCount > 0);
+    assert(gapReport.gapViolationCount > 0);
 
     Result margin = valid;
     margin.sheets = {{
@@ -1263,7 +1263,7 @@ void testProductionValidator() {
         );
 
     assert(!marginReport.valid);
-    assert(marginReport.marginCount > 0);
+    assert(marginReport.marginViolationCount > 0);
 
     Result duplicate = valid;
     duplicate.sheets = {{
@@ -1399,14 +1399,24 @@ void testParallelNestingController() {
 
     std::atomic<std::size_t> progressEvents{0};
     std::atomic<bool> completed{false};
+    std::atomic<bool> validated{false};
 
     parallel.onProgress =
         [&](const NestingProgress& progress) {
             ++progressEvents;
             if (progress.phase ==
+                NestingProgressPhase::ProductionValidation) {
+                validated.store(true);
+            }
+            if (progress.phase ==
                 NestingProgressPhase::Completed) {
                 completed.store(true);
             }
+        };
+
+    parallel.onValidation =
+        [&](const ProductionValidationReport& report) {
+            validated.store(report.valid);
         };
 
     const auto result = controller.run(
@@ -1417,6 +1427,7 @@ void testParallelNestingController() {
     );
 
     assert(progressEvents.load() > 0);
+    assert(validated.load());
     assert(completed.load());
     assert(result.unplaced.empty());
     assert(result.sheets.size() <= 2);
