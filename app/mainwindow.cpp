@@ -2244,29 +2244,35 @@ void MainWindow::calculationWatchdogTick() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 elapsed = now - calculationStartedMs_;
     const qint64 sinceProgress = now - lastProgressMs_;
-    const qint64 budgetMs = static_cast<qint64>(timeBudgetSpin_->value()) * 1000;
+    const qint64 budgetMs =
+        static_cast<qint64>(timeBudgetSpin_->value()) * 1000;
 
-    // The engine owns its normal deadline. The GUI watchdog is deliberately a
-    // secondary safety net: it allows a small grace period for queued worker
-    // shutdown, but prevents a black/locked GUI if progress delivery stops.
-    constexpr qint64 kProgressStallMs = 15000;
+    // The engine owns the normal deadline. The GUI watchdog is a secondary
+    // safety net: it never kills a healthy long NFP operation merely because
+    // no iteration event arrived yet. It only enforces a hard GUI-side
+    // deadline with a grace period, while the UI remains responsive.
     constexpr qint64 kDeadlineGraceMs = 10000;
 
     if (!watchdogTriggered_ &&
-        (sinceProgress >= kProgressStallMs ||
-         elapsed >= budgetMs + kDeadlineGraceMs)) {
+        elapsed >= budgetMs + kDeadlineGraceMs) {
         stopCalculation(true);
         return;
+    }
+
+    if (sinceProgress >= 15000) {
+        progressDetails_->setText(
+            QString("Расчёт продолжается… последний прогресс %1 с назад.")
+                .arg(static_cast<qlonglong>(sinceProgress / 1000))
+        );
     }
 
     if (watchdogTriggered_) {
         constexpr qint64 kCancelGraceMs = 10000;
         if (elapsed >= budgetMs + kDeadlineGraceMs + kCancelGraceMs) {
-            appendLog("GUI Watchdog: worker не завершился после запроса отмены; UI остаётся отзывчивым, ожидается безопасное завершение.");
-            progressDetails_->setText("Worker завершает отменённый расчёт…");
-            // Do not destroy/reset the controller or future here. Qt must wait
-            // for the actual finished signal before releasing worker state.
-            calculationWatchdog_->setInterval(5000);
+            progressDetails_->setText(
+                "Worker завершает отменённый расчёт… "
+                "ожидается безопасное завершение."
+            );
         }
     }
 }
