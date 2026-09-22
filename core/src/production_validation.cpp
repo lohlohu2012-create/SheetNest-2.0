@@ -751,7 +751,99 @@ bool repairProductionResult(
             std::string id;
         };
 
+        struct CandidateNeighbor {
+            int priority{};
+            double severity{};
+            double distance{};
+            std::string id;
+        };
+
+        auto issuePriority = [](ProductionValidationIssueType type) {
+            switch (type) {
+            case ProductionValidationIssueType::Collision:
+                return 100;
+            case ProductionValidationIssueType::Gap:
+                return 95;
+            case ProductionValidationIssueType::Margin:
+                return 70;
+            case ProductionValidationIssueType::MissingId:
+                return 50;
+            case ProductionValidationIssueType::DuplicateId:
+            case ProductionValidationIssueType::UnknownId:
+                return 20;
+            }
+            return 0;
+        };
+
+        auto issueSeverity = [](const ProductionValidationIssue& issue) {
+            switch (issue.type) {
+            case ProductionValidationIssueType::Collision:
+                return 1.0;
+            case ProductionValidationIssueType::Gap:
+                return std::max(
+                    0.0,
+                    issue.requiredMm - issue.measuredMm
+                );
+            case ProductionValidationIssueType::Margin:
+                return std::max(0.0, -issue.measuredMm);
+            case ProductionValidationIssueType::MissingId:
+                return 1.0;
+            case ProductionValidationIssueType::DuplicateId:
+            case ProductionValidationIssueType::UnknownId:
+                return 1.0;
+            }
+            return 0.0;
+        };
+
         std::vector<CandidateNeighbor> neighbors;
+        std::unordered_map<std::string, std::pair<int, double>> seedPriority;
+        seedPriority.reserve(ids.size());
+
+        for (const auto& issue : report.issues) {
+            const int priority = issuePriority(issue.type);
+            const double severity = issueSeverity(issue);
+
+            for (const auto& id : {issue.instanceId, issue.relatedInstanceId}) {
+                if (id.empty()) continue;
+                const auto it = seedPriority.find(id);
+                if (it == seedPriority.end() ||
+                    priority > it->second.first ||
+                    (priority == it->second.first &&
+                     severity > it->second.second)) {
+                    seedPriority[id] = {priority, severity};
+                }
+            }
+        }
+
+        std::stable_sort(
+            ids.begin(),
+            ids.end(),
+            [&](const std::string& a, const std::string& b) {
+                const auto pa = seedPriority.find(a);
+                const auto pb = seedPriority.find(b);
+                const int priorityA =
+                    pa == seedPriority.end() ? 0 : pa->second.first;
+                const int priorityB =
+                    pb == seedPriority.end() ? 0 : pb->second.first;
+                if (priorityA != priorityB) {
+                    return priorityA > priorityB;
+                }
+
+                const double severityA =
+                    pa == seedPriority.end() ? 0.0 : pa->second.second;
+                const double severityB =
+                    pb == seedPriority.end() ? 0.0 : pb->second.second;
+                if (std::abs(severityA - severityB) > kEps) {
+                    return severityA > severityB;
+                }
+                return a < b;
+            }
+        );
+
+        if (ids.size() > maxNeighbors) {
+            ids.resize(maxNeighbors);
+        }
+
         const double roundScale =
             0.35 + 0.35 * static_cast<double>(
                 std::min<std::size_t>(roundIndex, 3)
@@ -812,7 +904,22 @@ bool repairProductionResult(
                         );
 
                     if (distance <= reach + kEps) {
-                        neighbors.push_back({distance, placement.id});
+                        const auto priorityIt =
+                            seedPriority.find(seedId);
+                        const int priority =
+                            priorityIt == seedPriority.end()
+                                ? 0
+                                : priorityIt->second.first;
+                        const double severity =
+                            priorityIt == seedPriority.end()
+                                ? 0.0
+                                : priorityIt->second.second;
+                        neighbors.push_back({
+                            priority,
+                            severity,
+                            distance,
+                            placement.id
+                        });
                     }
                 }
             }
@@ -822,6 +929,12 @@ bool repairProductionResult(
             neighbors.begin(),
             neighbors.end(),
             [](const CandidateNeighbor& a, const CandidateNeighbor& b) {
+                if (a.priority != b.priority) {
+                    return a.priority > b.priority;
+                }
+                if (std::abs(a.severity - b.severity) > kEps) {
+                    return a.severity > b.severity;
+                }
                 if (std::abs(a.distance - b.distance) > kEps) {
                     return a.distance < b.distance;
                 }
