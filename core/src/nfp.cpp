@@ -568,12 +568,44 @@ std::vector<Polygon> unionPolygons(
     return assembleBoundaryLoops(boundary);
 }
 
+std::vector<Polygon> conservativeConvexFallback(const Polygon& polygon) {
+    Polygon cleaned = cleanPolygon(polygon);
+    if (cleaned.size() < 3) return {};
+
+    Polygon hull = convexHull(std::move(cleaned));
+    if (hull.size() >= 3 && std::abs(signedArea(hull)) > kEps) {
+        return {std::move(hull)};
+    }
+
+    const Bounds b = bounds(polygon);
+    if (b.width() <= kPointEps || b.height() <= kPointEps) return {};
+
+    return {Polygon{
+        {b.minX, b.minY},
+        {b.maxX, b.minY},
+        {b.maxX, b.maxY},
+        {b.minX, b.maxY}
+    }};
+}
+
+std::vector<Polygon> decomposeWithFallback(const Polygon& polygon) {
+    auto pieces = convexDecompose(polygon);
+    if (!pieces.empty()) return pieces;
+
+    // A malformed/near-degenerate contour must not collapse the NFP stage to
+    // zero candidates. The convex-hull fallback is deliberately conservative:
+    // it may reject some valid concave placements, but it never authorizes an
+    // overlap. The nesting layer still performs exact true-shape validation
+    // and can enter its geometric grid recovery path when needed.
+    return conservativeConvexFallback(polygon);
+}
+
 std::vector<Polygon> computeUnionNfp(
     const Polygon& fixed,
     const Polygon& moving
 ) {
-    const auto fixedPieces = convexDecompose(fixed);
-    const auto movingPieces = convexDecompose(moving);
+    const auto fixedPieces = decomposeWithFallback(fixed);
+    const auto movingPieces = decomposeWithFallback(moving);
 
     std::vector<Polygon> pairwise;
     pairwise.reserve(fixedPieces.size() * movingPieces.size());
@@ -589,7 +621,22 @@ std::vector<Polygon> computeUnionNfp(
         }
     }
 
-    return unionPolygons(pairwise);
+    auto unionResult = unionPolygons(pairwise);
+    if (!unionResult.empty()) return unionResult;
+
+    // Last-resort conservative NFP. This keeps the placement pipeline alive
+    // for numerically pathological contours instead of returning an empty
+    // forbidden region and producing parsed=1/candidates=0 diagnostics.
+    const auto fixedFallback = conservativeConvexFallback(fixed);
+    const auto movingFallback = conservativeConvexFallback(moving);
+    if (fixedFallback.empty() || movingFallback.empty()) return {};
+
+    const auto fallback = minkowskiConvexSum(
+        fixedFallback.front(),
+        reflected(movingFallback.front())
+    );
+    if (fallback.size() < 3) return {};
+    return {fallback};
 }
 
 } // namespace
@@ -981,7 +1028,7 @@ FeasibilityRegion feasibilityRegion(
 ) {
     FeasibilityRegion region;
 
-    if (maxX <= minX || maxY <= minY ||
+    if (maxX < minX - kPointEps || maxY < minY - kPointEps ||
         fixed.size() < 3 || moving.size() < 3) {
         return region;
     }
