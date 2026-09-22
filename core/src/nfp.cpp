@@ -607,7 +607,7 @@ std::vector<Polygon> decomposeWithFallback(
         control->complexityFallback();
         return conservativeConvexFallback(polygon);
     }
-    auto pieces = convexDecompose(polygon);
+    auto pieces = convexDecompose(polygon, control);
     if (!pieces.empty() &&
         (!control || pieces.size() <= control->maxConvexPieces)) return pieces;
     if (control && pieces.size() > control->maxConvexPieces) {
@@ -678,7 +678,10 @@ std::vector<Polygon> computeUnionNfp(
 
 } // namespace
 
-std::vector<Polygon> convexDecompose(const Polygon& input) {
+std::vector<Polygon> convexDecompose(
+    const Polygon& input,
+    const NfpRunControl* control
+) {
     Polygon polygon = cleanPolygon(input);
     if (polygon.size() < 3) return {};
 
@@ -687,8 +690,10 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
     // changing the represented simple polygon.
     bool removedCollinear = true;
     while (removedCollinear && polygon.size() > 3) {
+        if (control && control->stop()) return {};
         removedCollinear = false;
         for (std::size_t i = 0; i < polygon.size(); ++i) {
+            if (control && control->stop()) return {};
             const std::size_t prev =
                 (i + polygon.size() - 1) % polygon.size();
             const std::size_t next =
@@ -726,9 +731,11 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
     std::size_t guard = 0;
     while (indices.size() > 3 &&
            guard++ < polygon.size() * polygon.size()) {
+        if (control && control->stop()) return {};
         bool clipped = false;
 
         for (std::size_t i = 0; i < indices.size(); ++i) {
+            if (control && control->stop()) return {};
             const std::size_t ia =
                 indices[(i + indices.size() - 1) % indices.size()];
             const std::size_t ib = indices[i];
@@ -742,6 +749,7 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
 
             bool containsOther = false;
             for (const auto idx : indices) {
+                if (control && control->stop()) return {};
                 if (idx == ia || idx == ib || idx == ic) continue;
                 if (pointInTriangle(polygon[idx], a, b, c)) {
                     containsOther = true;
