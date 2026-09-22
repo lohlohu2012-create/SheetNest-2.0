@@ -45,6 +45,7 @@ private:
     void connectUi();
     void importDxf();
     void calculate();
+    void repairErrors();
     void benchmark();
     void exportDxf();
     void populatePartTable();
@@ -113,6 +114,7 @@ private:
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
+    QPushButton* repairButton_{};
     QPushButton* benchmarkButton_{};
     QPushButton* benchmarkExportButton_{};
     QPushButton* stopButton_{};
@@ -120,6 +122,7 @@ private:
 
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
+    bool repairRequested_{false};
     sheetnest::ProductionValidationReport validation_{};
 
     std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
