@@ -95,6 +95,15 @@ struct Options {
     std::size_t adaptiveRepairAttempts{4};
     std::size_t adaptiveRepairMaxNeighbors{16};
     std::size_t adaptiveRepairRounds{2};
+
+    // Small-part optimization: search the residual geometry more densely
+    // without ever reducing the configured physical gap.
+    bool enableSmallPartOptimization{true};
+    double smallPartAreaRatio{0.08};
+    std::size_t smallPartCandidateBudget{1024};
+    double smallPartBoundarySpacingMm{2.5};
+    std::size_t smallPartRefillPasses{2};
+
     std::shared_ptr<NestingRunControl> control{};
 };
 
