@@ -1175,6 +1175,65 @@ void testNestingBenchmark() {
     );
 }
 
+void testCandidateCollectorAndGlobalOptimizer() {
+    NestingCandidateCollector collector(2);
+
+    Result threeSheets;
+    threeSheets.sheets.resize(3);
+    threeSheets.unplaced = {"x"};
+    threeSheets.utilization = 0.2;
+
+    Result twoSheets;
+    twoSheets.sheets.resize(2);
+    twoSheets.unplaced = {};
+    twoSheets.utilization = 0.4;
+
+    Result fourSheets;
+    fourSheets.sheets.resize(4);
+    fourSheets.unplaced = {};
+    fourSheets.utilization = 0.9;
+
+    collector.add(threeSheets);
+    collector.add(twoSheets);
+    collector.add(fourSheets);
+
+    const auto candidates = collector.snapshot();
+    assert(candidates.size() == 2);
+    assert(candidates.front().sheets.size() == 2);
+
+    std::vector<Instance> instances;
+    for (int i = 0; i < 3; ++i) {
+        instances.push_back({
+            "global-" + std::to_string(i),
+            Part{"global", rectangle(50, 50), {}}
+        });
+    }
+
+    Sheet sheet{100, 100, 0};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 1;
+    options.gapMm = 2.0;
+    options.enableOptimizer = false;
+
+    auto result = nest(instances, sheet, options);
+    const auto beforeSheets = result.sheets.size();
+    const auto beforeUnplaced = result.unplaced.size();
+
+    const bool changed =
+        optimizeNestingResult(
+            instances,
+            sheet,
+            options,
+            result
+        );
+
+    (void)changed;
+    assert(result.unplaced.size() <= beforeUnplaced);
+    assert(result.sheets.size() <= beforeSheets);
+    assert(result.stats.optimizerPasses > 0);
+}
+
 void testParallelNestingController() {
     std::vector<Instance> instances;
     for (int i = 0; i < 8; ++i) {
@@ -1353,6 +1412,7 @@ int main() {
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testMinimumSheets();
+    testCandidateCollectorAndGlobalOptimizer();
     testParallelNestingController();
     testParallelNestingCancellation();
     testInstanceDiagnostics();
