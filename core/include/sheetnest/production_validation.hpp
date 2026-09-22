@@ -52,6 +52,7 @@ struct AdaptiveRepairRound {
     std::vector<std::string> extractedIds;
     std::vector<std::string> movedIds;
     std::vector<std::string> stationaryIds;
+    std::vector<std::vector<std::string>> conflictLevels;
 };
 
 struct ProductionValidationReport {
