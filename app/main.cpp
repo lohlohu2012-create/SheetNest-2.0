@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QThread>
+#include <QEventLoop>
 
 #include "splashscreen.hpp"
 
