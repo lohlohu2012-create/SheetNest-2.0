@@ -6,14 +6,14 @@
 
 namespace sheetnest {
 
-struct TechnologyRow {
+struct TechnologyRowData {
     Material material;
     double thicknessMm;
     double speedMMin;
     const char* gas;
 };
 
-static constexpr TechnologyRow kBodor3kW[] = {
+static constexpr TechnologyRowData kBodor3kW[] = {
     {Material::CarbonSteel,    1,  9.0, "O2"},
     {Material::CarbonSteel,    2,  6.5, "O2"},
     {Material::CarbonSteel,    3,  3.5, "O2"},
@@ -52,6 +52,60 @@ static constexpr TechnologyRow kBodor3kW[] = {
     {Material::Brass, 6,  3.0, "N2"},
     {Material::Brass, 8,  2.5, "N2"}
 };
+
+std::vector<TechnologyRow> bodor3kWTechnologyTable() {
+    std::vector<TechnologyRow> rows;
+    rows.reserve(sizeof(kBodor3kW) / sizeof(kBodor3kW[0]));
+    for (const auto& row : kBodor3kW) {
+        rows.push_back({
+            row.material,
+            row.thicknessMm,
+            row.speedMMin,
+            row.gas
+        });
+    }
+    return rows;
+}
+
+TechnologyValidationReport validateBodor3kWTechnology() {
+    TechnologyValidationReport report;
+    report.rows = sizeof(kBodor3kW) / sizeof(kBodor3kW[0]);
+
+    for (std::size_t i = 0; i < report.rows; ++i) {
+        const auto& row = kBodor3kW[i];
+        if (!std::isfinite(row.thicknessMm) ||
+            row.thicknessMm <= 0.0 ||
+            !std::isfinite(row.speedMMin) ||
+            row.speedMMin <= 0.0 ||
+            row.gas == nullptr ||
+            row.gas[0] == '\0') {
+            ++report.invalidRows;
+            report.issues.push_back(
+                "Некорректная строка технологии #" +
+                std::to_string(i + 1)
+            );
+        }
+
+        for (std::size_t j = 0; j < i; ++j) {
+            if (kBodor3kW[j].material == row.material &&
+                std::abs(kBodor3kW[j].thicknessMm - row.thicknessMm) <= 1e-9) {
+                ++report.duplicateRows;
+                report.issues.push_back(
+                    "Дубликат материала/толщины в строках " +
+                    std::to_string(j + 1) + " и " +
+                    std::to_string(i + 1)
+                );
+                break;
+            }
+        }
+    }
+
+    report.valid =
+        report.invalidRows == 0 &&
+        report.duplicateRows == 0 &&
+        report.rows > 0;
+    return report;
+}
 
 CuttingParameters bodor3kWParameters(Material material, double thicknessMm) {
     CuttingParameters result{material, thicknessMm, 0.0, {}};
