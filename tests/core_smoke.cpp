@@ -2118,7 +2118,7 @@ void testDenseSmallPartPlacement() {
     // two sheets or fewer makes the test sensitive to candidate starvation
     // without depending on a single exact placement order.
     const auto validation =
-        validateProductionResult(instances, sheet, options, result);
+        validateProductionResult(parts, sheet, options, result);
     assert(validation.valid);
     assert(validation.unplacedCount == 0);
 }
