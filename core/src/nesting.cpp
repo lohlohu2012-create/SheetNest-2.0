@@ -581,7 +581,71 @@ std::vector<Candidate> candidatesFor(
             : 512;
 
     if (result.size() > candidateLimit) {
-        result.resize(candidateLimit);
+        if (options.enableSmallPartOptimization &&
+            materialArea(Part{"", part, {}}) <=
+                std::max(
+                    1.0,
+                    sheetSize.width * sheetSize.height *
+                    std::clamp(
+                        options.smallPartAreaRatio,
+                        0.001,
+                        0.25
+                    )
+                )) {
+            // Keep the best score-front candidates, but do not let the
+            // Y/X sort erase entire feasibility-boundary segments. The
+            // remainder of the budget is sampled deterministically across
+            // the full candidate set, preserving narrow/interlocking spaces
+            // that may occur far from the current lowest-Y frontier.
+            const std::size_t frontBudget =
+                std::max<std::size_t>(
+                    1,
+                    candidateLimit * 3 / 5
+                );
+            const std::size_t distributedBudget =
+                candidateLimit - frontBudget;
+
+            std::vector<Candidate> diversified;
+            diversified.reserve(candidateLimit);
+
+            for (std::size_t i = 0;
+                 i < frontBudget && i < result.size();
+                 ++i) {
+                diversified.push_back(result[i]);
+            }
+
+            if (distributedBudget > 0 &&
+                result.size() > frontBudget) {
+                const std::size_t tailSize =
+                    result.size() - frontBudget;
+
+                for (std::size_t k = 0;
+                     k < distributedBudget;
+                     ++k) {
+                    const std::size_t index =
+                        frontBudget +
+                        (k * (tailSize - 1)) /
+                        std::max<std::size_t>(
+                            1,
+                            distributedBudget - 1
+                        );
+
+                    if (diversified.empty() ||
+                        std::abs(
+                            diversified.back().x - result[index].x
+                        ) > 1e-6 ||
+                        std::abs(
+                            diversified.back().y - result[index].y
+                        ) > 1e-6) {
+                        diversified.push_back(result[index]);
+                    }
+                }
+            }
+
+            result = std::move(diversified);
+        } else {
+            result.resize(candidateLimit);
+        }
     }
     (void)sheetSize;
     return result;
