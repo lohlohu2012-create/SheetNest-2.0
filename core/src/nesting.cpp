@@ -431,6 +431,59 @@ bool betterCandidate(const Candidate& a, const Candidate& b) {
     return std::tie(a.scoreY, a.scoreX) < std::tie(b.scoreY, b.scoreX);
 }
 
+std::vector<Candidate> fallbackGridCandidates(
+    const Polygon& part,
+    int rotation,
+    const Sheet& sheet,
+    double margin
+) {
+    std::vector<Candidate> result;
+
+    const Polygon rotated = rotate(part, rotation);
+    const Bounds pb = bounds(rotated);
+
+    const double minX = margin - pb.minX;
+    const double minY = margin - pb.minY;
+    const double maxX = sheet.width - margin - pb.maxX;
+    const double maxY = sheet.height - margin - pb.maxY;
+
+    if (maxX < minX || maxY < minY) return result;
+
+    // Emergency-only recovery path. NFP candidates are always preferred;
+    // every grid point is still validated by the exact polygon predicate.
+    constexpr std::size_t kColumns = 64;
+    constexpr std::size_t kRows = 32;
+
+    result.reserve(kColumns * kRows);
+
+    for (std::size_t iy = 0; iy < kRows; ++iy) {
+        const double ty =
+            static_cast<double>(iy) /
+            static_cast<double>(kRows - 1);
+
+        for (std::size_t ix = 0; ix < kColumns; ++ix) {
+            const double tx =
+                static_cast<double>(ix) /
+                static_cast<double>(kColumns - 1);
+
+            const double x = minX + (maxX - minX) * tx;
+            const double y = minY + (maxY - minY) * ty;
+            result.push_back({x, y, y, x});
+        }
+    }
+
+    std::sort(
+        result.begin(),
+        result.end(),
+        [](const Candidate& a, const Candidate& b) {
+            return std::tie(a.scoreY, a.scoreX) <
+                   std::tie(b.scoreY, b.scoreX);
+        }
+    );
+
+    return result;
+}
+
 bool placeOnSheet(
     const Instance& instance,
     const Sheet& sheet,
@@ -492,7 +545,47 @@ bool placeOnSheet(
                 bestShapes.clear();
             }
         }
+    }
 
+    // Recovery for an incomplete NFP boundary sample. This path is only
+    // entered after all true-shape candidates failed and is still protected
+    // by the exact collision and clearance predicate.
+    if (!found) {
+        for (int rotation : rotations) {
+            for (const auto& candidate : fallbackGridCandidates(
+                     instance.part.outer,
+                     rotation,
+                     sheet,
+                     sheet.edgeMarginMm)) {
+
+                const auto shape =
+                    transformed(instance, rotation, candidate.x, candidate.y);
+
+                if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) continue;
+
+                bool collision = false;
+                for (const auto& existing : state.shapes) {
+                    if (conflict(shape, existing, options.gapMm)) {
+                        collision = true;
+                        break;
+                    }
+                }
+                if (collision) continue;
+
+                const auto merged = combinedBounds(state.shapes, shape);
+                Candidate score = candidate;
+                score.scoreY = merged.maxY;
+                score.scoreX = merged.maxX;
+
+                if (!found || betterCandidate(score, best)) {
+                    found = true;
+                    best = score;
+                    bestRotation = rotation;
+                }
+            }
+
+            if (found) break;
+        }
     }
 
     if (!found) return false;
