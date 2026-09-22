@@ -1144,7 +1144,7 @@ void testNestingBenchmark() {
     assert(benchmark.optimized.nfpChecks > 0);
 
     // BenchmarkCase must expose the complete optimizer telemetry from nest().
-    const optimizedDirect = nest(instances, sheet, options);
+    const auto optimizedDirect = nest(instances, sheet, options);
     assert(
         benchmark.optimized.candidateChecks ==
         optimizedDirect.stats.candidateChecks
