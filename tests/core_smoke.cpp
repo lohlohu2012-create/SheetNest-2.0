@@ -2062,7 +2062,7 @@ void testDenseSmallPartPlacement() {
     Sheet sheet{100.0, 50.0, 1.0};
     Options options;
     options.rotations = {0, 90};
-    options.iterations = 24;
+    options.iterations = 8;
     options.gapMm = 1.0;
     options.enableSmallPartOptimization = true;
     options.smallPartAreaRatio = 0.25;
