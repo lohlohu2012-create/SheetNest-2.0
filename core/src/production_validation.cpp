@@ -1003,7 +1003,7 @@ bool repairProductionResult(
                     localCandidate
                 );
 
-            const currentIssueCount =
+            const std::size_t currentIssueCount =
                 adaptiveReport.issues.size();
 
             if (currentIssueCount < previousIssueCount) {
