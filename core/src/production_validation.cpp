@@ -664,6 +664,7 @@ bool repairProductionResult(
     bool selectedAdaptiveCandidate = false;
     std::vector<std::string> adaptiveConflictIds;
     std::unordered_set<std::string> adaptiveExtractedSet;
+    std::vector<AdaptiveRepairRound> adaptiveHistory;
     Result adaptiveBefore = result;
 
     auto seedIdsFromReport = [](
@@ -822,19 +823,34 @@ bool repairProductionResult(
                     seedIds.size()
                 );
 
+            const Result roundBefore =
+                adaptiveCandidate;
+
             Result localCandidate = adaptiveCandidate;
+            std::vector<std::string> roundExtractedIds;
 
             if (!adaptiveDestroyAndRepairResult(
                     instances,
                     sheet,
                     repairOptions,
                     seedIds,
-                    localCandidate
+                    localCandidate,
+                    &roundExtractedIds
                 )) {
                 break;
             }
 
             ++actualAdaptiveRounds;
+
+            adaptiveHistory.push_back(
+                makeRoundSnapshot(
+                    round + 1,
+                    seedIds,
+                    roundExtractedIds,
+                    roundBefore,
+                    localCandidate
+                )
+            );
 
             adaptiveReport =
                 validateProductionResult(
@@ -1033,6 +1049,12 @@ bool repairProductionResult(
     completedReport.adaptiveRepairGroupSize = largestAdaptiveGroup;
     completedReport.repairElapsedMs = totalElapsedMs;
     completedReport.repaired = true;
+
+    if (selectedAdaptiveCandidate &&
+        !adaptiveHistory.empty()) {
+        completedReport.adaptiveHistory =
+            adaptiveHistory;
+    }
 
     if (selectedAdaptiveCandidate &&
         actualAdaptiveRounds > 0 &&
