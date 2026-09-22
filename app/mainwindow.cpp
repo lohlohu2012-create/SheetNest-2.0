@@ -342,7 +342,48 @@ void MainWindow::buildUi() {
 
     view_ = new NestView;
 
-    diagnosticsTable_ = new QTableWidget(0, 6);
+    auto* repairViewPanel = new QWidget;
+    auto* repairViewLayout = new QVBoxLayout(repairViewPanel);
+    repairViewLayout->setContentsMargins(0, 0, 0, 0);
+    repairViewLayout->setSpacing(4);
+
+    auto* repairControls = new QGroupBox("Adaptive Repair");
+    auto* repairControlsLayout = new QGridLayout(repairControls);
+    repairControlsLayout->setContentsMargins(8, 6, 8, 6);
+
+    repairRoundCombo_ = new QComboBox;
+    repairRoundCombo_->addItem("Итоговая раскладка", -1);
+
+    repairConflictLayer_ = new QCheckBox("Конфликты");
+    repairExtractedLayer_ = new QCheckBox("Извлечённые");
+    repairMovedLayer_ = new QCheckBox("Новые позиции");
+    repairStationaryLayer_ = new QCheckBox("Неподвижные");
+    repairConflictLayer_->setChecked(true);
+    repairExtractedLayer_->setChecked(true);
+    repairMovedLayer_->setChecked(true);
+    repairStationaryLayer_->setChecked(true);
+
+    repairControlsLayout->addWidget(
+        new QLabel("История:"), 0, 0
+    );
+    repairControlsLayout->addWidget(
+        repairRoundCombo_, 0, 1, 1, 3
+    );
+    repairControlsLayout->addWidget(
+        repairConflictLayer_, 1, 0
+    );
+    repairControlsLayout->addWidget(
+        repairExtractedLayer_, 1, 1
+    );
+    repairControlsLayout->addWidget(
+        repairMovedLayer_, 1, 2
+    );
+    repairControlsLayout->addWidget(
+        repairStationaryLayer_, 1, 3
+    );
+
+    repairViewLayout->addWidget(repairControls);
+    repairViewLayout->addWidget(view_, 1);
     diagnosticsTable_->setHorizontalHeaderLabels({
         "instanceId", "unitId", "Source ID", "Слой", "Этап", "Сообщение"
     });
@@ -377,7 +418,7 @@ void MainWindow::buildUi() {
     validatorTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     auto* rightTabs = new QTabWidget;
-    rightTabs->addTab(view_, "Раскладка");
+    rightTabs->addTab(repairViewPanel, "Раскладка");
     rightTabs->addTab(diagnosticsTable_, "Диагностика");
     rightTabs->addTab(validatorTable_, "Production Validator");
     rightTabs->addTab(benchmarkTable_, "Benchmark");
@@ -472,6 +513,51 @@ void MainWindow::connectUi() {
         repairErrors();
     });
 
+    const auto rerenderAdaptive = [this] {
+        refreshAdaptiveRepairView();
+    };
+
+    connect(
+        repairRoundCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [rerenderAdaptive](int) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairConflictLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairExtractedLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairMovedLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairStationaryLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+
     connect(exportButton_, &QPushButton::clicked, this, [this] {
         exportDxf();
     });
@@ -511,15 +597,33 @@ void MainWindow::connectUi() {
             result_ = output.result;
             technology_ = output.technology;
             validation_ = output.validation;
+
+            {
+                const blocker =
+                    QSignalBlocker(repairRoundCombo_);
+                repairRoundCombo_->clear();
+                repairRoundCombo_->addItem(
+                    "Итоговая раскладка",
+                    -1
+                );
+                for (const auto& round :
+                     validation_.adaptiveHistory) {
+                    repairRoundCombo_->addItem(
+                        QString("Раунд %1")
+                            .arg(static_cast<qulonglong>(
+                                round.roundIndex)),
+                        static_cast<int>(round.roundIndex)
+                    );
+                }
+                repairRoundCombo_->setEnabled(
+                    !validation_.adaptiveHistory.empty()
+                );
+            }
+
             populateDiagnostics();
             populateProductionValidation();
 
-            view_->showResult(
-                result_,
-                instances_,
-                sheet_,
-                &validation_
-            );
+            refreshAdaptiveRepairView();
 
             const auto minutes = output.cutting.totalMinutes;
             const int hours = static_cast<int>(minutes / 60.0);
@@ -1581,6 +1685,36 @@ void MainWindow::updateProgress(
         );
         break;
     }
+}
+
+void MainWindow::refreshAdaptiveRepairView() {
+    if (!view_) return;
+
+    int selectedRound = -1;
+    if (repairRoundCombo_) {
+        selectedRound =
+            repairRoundCombo_->currentData().toInt();
+    }
+
+    view_->showResult(
+        result_,
+        instances_,
+        sheet_,
+        &validation_,
+        selectedRound,
+        repairConflictLayer_
+            ? repairConflictLayer_->isChecked()
+            : true,
+        repairExtractedLayer_
+            ? repairExtractedLayer_->isChecked()
+            : true,
+        repairMovedLayer_
+            ? repairMovedLayer_->isChecked()
+            : true,
+        repairStationaryLayer_
+            ? repairStationaryLayer_->isChecked()
+            : true
+    );
 }
 
 void MainWindow::setBusy(bool busy) {
