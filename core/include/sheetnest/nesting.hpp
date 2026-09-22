@@ -110,7 +110,8 @@ bool optimizeNestingResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
     const Options& options,
-    Result& result
+    Result& result,
+    std::vector<std::string>* extractedIdsOut = nullptr
 );
 
 // Locally removes only a conflict-driven group of placements, repacks that
