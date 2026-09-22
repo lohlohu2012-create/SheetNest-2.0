@@ -924,10 +924,78 @@ bool repairProductionResult(
         return ids;
     };
 
+    auto classifyConflictLevels = [](
+        const ProductionValidationReport& report,
+        const std::vector<std::string>& conflictIds
+    ) {
+        std::vector<std::vector<std::string>> levels;
+        std::unordered_set<std::string> conflictSet(
+            conflictIds.begin(), conflictIds.end()
+        );
+        std::unordered_set<std::string> collisionIds;
+        std::unordered_set<std::string> gapIds;
+        std::unordered_set<std::string> secondaryIds;
+
+        for (const auto& issue : report.issues) {
+            if (!conflictSet.contains(issue.instanceId) &&
+                !conflictSet.contains(issue.relatedInstanceId)) {
+                continue;
+            }
+            auto add = [](std::unordered_set<std::string>& set,
+                          const std::string& id) {
+                if (!id.empty()) set.insert(id);
+            };
+            switch (issue.type) {
+            case ProductionValidationIssueType::Collision:
+                add(collisionIds, issue.instanceId);
+                add(collisionIds, issue.relatedInstanceId);
+                break;
+            case ProductionValidationIssueType::Gap:
+                add(gapIds, issue.instanceId);
+                add(gapIds, issue.relatedInstanceId);
+                break;
+            default:
+                add(secondaryIds, issue.instanceId);
+                add(secondaryIds, issue.relatedInstanceId);
+                break;
+            }
+        }
+
+        auto materialize = [&](const std::unordered_set<std::string>& source,
+                               std::unordered_set<std::string>* used) {
+            std::vector<std::string> level;
+            for (const auto& id : source) {
+                if (!conflictSet.contains(id)) continue;
+                if (used->insert(id).second) level.push_back(id);
+            }
+            std::sort(level.begin(), level.end());
+            return level;
+        };
+
+        std::unordered_set<std::string> used;
+        auto collisionLevel = materialize(collisionIds, &used);
+        if (!collisionLevel.empty()) levels.push_back(std::move(collisionLevel));
+        auto gapLevel = materialize(gapIds, &used);
+        if (!gapLevel.empty()) levels.push_back(std::move(gapLevel));
+        auto secondaryLevel = materialize(secondaryIds, &used);
+        if (!secondaryLevel.empty()) levels.push_back(std::move(secondaryLevel));
+
+        // Any graph member not directly named by a validator issue is kept as
+        // the final dependent fringe of the same connected component.
+        std::vector<std::string> fringe;
+        for (const auto& id : conflictIds) {
+            if (used.insert(id).second) fringe.push_back(id);
+        }
+        std::sort(fringe.begin(), fringe.end());
+        if (!fringe.empty()) levels.push_back(std::move(fringe));
+        return levels;
+    };
+
     auto makeRoundSnapshot = [](
         std::size_t roundIndex,
         const std::vector<std::string>& conflictIds,
         const std::vector<std::string>& extractedIds,
+        const std::vector<std::vector<std::string>>& conflictLevels,
         const Result& before,
         const Result& after
     ) {
@@ -937,6 +1005,7 @@ bool repairProductionResult(
         roundSnapshot.afterSheets = after.sheets;
         roundSnapshot.conflictIds = conflictIds;
         roundSnapshot.extractedIds = extractedIds;
+        roundSnapshot.conflictLevels = conflictLevels;
 
         std::unordered_set<std::string> conflictSet(
             conflictIds.begin(),
@@ -1115,11 +1184,15 @@ bool repairProductionResult(
                 adaptiveExtractedSet.insert(id);
             }
 
+            const auto conflictLevels =
+                classifyConflictLevels(adaptiveReport, seedIds);
+
             adaptiveHistory.push_back(
                 makeRoundSnapshot(
                     round + 1,
                     seedIds,
                     roundExtractedIds,
+                    conflictLevels,
                     roundBefore,
                     localCandidate
                 )
