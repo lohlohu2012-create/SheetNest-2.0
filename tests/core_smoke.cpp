@@ -1107,6 +1107,43 @@ void testInstanceDiagnostics() {
     assert(sawUnplaced);
 }
 
+void testSmallPartOptimization() {
+    std::vector<Instance> instances{
+        {"large-a", Part{"large", rectangle(60, 40), {}}},
+        {"large-b", Part{"large", rectangle(60, 40), {}}},
+        {"small-a", Part{"small", rectangle(12, 12), {}}},
+        {"small-b", Part{"small", rectangle(12, 12), {}}},
+        {"small-c", Part{"small", rectangle(12, 12), {}}}
+    };
+
+    Sheet sheet{100, 100, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 4;
+    options.gapMm = 2.0;
+    options.enableSmallPartOptimization = true;
+    options.smallPartAreaRatio = 0.10;
+    options.smallPartCandidateBudget = 1024;
+    options.smallPartBoundarySpacingMm = 1.0;
+    options.smallPartRefillPasses = 3;
+
+    const auto result = nest(instances, sheet, options);
+
+    assert(result.unplaced.size() < instances.size());
+    assert(result.stats.candidateChecks > 0);
+
+    // The small-part pass may refill residual regions, but it must never
+    // violate the configured physical clearance.
+    const auto report =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            result
+        );
+    assert(report.valid);
+}
+
 void testNestingBenchmark() {
     std::vector<Instance> instances;
     for (int i = 0; i < 6; ++i) {
@@ -1766,6 +1803,7 @@ int main() {
     testParallelNestingCancellation();
     testInstanceDiagnostics();
     testNestingBenchmark();
+    testSmallPartOptimization();
     testInterlockIntoHole();
     std::cout << "SheetNest core smoke tests passed\n";
     return 0;
