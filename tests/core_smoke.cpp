@@ -1,6 +1,6 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
-#include "sheetnest/benchmark.hpp"
+#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
@@ -1437,6 +1437,41 @@ void testConcaveNfpCandidates() {
     assert(!vertices.empty());
 }
 
+void testCuttingPathInnerContoursFirst() {
+    CuttingParameters technology;
+    technology.speedMMin = 10.0;
+    PathOptions options;
+    options.rapidSpeedMMin = 120.0;
+    options.pierceSeconds = 0.25;
+    options.innerContoursFirst = true;
+
+    const Polygon outer = rectangle(100.0, 100.0);
+    const Polygon hole = translate(rectangle(10.0, 10.0), 45.0, 45.0);
+    const auto path = planCuttingPath({outer, hole}, technology, options);
+
+    assert(path.pierces == 2);
+    assert(path.moves.size() > 2);
+    std::size_t firstPierceMove = std::numeric_limits<std::size_t>::max();
+    for (std::size_t i = 0; i < path.moves.size(); ++i) {
+        if (path.moves[i].type == CutType::Pierce) {
+            firstPierceMove = i;
+            break;
+        }
+    }
+    assert(firstPierceMove != std::numeric_limits<std::size_t>::max());
+
+    // The first contour cut must be the small internal contour, not the
+    // enclosing 100x100 outer boundary.
+    assert(path.moves[firstPierceMove].from.x >= 45.0 - 1e-6);
+    assert(path.moves[firstPierceMove].from.x <= 55.0 + 1e-6);
+    assert(path.moves[firstPierceMove].from.y >= 45.0 - 1e-6);
+    assert(path.moves[firstPierceMove].from.y <= 55.0 + 1e-6);
+
+    const auto estimate = estimateCuttingPath(path, technology, options);
+    assert(estimate.contourLengthMm > 0.0);
+    assert(estimate.totalMinutes > 0.0);
+}
+
 void testPerPartQuantitiesAndUnitIds() {
     const auto doc = importDxf(kMultiplePartsDxf, 0.05);
     assert(doc.valid());
@@ -2752,7 +2787,7 @@ int main(int argc, char** argv) {
     testDegenerateArc();
     testDxfModelPipeline();
     testPerPartQuantitiesAndUnitIds();
-    testDxfExportRoundTrip();
+    testDxfExportRoundTrip();\n    testCuttingPathInnerContoursFirst();
     testCollinearConcaveNfpRegression();
     testClearanceCornerSampling();
     testNfpMinkowski();
