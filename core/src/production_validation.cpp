@@ -1237,6 +1237,8 @@ bool repairProductionResult(
                     conflictLevels, levelBefore, levelCandidate
                 ));
                 auto& sublevelSnapshot = adaptiveHistory.back();
+                sublevelSnapshot.repairedLevel = levelIndex;
+                sublevelSnapshot.validationSequence = adaptiveHistory.size();
                 sublevelSnapshot.collisionCountAfter = levelReport.collisionCount;
                 sublevelSnapshot.gapViolationCountAfter = levelReport.gapViolationCount;
                 sublevelSnapshot.marginViolationCountAfter = levelReport.marginViolationCount;
