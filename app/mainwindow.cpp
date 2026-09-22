@@ -442,12 +442,12 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 13);
+    benchmarkTable_ = new QTableWidget(0, 15);
     benchmarkTable_->setHorizontalHeaderLabels({
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
         "Использование", "Кандидаты", "Collision checks", "NFP checks",
         "Refill moves", "Exchange attempts", "Sheets eliminated",
-        "Optimizer passes"
+        "Optimizer passes", "NFP timeouts", "NFP fallbacks"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -803,6 +803,12 @@ void MainWindow::connectUi() {
                         .arg(static_cast<int>(result_.unplaced.size()))
                 );
             }
+
+            appendLog(
+                QString("NFP telemetry: таймауты=%1, complexity fallback=%2.")
+                    .arg(static_cast<qulonglong>(result_.stats.nfpTimeouts))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpComplexityFallbacks))
+            );
 
             appendLog(
                 QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6.")
@@ -1274,10 +1280,12 @@ void MainWindow::populateBenchmark(
             QString::number(static_cast<qulonglong>(b.refillMoves)),
             QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
             QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
-            QString::number(static_cast<qulonglong>(b.optimizerPasses))
+            QString::number(static_cast<qulonglong>(b.optimizerPasses)),
+            QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+            QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks))
         };
 
-        for (int column = 0; column < 13; ++column) {
+        for (int column = 0; column < 15; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
