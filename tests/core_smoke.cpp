@@ -1,5 +1,6 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
+#include "sheetnest/cam_export.hpp"
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting_path.hpp"
 #include "sheetnest/dxf_export.hpp"
@@ -1486,6 +1487,16 @@ void testCuttingPathInnerContoursFirst() {
     const auto estimate = estimateCuttingPath(path, technology, options);
     assert(estimate.contourLengthMm > 0.0);
     assert(estimate.totalMinutes > 0.0);
+
+    const auto camReport = validateCuttingPath(route);
+    assert(camReport.valid);
+    CamExportOptions camOptions;
+    camOptions.includeComments = true;
+    const auto camProgram =
+        exportCamProgram(route, technology, camOptions);
+    assert(!camProgram.empty());
+    assert(camProgram.find("G90") != std::string::npos);
+    assert(camProgram.find("M2") != std::string::npos);
 }
 
 void testPerPartQuantitiesAndUnitIds() {
