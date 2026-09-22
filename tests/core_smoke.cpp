@@ -1662,10 +1662,22 @@ void testAdaptiveRepairConflictGraph() {
 
     bool sawCollisionLevel = false;
     bool sawGapLevel = false;
+    bool sawDependentLevel = false;
     bool sawEStationary = false;
     bool sawNewCollisionAfterRepair = false;
+    std::size_t previousValidationSequence = 0;
+    std::size_t previousLevel = 0;
     for (std::size_t i = 0; i < report.adaptiveHistory.size(); ++i) {
         const auto& round = report.adaptiveHistory[i];
+        assert(round.validationSequence > previousValidationSequence);
+        previousValidationSequence = round.validationSequence;
+        if (i > 0) {
+            // The hierarchy may restart at Collision after a newly exposed
+            // conflict, but it can never move backwards from Gap to fringe
+            // within the same successful repair chain.
+            assert(round.repairedLevel <= previousLevel + 1);
+        }
+        previousLevel = round.repairedLevel;
         assert(!round.conflictLevels.empty());
 
         // The snapshot must contain the validator result produced immediately
@@ -1680,13 +1692,15 @@ void testAdaptiveRepairConflictGraph() {
         assert(round.marginViolationCountAfter == afterValidation.marginViolationCount);
         assert(round.validAfter == afterValidation.valid);
 
-        if (!round.conflictLevels.empty() &&
-            round.conflictLevels.front().size() >= 3) {
+        if (round.repairedLevel == 0) {
             sawCollisionLevel = true;
-        }
-        if (round.conflictLevels.size() >= 2 &&
-            !round.conflictLevels[1].empty()) {
+            assert(round.conflictLevels.front().size() > 0);
+        } else if (round.repairedLevel == 1) {
             sawGapLevel = true;
+            assert(round.conflictLevels.size() >= 2);
+            assert(!round.conflictLevels[1].empty());
+        } else {
+            sawDependentLevel = true;
         }
 
         // If a repair itself exposes a new Collision, the next adaptive
@@ -1707,6 +1721,7 @@ void testAdaptiveRepairConflictGraph() {
     }
     assert(sawCollisionLevel);
     assert(sawGapLevel);
+    assert(sawDependentLevel || report.adaptiveRepairRounds < 3);
     if (!report.adaptiveChanges.empty()) {
         assert(sawEStationary);
     }
