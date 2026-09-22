@@ -250,6 +250,11 @@ void NestView::showResult(
         }
     }
 
+    const bool animated =
+        repairRound > 0 &&
+        animationStage >= 0 &&
+        animationStage <= 3;
+
     Result displayResult = result;
 
     if (repairVisualization &&
@@ -258,7 +263,13 @@ void NestView::showResult(
              repairVisualization->adaptiveHistory) {
             if (static_cast<int>(history.roundIndex) ==
                 repairRound) {
-                displayResult.sheets = history.afterSheets;
+                if (animated &&
+                    (animationStage == 0 ||
+                     animationStage == 1)) {
+                    displayResult.sheets = history.beforeSheets;
+                } else {
+                    displayResult.sheets = history.afterSheets;
+                }
                 break;
             }
         }
@@ -327,6 +338,7 @@ void NestView::showResult(
 
                     if (instanceIt == byId.end()) continue;
                     if (!change.extracted || !showExtracted) continue;
+                    if (animated && animationStage == 0) continue;
 
                     addRepairOverlay(
                         sheetItem,
@@ -366,7 +378,23 @@ void NestView::showResult(
                 changeIt != repairChangesById.end()) {
                 const auto& change = changeIt->second;
 
-                if (change.moved && showMoved) {
+                const bool stageShowsMoved =
+                    !animated ||
+                    animationStage == 2 ||
+                    animationStage == 3;
+                const bool stageShowsStationary =
+                    !animated ||
+                    animationStage == 2 ||
+                    animationStage == 3;
+                const bool stageShowsConflict =
+                    !animated ||
+                    animationStage == 0 ||
+                    animationStage == 1 ||
+                    animationStage == 3;
+
+                if (change.moved &&
+                    showMoved &&
+                    stageShowsMoved) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
@@ -382,7 +410,9 @@ void NestView::showResult(
                     );
                 }
 
-                if (change.stationary && showStationary) {
+                if (change.stationary &&
+                    showStationary &&
+                    stageShowsStationary) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
@@ -398,7 +428,9 @@ void NestView::showResult(
                     );
                 }
 
-                if (change.conflictGroup && showConflict) {
+                if (change.conflictGroup &&
+                    showConflict &&
+                    stageShowsConflict) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
@@ -412,6 +444,16 @@ void NestView::showResult(
                             .arg(QString::fromStdString(
                                 placement.id))
                     );
+                }
+
+                if (animated &&
+                    animationStage == 1 &&
+                    change.extracted) {
+                    partItem->setOpacity(0.18);
+                } else if (animated &&
+                           animationStage == 0 &&
+                           change.conflictGroup) {
+                    partItem->setOpacity(0.72);
                 }
 
                 partItem->setToolTip(
@@ -443,6 +485,73 @@ void NestView::showResult(
         scene()->setSceneRect(all);
 
         if (hasAdaptiveRepair) {
+            if (animated) {
+                const QString titles[] = {
+                    "1/4  КОНФЛИКТ",
+                    "2/4  ИЗВЛЕЧЕНИЕ ДЕТАЛЕЙ",
+                    "3/4  ЛОКАЛЬНАЯ ПЕРЕПАКОВКА",
+                    "4/4  PRODUCTION VALIDATOR"
+                };
+                const QColor colors[] = {
+                    QColor("#ff4d5e"),
+                    QColor("#facc15"),
+                    QColor("#22d3ee"),
+                    QColor("#22c55e")
+                };
+                const QString detail =
+                    animationStage == 0
+                        ? QString("Раунд %1 • конфликтов: %2")
+                            .arg(repairRound)
+                            .arg(static_cast<qulonglong>(
+                                repairVisualization->adaptiveConflictIds.size()))
+                        : animationStage == 1
+                            ? QString("Раунд %1 • извлечение: %2")
+                                .arg(repairRound)
+                                .arg(static_cast<qulonglong>(
+                                    repairVisualization->adaptiveExtractedIds.size()))
+                            : animationStage == 2
+                                ? QString("Раунд %1 • перемещено: %2")
+                                    .arg(repairRound)
+                                    .arg(static_cast<qulonglong>(
+                                        repairVisualization->adaptiveMovedIds.size()))
+                                : QString("Раунд %1 • Validator: %2")
+                                    .arg(repairRound)
+                                    .arg(repairVisualization->valid
+                                             ? "PASS"
+                                             : "FAIL");
+
+                const QRectF bannerRect(
+                    scene()->sceneRect().right() - 380.0,
+                    scene()->sceneRect().top() + 18.0,
+                    340.0,
+                    72.0
+                );
+                auto* banner = scene()->addRect(
+                    bannerRect,
+                    QPen(colors[animationStage], 1.8),
+                    QBrush(QColor(12, 18, 24, 235))
+                );
+                banner->setZValue(1100.0);
+
+                auto* title = scene()->addSimpleText(
+                    titles[animationStage]
+                );
+                title->setBrush(QBrush(colors[animationStage]));
+                title->setPos(
+                    bannerRect.left() + 14.0,
+                    bannerRect.top() + 10.0
+                );
+                title->setZValue(1101.0);
+
+                auto* detailItem = scene()->addSimpleText(detail);
+                detailItem->setBrush(QBrush(QColor("#cbd5e1")));
+                detailItem->setPos(
+                    bannerRect.left() + 14.0,
+                    bannerRect.top() + 38.0
+                );
+                detailItem->setZValue(1101.0);
+            }
+
             QString roundLabel = "Итог";
             std::size_t conflictCount = 0;
             std::size_t extractedCount = 0;
