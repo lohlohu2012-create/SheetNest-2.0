@@ -841,7 +841,6 @@ void MainWindow::connectUi() {
             validation_ = output.validation;
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
-            populateLaserOperationSelector();
 
             {
                 const QSignalBlocker blocker(
