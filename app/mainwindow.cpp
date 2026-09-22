@@ -947,6 +947,7 @@ void MainWindow::importDxf() {
 }
 
 void MainWindow::refreshInstances() {
+    resetAdaptiveRepairAnimation();
     hasBenchmarkResult_ = false;
     validation_ = {};
     validation_.valid = false;
@@ -2065,12 +2066,23 @@ void MainWindow::refreshAdaptiveRepairView() {
             repairRoundCombo_->currentData().toInt();
     }
 
+    int animationRound = selectedRound;
+    int animationStage = -1;
+
+    if (repairAnimationSession_ &&
+        repairAnimationFrame_ >= 0) {
+        animationRound =
+            repairAnimationFrame_ / 4 + 1;
+        animationStage =
+            repairAnimationFrame_ % 4;
+    }
+
     view_->showResult(
         result_,
         instances_,
         sheet_,
         &validation_,
-        selectedRound,
+        animationRound,
         repairConflictLayer_
             ? repairConflictLayer_->isChecked()
             : true,
@@ -2082,7 +2094,8 @@ void MainWindow::refreshAdaptiveRepairView() {
             : true,
         repairStationaryLayer_
             ? repairStationaryLayer_->isChecked()
-            : true
+            : true,
+        animationStage
     );
 }
 
@@ -2102,6 +2115,39 @@ void MainWindow::setBusy(bool busy) {
         validation_.valid
     );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
+
+    const hasRepairHistory =
+        !validation_.adaptiveHistory.empty();
+    if (repairPlayButton_) {
+        repairPlayButton_->setEnabled(
+            !busy &&
+            hasRepairHistory &&
+            !repairAnimationPlaying_
+        );
+    }
+    if (repairPauseButton_) {
+        repairPauseButton_->setEnabled(
+            !busy &&
+            hasRepairHistory &&
+            repairAnimationPlaying_
+        );
+    }
+    if (repairPrevButton_) {
+        repairPrevButton_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+    if (repairNextButton_) {
+        repairNextButton_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+    if (repairSpeedCombo_) {
+        repairSpeedCombo_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+
     stopButton_->setEnabled(busy && nestingController_ != nullptr);
 
     if (busy) {
