@@ -528,7 +528,7 @@ void MainWindow::buildUi() {
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
         "Использование", "Кандидаты", "Collision checks", "NFP checks",
         "Refill moves", "Exchange attempts", "Sheets eliminated",
-        "Optimizer passes", "NFP timeouts", "NFP fallbacks"
+        "Optimizer passes", "NFP timeouts", "NFP fallbacks", "Placed IDs", "Skipped IDs"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1456,10 +1456,24 @@ void MainWindow::populateBenchmark(
             QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
             QString::number(static_cast<qulonglong>(b.optimizerPasses)),
             QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
-            QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks))
+            QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+            QString::fromStdString(std::accumulate(
+                b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
+                std::string{},
+                [](std::string a, const std::string& id) {
+                    return a.empty() ? id : a + ";" + id;
+                }
+            )),
+            QString::fromStdString(std::accumulate(
+                b.skippedInstanceIds.begin(), b.skippedInstanceIds.end(),
+                std::string{},
+                [](std::string a, const std::string& id) {
+                    return a.empty() ? id : a + ";" + id;
+                }
+            ))
         };
 
-        for (int column = 0; column < 15; ++column) {
+        for (int column = 0; column < 17; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
@@ -1876,7 +1890,7 @@ void MainWindow::exportBenchmarkResults() {
                 QString::number(static_cast<qulonglong>(b.optimizerPasses))
             };
 
-            for (int i = 0; i < 13; ++i) {
+            for (int i = 0; i < 17; ++i) {
                 if (i > 0) row += ',';
                 appendCsvField(row, values[i]);
             }
