@@ -17,6 +17,10 @@ namespace {
 
 constexpr double kEps = 1e-7;
 
+bool shouldStop(const Options& options) {
+    return options.control && options.control->shouldStop();
+}
+
 struct PlacedShape {
     Polygon outer;
     std::vector<Polygon> holes;
@@ -238,7 +242,8 @@ std::vector<Candidate> candidatesFor(
     const Sheet& sheetSize,
     double gap,
     double margin,
-    NestingStats* stats
+    NestingStats* stats,
+    const std::shared_ptr<NestingRunControl>& control
 ) {
     const Polygon rotatedPart = rotate(part, rotation);
     const auto pb = bounds(rotatedPart);
@@ -397,6 +402,7 @@ std::vector<Candidate> candidatesFor(
     };
 
     for (const auto& placed : sheet.shapes) {
+        if (control && control->shouldStop()) break;
         addRingCandidates(placed.outer);
 
         for (const auto& hole : holes) {
@@ -416,6 +422,7 @@ std::vector<Candidate> candidatesFor(
 
         if (placementMaxX >= placementMinX &&
             placementMaxY >= placementMinY) {
+            if (control && control->shouldStop()) break;
             if (stats) ++stats->nfpChecks;
 
             const auto region = nfp::feasibilityRegion(
@@ -562,6 +569,7 @@ bool placeOnSheet(
     const double margin = std::max(0.0, sheet.edgeMarginMm);
 
     for (int rotation : rotations) {
+        if (shouldStop(options)) return false;
         const auto rotated = rotate(instance.part.outer, rotation);
         const auto rotatedBounds = bounds(rotated);
 
@@ -583,7 +591,9 @@ bool placeOnSheet(
                  sheet,
                  options.gapMm,
                  sheet.edgeMarginMm,
-                 stats)) {
+                 stats,
+                 options.control)) {
+            if (shouldStop(options)) return false;
             if (stats) ++stats->candidateChecks;
 
             const auto shape =
@@ -1126,6 +1136,7 @@ bool tryExchangeEliminateSheet(
     };
 
     for (const auto& id : sourceIds) {
+        if (shouldStop(options)) return false;
         if (!moveOnePart(id)) {
             return false;
         }
@@ -1154,10 +1165,12 @@ bool refillExistingSheets(
     constexpr int kPasses = 3;
 
     for (int pass = 0; pass < kPasses; ++pass) {
+        if (shouldStop(options)) break;
         bool passChanged = false;
 
         for (std::size_t sourceIndex = states.size();
              sourceIndex-- > 1;) {
+            if (shouldStop(options)) break;
 
             const auto sourceIds =
                 orderedPlacementIds(
@@ -1258,6 +1271,7 @@ bool compactResult(
     // opened a new sheet even though an earlier sheet still had usable space.
     for (std::size_t sourceIndex = states.size();
          sourceIndex-- > 1;) {
+        if (shouldStop(options)) break;
 
         SheetState source = states[sourceIndex];
         if (source.shapes.empty()) {
@@ -1528,6 +1542,17 @@ Result runAttempt(
     if (order.empty()) return result;
 
     for (std::size_t position = 0; position < order.size(); ++position) {
+        if (shouldStop(options)) {
+            for (std::size_t remaining = position;
+                 remaining < order.size();
+                 ++remaining) {
+                result.unplaced.push_back(
+                    instances[order[remaining]].id
+                );
+            }
+            break;
+        }
+
         const auto& instance = instances[order[position]];
 
         std::vector<int> rotations = options.rotations;
@@ -1660,6 +1685,10 @@ Result nest(
     }
     best.utilization = -1.0;
 
+    if (shouldStop(options)) {
+        return best;
+    }
+
     if (sheet.width <= 0.0 || sheet.height <= 0.0) {
         best.unplaced.reserve(instances.size());
         for (const auto& instance : instances) best.unplaced.push_back(instance.id);
@@ -1685,6 +1714,7 @@ Result nest(
     std::mt19937 rng(options.seed);
 
     for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
+        if (shouldStop(options)) break;
         auto attemptOrder = order;
 
         if (attempt > 0) {
