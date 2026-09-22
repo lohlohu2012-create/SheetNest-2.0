@@ -10,7 +10,7 @@
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/parallel_nesting.hpp"
-#include "sheetnest/production_validation.hpp"
+#include "sheetnest/production_validator.hpp"
 
 class QComboBox;
 class QCheckBox;
