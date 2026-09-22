@@ -91,6 +91,10 @@ struct Options {
     bool enableAutoRepair{true};
     std::size_t autoRepairAttempts{8};
     std::uint64_t autoRepairTimeBudgetMs{15000};
+    bool enableAdaptiveDestroyRepair{true};
+    std::size_t adaptiveRepairAttempts{4};
+    std::size_t adaptiveRepairMaxNeighbors{16};
+    std::size_t adaptiveRepairRounds{2};
     std::shared_ptr<NestingRunControl> control{};
 };
 
@@ -106,6 +110,17 @@ bool optimizeNestingResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
     const Options& options,
+    Result& result
+);
+
+// Locally removes only a conflict-driven group of placements, repacks that
+// group into the affected sheet regions while keeping unrelated placements
+// fixed, and leaves the caller to run the final Production Validator.
+bool adaptiveDestroyAndRepairResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const std::vector<std::string>& seedIds,
     Result& result
 );
 
