@@ -2584,6 +2584,9 @@ void testEndToEndDxfToCam() {
 
     const auto document = importDxf(dxf);
     assert(document.valid());
+    const auto preflight = preflightDxf(document);
+    assert(preflight.valid);
+    assert(preflight.validParts == 2);
     const auto instances = instancesFromDxf(document, 2);
     assert(instances.size() == 2);
 
