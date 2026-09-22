@@ -2345,9 +2345,9 @@ void testDenseSmallPartPlacement() {
 
         for (const auto& placement : placements) {
             assert(placement.x >= sheet.edgeMarginMm - 1e-6);
-            assert(placement.y >= sheet.margin - 1e-6);
-            assert(placement.x <= sheet.width - sheet.width - sheet.edgeMarginMm + 1e-6);
-            assert(placement.y <= sheet.height - sheet.margin + 1e-6);
+            assert(placement.y >= sheet.edgeMarginMm - 1e-6);
+            assert(placement.x <= sheet.width - sheet.edgeMarginMm + 1e-6);
+            assert(placement.y <= sheet.height - sheet.edgeMarginMm + 1e-6);
         }
     }
     assert(placedCount == static_cast<std::size_t>(kInstances));
