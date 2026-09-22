@@ -655,6 +655,7 @@ bool repairProductionResult(
 
     Result bestValid;
     bool foundValid = false;
+    std::size_t actualAttempts = 0;
 
     Result bestFailure = result;
     ProductionValidationReport bestFailureReport = initial;
@@ -693,6 +694,7 @@ bool repairProductionResult(
     for (std::size_t attempt = 0;
          attempt < maxAttempts && !timeExpired();
          ++attempt) {
+        ++actualAttempts;
         if (repairOptions.control &&
             repairOptions.control->shouldStop()) {
             break;
@@ -780,7 +782,7 @@ bool repairProductionResult(
     const auto totalElapsedMs = elapsedMs();
 
     if (!foundValid) {
-        bestFailureReport.repairAttempts = maxAttempts;
+        bestFailureReport.repairAttempts = actualAttempts;
         bestFailureReport.repairElapsedMs = totalElapsedMs;
         bestFailureReport.repaired = false;
 
@@ -804,7 +806,7 @@ bool repairProductionResult(
         );
 
     auto completedReport = finalReport;
-    completedReport.repairAttempts = maxAttempts;
+    completedReport.repairAttempts = actualAttempts;
     completedReport.repairElapsedMs = totalElapsedMs;
     completedReport.repaired = true;
 
