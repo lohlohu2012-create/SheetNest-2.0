@@ -866,6 +866,7 @@ void MainWindow::connectUi() {
             technology_ = output.technology;
             validation_ = output.validation;
             cuttingRoute_ = output.cuttingRoute;
+            view_->setCuttingRoute(cuttingRoute_, sheet_.height);
             populateLaserOperationSelector();
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
