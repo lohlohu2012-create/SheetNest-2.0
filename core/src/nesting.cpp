@@ -2016,6 +2016,14 @@ Result runAttempt(
             state.shapes.push_back(std::move(bestShape));
             state.placements.push_back(bestPlacement);
             state.placedArea += materialArea(instance.part);
+
+            // Keep the broad-phase index synchronized with the committed
+            // placement. Without this insertion the next small-part refill
+            // would silently fall back to a stale index.
+            state.spatialIndex.insert(
+                state.shapes.size() - 1,
+                state.shapes.back().outerBounds
+            );
             placed = true;
         } else {
             SheetState state;
