@@ -2108,6 +2108,7 @@ void testAdaptiveRepairNewCollisionPriority() {
     std::size_t lastLevel = 0;
     std::size_t firstCollisionHistoryIndex = std::numeric_limits<std::size_t>::max();
     std::size_t firstGapHistoryIndex = std::numeric_limits<std::size_t>::max();
+    std::size_t gapHistoryEntryCount = 0;
 
     for (std::size_t historyIndex = 0;
          historyIndex < report.adaptiveHistory.size();
@@ -2143,6 +2144,7 @@ void testAdaptiveRepairNewCollisionPriority() {
         }
 
         if (round.repairedLevel == 1) {
+            ++gapHistoryEntryCount;
             if (firstGapHistoryIndex == std::numeric_limits<std::size_t>::max()) {
                 firstGapHistoryIndex = historyIndex;
             }
@@ -2199,6 +2201,7 @@ void testAdaptiveRepairNewCollisionPriority() {
     assert(firstCollisionHistoryIndex != std::numeric_limits<std::size_t>::max());
     assert(firstGapHistoryIndex != std::numeric_limits<std::size_t>::max());
     assert(firstCollisionHistoryIndex < firstGapHistoryIndex);
+    assert(gapHistoryEntryCount == 1);
     assert(sawSuccessfulRevalidationBetweenCollisionAndFirstGap);
 }
 
