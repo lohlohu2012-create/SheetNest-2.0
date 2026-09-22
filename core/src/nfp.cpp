@@ -661,7 +661,7 @@ std::vector<Polygon> computeUnionNfp(
         }
         if (control && pairwise.size() >= control->maxPairwisePolygons) {
             control->complexityFallback();
-            break;
+            return conservativeNfpFallback(fixed, moving, 0);
         }
         for (const auto& movingPiece : movingPieces) {
             if (control && control->stop()) {
@@ -676,7 +676,7 @@ std::vector<Polygon> computeUnionNfp(
                 pairwise.push_back(nfp);
                 if (control && pairwise.size() >= control->maxPairwisePolygons) {
                     control->complexityFallback();
-                    break;
+                    return conservativeNfpFallback(fixed, moving, 0);
                 }
             }
         }
@@ -880,8 +880,7 @@ std::vector<Polygon> noFitPolygons(
     // A deadline is request-scoped and must never poison the shared cache with
     // an incomplete/partial NFP. Return a conservative fallback and leave the
     // normal cache untouched when the guard stopped the computation.
-    if (control && control->shouldStop && control->shouldStop()) {
-        control->stop();
+    if (control && control->stop()) {
         return conservativeNfpFallback(fixed, moving, normalizedRotation);
     }
 
