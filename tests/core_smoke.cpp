@@ -2344,9 +2344,9 @@ void testDenseSmallPartPlacement() {
         placedCount += placements.size();
 
         for (const auto& placement : placements) {
-            assert(placement.x >= sheet.margin - 1e-6);
+            assert(placement.x >= sheet.edgeMarginMm - 1e-6);
             assert(placement.y >= sheet.margin - 1e-6);
-            assert(placement.x <= sheet.width - sheet.margin + 1e-6);
+            assert(placement.x <= sheet.width - sheet.width - sheet.edgeMarginMm + 1e-6);
             assert(placement.y <= sheet.height - sheet.margin + 1e-6);
         }
     }
@@ -2359,7 +2359,7 @@ void testDenseSmallPartPlacement() {
     const auto validation =
         validateProductionResult(parts, sheet, options, result);
     assert(validation.valid);
-    assert(validation.unplacedCount == 0);
+    assert(result.unplaced.empty());
 }
 
 void testMinimumSheets() {
