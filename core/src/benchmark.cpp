@@ -32,6 +32,8 @@ BenchmarkCase runCase(
     benchmark.exchangeAttempts = result.stats.exchangeAttempts;
     benchmark.sheetsEliminated = result.stats.sheetsEliminated;
     benchmark.optimizerPasses = result.stats.optimizerPasses;
+    benchmark.nfpTimeouts = result.stats.nfpTimeouts;
+    benchmark.nfpComplexityFallbacks = result.stats.nfpComplexityFallbacks;
     return benchmark;
 }
 
