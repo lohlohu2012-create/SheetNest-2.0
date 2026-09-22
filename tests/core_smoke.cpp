@@ -2104,10 +2104,12 @@ void testAdaptiveRepairNewCollisionPriority() {
     bool sawCollisionResolved = false;
     bool sawGapAfterCollision = false;
     bool sawSuccessfulRevalidationBetweenCollisionAndFirstGap = false;
+    bool sawSuccessfulZeroCollisionRevalidation = false;
     std::size_t lastSequence = 0;
     std::size_t lastLevel = 0;
     std::size_t firstCollisionHistoryIndex = std::numeric_limits<std::size_t>::max();
     std::size_t firstGapHistoryIndex = std::numeric_limits<std::size_t>::max();
+    std::size_t firstZeroCollisionValidationHistoryIndex = std::numeric_limits<std::size_t>::max();
     std::size_t gapHistoryEntryCount = 0;
 
     for (std::size_t historyIndex = 0;
@@ -2125,6 +2127,19 @@ void testAdaptiveRepairNewCollisionPriority() {
         assert(round.collisionCountAfter == validation.collisionCount);
         assert(round.gapViolationCountAfter == validation.gapViolationCount);
         assert(round.validAfter == validation.valid);
+
+        // Independent revalidation gate: this is the only event that can
+        // authorize entry into Gap processing. Record the first successful
+        // zero-Collision validation explicitly so the regression catches any
+        // future history reordering, even if the Collision-level bookkeeping
+        // changes.
+        if (validation.valid && validation.collisionCount == 0) {
+            sawSuccessfulZeroCollisionRevalidation = true;
+            if (firstZeroCollisionValidationHistoryIndex ==
+                std::numeric_limits<std::size_t>::max()) {
+                firstZeroCollisionValidationHistoryIndex = historyIndex;
+            }
+        }
 
         if (round.repairedLevel == 0) {
             sawNewCollisionState = true;
@@ -2167,6 +2182,14 @@ void testAdaptiveRepairNewCollisionPriority() {
             assert(firstGapHistoryIndex > firstCollisionHistoryIndex);
             assert(firstGapHistoryIndex > 0);
 
+            // Separate ordering invariant: NO Gap history entry may occur
+            // before the first successful independent revalidation with
+            // collisionCount == 0.
+            assert(sawSuccessfulZeroCollisionRevalidation);
+            assert(firstZeroCollisionValidationHistoryIndex !=
+                   std::numeric_limits<std::size_t>::max());
+            assert(firstGapHistoryIndex > firstZeroCollisionValidationHistoryIndex);
+
             const auto& validationBeforeGap =
                 report.adaptiveHistory[firstGapHistoryIndex - 1];
             Result validatedState;
@@ -2202,6 +2225,8 @@ void testAdaptiveRepairNewCollisionPriority() {
     assert(firstGapHistoryIndex != std::numeric_limits<std::size_t>::max());
     assert(firstCollisionHistoryIndex < firstGapHistoryIndex);
     assert(gapHistoryEntryCount == 1);
+    assert(sawSuccessfulZeroCollisionRevalidation);
+    assert(firstZeroCollisionValidationHistoryIndex < firstGapHistoryIndex);
     assert(sawSuccessfulRevalidationBetweenCollisionAndFirstGap);
 }
 
