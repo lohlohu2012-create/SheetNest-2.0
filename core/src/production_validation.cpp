@@ -650,11 +650,41 @@ bool repairProductionResult(
                static_cast<std::uint64_t>(timeBudget.count());
     };
 
-    auto failureScore = [](
+    auto issueSeverityScore = [](
+        const ProductionValidationReport& validation
+    ) {
+        std::size_t score = 0;
+        for (const auto& issue : validation.issues) {
+            std::size_t weight = 1;
+            switch (issue.type) {
+            case ProductionValidationIssueType::Collision:
+                weight = 100;
+                break;
+            case ProductionValidationIssueType::Gap:
+                weight = 95;
+                break;
+            case ProductionValidationIssueType::Margin:
+                weight = 70;
+                break;
+            case ProductionValidationIssueType::MissingId:
+                weight = 50;
+                break;
+            case ProductionValidationIssueType::DuplicateId:
+            case ProductionValidationIssueType::UnknownId:
+                weight = 20;
+                break;
+            }
+            score += weight;
+        }
+        return score;
+    };
+
+    auto failureScore = [&]( 
         const ProductionValidationReport& validation,
         const Result& candidate
     ) {
         return std::tuple{
+            issueSeverityScore(validation),
             validation.issues.size(),
             candidate.unplaced.size(),
             candidate.sheets.size(),
@@ -919,8 +949,8 @@ bool repairProductionResult(
                 1,
                 options.adaptiveRepairMaxNeighbors
             );
-        std::size_t previousIssueCount =
-            adaptiveReport.issues.size();
+        std::size_t previousIssueSeverity =
+            issueSeverityScore(adaptiveReport);
 
         for (std::size_t round = 0;
              round < std::max<std::size_t>(
@@ -1003,10 +1033,10 @@ bool repairProductionResult(
                     localCandidate
                 );
 
-            const std::size_t currentIssueCount =
-                adaptiveReport.issues.size();
+            const std::size_t currentIssueSeverity =
+                issueSeverityScore(adaptiveReport);
 
-            if (currentIssueCount < previousIssueCount) {
+            if (currentIssueSeverity < previousIssueSeverity) {
                 adaptiveNeighborBudget =
                     std::max<std::size_t>(
                         1,
@@ -1026,7 +1056,7 @@ bool repairProductionResult(
                     );
             }
 
-            previousIssueCount = currentIssueCount;
+            previousIssueSeverity = currentIssueSeverity;
 
             if (adaptiveReport.valid) {
                 if (!foundValid ||
