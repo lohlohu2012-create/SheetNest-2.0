@@ -144,7 +144,8 @@ private:
     bool hasBenchmarkResult_{false};
     bool repairRequested_{false};
     bool repairAnimationPlaying_{false};
-    int repairAnimationFrame_{0};
+    bool repairAnimationSession_{false};
+    int repairAnimationFrame_{-1};
     sheetnest::ProductionValidationReport validation_{};
 
     QTimer* repairAnimationTimer_{};
