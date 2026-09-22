@@ -1161,50 +1161,69 @@ bool repairProductionResult(
                     seedIds.size()
                 );
 
-            const Result roundBefore =
-                adaptiveCandidate;
-
-            Result localCandidate = adaptiveCandidate;
-            std::vector<std::string> roundExtractedIds;
-
-            if (!adaptiveDestroyAndRepairResult(
-                    instances,
-                    sheet,
-                    repairOptions,
-                    seedIds,
-                    localCandidate,
-                    &roundExtractedIds
-                )) {
-                break;
-            }
-
-            ++actualAdaptiveRounds;
-
-            for (const auto& id : roundExtractedIds) {
-                adaptiveExtractedSet.insert(id);
-            }
-
             const auto conflictLevels =
                 classifyConflictLevels(adaptiveReport, seedIds);
+            if (conflictLevels.empty()) break;
 
-            adaptiveHistory.push_back(
-                makeRoundSnapshot(
-                    round + 1,
-                    seedIds,
-                    roundExtractedIds,
-                    conflictLevels,
-                    roundBefore,
-                    localCandidate
-                )
-            );
+            Result localCandidate = adaptiveCandidate;
+            bool levelProgress = false;
 
-            adaptiveReport =
-                validateProductionResult(
-                    instances,
-                    sheet,
-                    repairOptions,
-                    localCandidate
+            // Repair hierarchy: Collision -> Gap -> dependent fringe.
+            // Validate after every level and only advance when the current
+            // physical class is no longer violated.
+            for (std::size_t levelIndex = 0;
+                 levelIndex < conflictLevels.size() && !timeExpired();
+                 ++levelIndex) {
+                if (repairOptions.control && repairOptions.control->shouldStop()) break;
+                const auto& levelIds = conflictLevels[levelIndex];
+                if (levelIds.empty()) continue;
+
+                std::vector<std::string> signatureIds = levelIds;
+                std::sort(signatureIds.begin(), signatureIds.end());
+                std::string repairLevelSignature =
+                    "round:" + std::to_string(round) +
+                    ":level:" + std::to_string(levelIndex) + "\\n";
+                for (const auto& id : signatureIds) {
+                    repairLevelSignature += id;
+                    repairLevelSignature.push_back('\\n');
+                }
+                if (!attemptedRepairGroups.insert(repairLevelSignature).second) continue;
+
+                const Result levelBefore = localCandidate;
+                Result levelCandidate = localCandidate;
+                std::vector<std::string> levelExtractedIds;
+                if (!adaptiveDestroyAndRepairResult(
+                        instances, sheet, repairOptions, levelIds,
+                        levelCandidate, &levelExtractedIds)) {
+                    continue;
+                }
+
+                ++actualAdaptiveRounds;
+                levelProgress = true;
+                for (const auto& id : levelExtractedIds) adaptiveExtractedSet.insert(id);
+
+                const auto levelReport = validateProductionResult(
+                    instances, sheet, repairOptions, levelCandidate
                 );
+                const auto remainingLevels =
+                    classifyConflictLevels(levelReport, levelIds);
+
+                adaptiveHistory.push_back(makeRoundSnapshot(
+                    round + 1, levelIds, levelExtractedIds,
+                    remainingLevels, levelBefore, levelCandidate
+                ));
+
+                localCandidate = std::move(levelCandidate);
+                adaptiveReport = levelReport;
+
+                // A higher-priority physical class blocks progression to the
+                // next class. The next outer adaptive round will retry it.
+                if (levelIndex == 0 && adaptiveReport.collisionCount > 0) break;
+                if (levelIndex == 1 && adaptiveReport.gapViolationCount > 0) break;
+                if (adaptiveReport.valid) break;
+            }
+
+            if (!levelProgress) break;
 
             const std::size_t currentIssueSeverity =
                 issueSeverityScore(adaptiveReport);
