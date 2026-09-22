@@ -2103,10 +2103,16 @@ void testAdaptiveRepairNewCollisionPriority() {
     bool sawNewCollisionState = false;
     bool sawCollisionResolved = false;
     bool sawGapAfterCollision = false;
+    bool sawSuccessfulRevalidationBetweenCollisionAndFirstGap = false;
     std::size_t lastSequence = 0;
     std::size_t lastLevel = 0;
+    std::size_t firstCollisionHistoryIndex = std::numeric_limits<std::size_t>::max();
+    std::size_t firstGapHistoryIndex = std::numeric_limits<std::size_t>::max();
 
-    for (const auto& round : report.adaptiveHistory) {
+    for (std::size_t historyIndex = 0;
+         historyIndex < report.adaptiveHistory.size();
+         ++historyIndex) {
+        const auto& round = report.adaptiveHistory[historyIndex];
         assert(round.validationSequence > lastSequence);
         lastSequence = round.validationSequence;
 
@@ -2121,6 +2127,9 @@ void testAdaptiveRepairNewCollisionPriority() {
 
         if (round.repairedLevel == 0) {
             sawNewCollisionState = true;
+            if (firstCollisionHistoryIndex == std::numeric_limits<std::size_t>::max()) {
+                firstCollisionHistoryIndex = historyIndex;
+            }
 
             // A Collision-level repair is allowed to expose another
             // Collision. It must be reported by the immediate validator.
@@ -2134,6 +2143,10 @@ void testAdaptiveRepairNewCollisionPriority() {
         }
 
         if (round.repairedLevel == 1) {
+            if (firstGapHistoryIndex == std::numeric_limits<std::size_t>::max()) {
+                firstGapHistoryIndex = historyIndex;
+            }
+
             // HARD INVARIANT: Gap processing is forbidden while ANY Collision
             // remains. This is deliberately fail-fast so a future regression
             // cannot silently reorder the hierarchy.
@@ -2144,6 +2157,32 @@ void testAdaptiveRepairNewCollisionPriority() {
             assert(round.conflictLevels.size() >= 2);
             assert(!round.conflictLevels[1].empty());
             sawGapAfterCollision = true;
+
+            // The first Gap entry must be strictly after the first Collision
+            // entry and immediately preceded by a successful revalidation
+            // proving that Collision is gone.
+            assert(firstCollisionHistoryIndex != std::numeric_limits<std::size_t>::max());
+            assert(firstGapHistoryIndex > firstCollisionHistoryIndex);
+            assert(firstGapHistoryIndex > 0);
+
+            const auto& validationBeforeGap =
+                report.adaptiveHistory[firstGapHistoryIndex - 1];
+            Result validatedState;
+            validatedState.sheets = validationBeforeGap.afterSheets;
+            const auto validationBeforeGapResult =
+                validateProductionResult(
+                    instances,
+                    sheet,
+                    options,
+                    validatedState
+                );
+
+            assert(validationBeforeGapResult.valid);
+            assert(validationBeforeGapResult.collisionCount == 0);
+            assert(validationBeforeGap.validAfter);
+            assert(validationBeforeGap.collisionCountAfter == 0);
+            assert(validationBeforeGap.validationSequence < round.validationSequence);
+            sawSuccessfulRevalidationBetweenCollisionAndFirstGap = true;
         }
 
         // The hierarchy must not jump from Collision directly to a dependent
@@ -2157,6 +2196,10 @@ void testAdaptiveRepairNewCollisionPriority() {
     assert(sawNewCollisionState);
     assert(sawCollisionResolved);
     assert(sawGapAfterCollision);
+    assert(firstCollisionHistoryIndex != std::numeric_limits<std::size_t>::max());
+    assert(firstGapHistoryIndex != std::numeric_limits<std::size_t>::max());
+    assert(firstCollisionHistoryIndex < firstGapHistoryIndex);
+    assert(sawSuccessfulRevalidationBetweenCollisionAndFirstGap);
 }
 
 
@@ -2193,5 +2236,6 @@ int main() {
     
  
 testAdaptiveRepairConflictGraph();
+    testAdaptiveRepairNewCollisionPriority();
     testAutomaticProductionRepair();
 }
