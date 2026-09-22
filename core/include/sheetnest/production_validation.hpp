@@ -50,6 +50,17 @@ ProductionValidationReport validateProductionResult(
     const Result& result
 );
 
+// Attempts to repair an invalid result by running several bounded,
+// higher-quality nesting passes. The current result is replaced only when
+// the repaired candidate passes Production Validator.
+bool repairProductionResult(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    Result& result,
+    ProductionValidationReport* reportOut = nullptr
+);
+
 const char* productionValidationIssueTypeName(
     ProductionValidationIssueType type
 );
