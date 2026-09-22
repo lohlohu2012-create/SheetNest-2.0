@@ -1,5 +1,7 @@
 #include "sheetnest/cutting_path.hpp"
-#include <cmath>\n#include <algorithm>\n#include <limits>
+#include <cmath>
+#include <algorithm>
+#include <limits>
 namespace sheetnest {
 
 static double d(Point a, Point b) {
