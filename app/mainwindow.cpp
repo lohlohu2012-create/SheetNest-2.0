@@ -361,9 +361,21 @@ void MainWindow::buildUi() {
         QAbstractItemView::SelectRows
     );
 
+    validatorTable_ = new QTableWidget(0, 7);
+    validatorTable_->setHorizontalHeaderLabels({
+        "Тип", "Лист", "instanceId", "Связанный ID",
+        "Измерено, мм", "Требуется, мм", "Сообщение"
+    });
+    validatorTable_->horizontalHeader()->setStretchLastSection(true);
+    validatorTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows
+    );
+    validatorTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
     auto* rightTabs = new QTabWidget;
     rightTabs->addTab(view_, "Раскладка");
     rightTabs->addTab(diagnosticsTable_, "Диагностика");
+    rightTabs->addTab(validatorTable_, "Production Validator");
     rightTabs->addTab(benchmarkTable_, "Benchmark");
 
     splitter->addWidget(controlPanel);
@@ -489,7 +501,9 @@ void MainWindow::connectUi() {
             const auto output = watcher_->result();
             result_ = output.result;
             technology_ = output.technology;
+            validation_ = output.validation;
             populateDiagnostics();
+            populateProductionValidation();
 
             view_->showResult(
                 result_,
@@ -508,7 +522,8 @@ void MainWindow::connectUi() {
                         "Размещено: %2\n"
                         "Не размещено: %3\n"
                         "Использование: %4%\n"
-                        "Длина реза: %5 м\n"
+                        "Production Validator: %5\n"
+                        "Длина реза: %6 м\n"
                         "Пробивок: %6\n"
                         "Время лазерной резки: %7 ч %8 мин")
                     .arg(static_cast<int>(result_.sheets.size()))
@@ -516,6 +531,7 @@ void MainWindow::connectUi() {
                         instances_.size() - result_.unplaced.size()))
                     .arg(static_cast<int>(result_.unplaced.size()))
                     .arg(result_.utilization * 100.0, 0, 'f', 1)
+                    .arg(validation_.valid ? "OK" : "ОШИБКА")
                     .arg(output.cutting.contourLengthMm / 1000.0, 0, 'f', 2)
                     .arg(output.cutting.pierces)
                     .arg(hours)
@@ -541,8 +557,20 @@ void MainWindow::connectUi() {
                 );
             }
 
+            appendLog(
+                QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6, unknown ID=%7.")
+                    .arg(validation_.valid ? "OK" : "ОШИБКА")
+                    .arg(static_cast<qulonglong>(validation_.collisionCount))
+                    .arg(static_cast<qulonglong>(validation_.gapViolationCount))
+                    .arg(static_cast<qulonglong>(validation_.marginViolationCount))
+                    .arg(static_cast<qulonglong>(validation_.duplicateIdCount))
+                    .arg(static_cast<qulonglong>(validation_.missingIdCount))
+                    .arg(static_cast<qulonglong>(validation_.unknownIdCount))
+            );
+
             exportButton_->setEnabled(
-                !result_.sheets.empty()
+                !result_.sheets.empty() &&
+                validation_.valid
             );
         } catch (const std::exception& error) {
             QMessageBox::critical(
@@ -814,6 +842,59 @@ void MainWindow::populateDiagnostics() {
     diagnosticsTable_->resizeColumnsToContents();
 }
 
+void MainWindow::populateProductionValidation() {
+    if (!validatorTable_) return;
+
+    validatorTable_->setRowCount(
+        static_cast<int>(validation_.issues.size())
+    );
+
+    for (std::size_t i = 0; i < validation_.issues.size(); ++i) {
+        const auto& issue = validation_.issues[i];
+
+        const QString values[] = {
+            QString::fromUtf8(
+                productionValidationIssueTypeName(issue.type)
+            ),
+            QString::number(
+                static_cast<qulonglong>(issue.sheetIndex + 1)
+            ),
+            QString::fromStdString(issue.instanceId),
+            QString::fromStdString(issue.relatedInstanceId),
+            QString::number(issue.measuredMm, 'f', 3),
+            QString::number(issue.requiredMm, 'f', 3),
+            QString::fromStdString(issue.message)
+        };
+
+        for (int column = 0; column < 7; ++column) {
+            validatorTable_->setItem(
+                static_cast<int>(i),
+                column,
+                new QTableWidgetItem(values[column])
+            );
+        }
+    }
+
+    if (validation_.valid && validatorTable_->rowCount() == 0) {
+        validatorTable_->setRowCount(1);
+
+        const QString values[] = {
+            "OK", "-", "-", "-", "-", "-",
+            "Production Validator: ошибок не обнаружено."
+        };
+
+        for (int column = 0; column < 7; ++column) {
+            validatorTable_->setItem(
+                0,
+                column,
+                new QTableWidgetItem(values[column])
+            );
+        }
+    }
+
+    validatorTable_->resizeColumnsToContents();
+}
+
 void MainWindow::populateBenchmark(
     const BenchmarkResult& benchmarkResult
 ) {
@@ -1017,7 +1098,10 @@ void MainWindow::benchmark() {
     const auto optionsCopy = options_;
 
     hasBenchmarkResult_ = false;
-    benchmarkExportButton_->setEnabled(false);
+    validation_ = {};
+    if (benchmarkExportButton_) {
+        benchmarkExportButton_->setEnabled(false);
+    }
     nestingController_.reset();
     setBusy(true);
     appendLog("Запущен benchmark: базовый поиск vs оптимизированный...");
@@ -1063,6 +1147,12 @@ CalculationOutput MainWindow::performCalculation(
     );
     output.diagnostics = diagnoseNest(
         instances,
+        output.result
+    );
+    output.validation = validateProductionResult(
+        instances,
+        sheet,
+        options,
         output.result
     );
     return output;
@@ -1196,6 +1286,16 @@ void MainWindow::exportBenchmarkResults() {
 
 void MainWindow::exportDxf() {
     if (result_.sheets.empty()) {
+        return;
+    }
+
+    if (!validation_.valid) {
+        QMessageBox::warning(
+            this,
+            "Production Validator",
+            "Раскладка не прошла Production Validator. "
+            "Экспорт DXF заблокирован до устранения ошибок."
+        );
         return;
     }
 
@@ -1354,6 +1454,13 @@ void MainWindow::updateProgress(
         );
         break;
 
+    case sheetnest::NestingProgressPhase::ProductionValidation:
+        appendLog(
+            QString("Production Validator: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
     case sheetnest::NestingProgressPhase::Completed:
         progress_->setValue(100);
         appendLog(
@@ -1385,7 +1492,11 @@ void MainWindow::setBusy(bool busy) {
     importButton_->setEnabled(!busy);
     calculateButton_->setEnabled(!busy && !instances_.empty());
     benchmarkButton_->setEnabled(!busy && !instances_.empty());
-    exportButton_->setEnabled(!busy && !result_.sheets.empty());
+    exportButton_->setEnabled(
+        !busy &&
+        !result_.sheets.empty() &&
+        validation_.valid
+    );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
     stopButton_->setEnabled(busy && nestingController_ != nullptr);
 
