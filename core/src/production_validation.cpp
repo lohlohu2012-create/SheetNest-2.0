@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <tuple>
 
 namespace sheetnest {
 namespace {
@@ -606,14 +607,24 @@ bool repairProductionResult(
     const std::uint32_t baseSeed = options.seed;
 
     Result bestCandidate;
+    bestCandidate.utilization = -1.0;
     ProductionValidationReport bestReport = initial;
     bool foundValid = false;
 
-    // Three bounded independent repairs are deliberate: a single greedy
+    const std::size_t repairAttempts =
+        std::clamp<std::size_t>(
+            std::max<std::size_t>(1, options.autoRepairAttempts),
+            1,
+            8
+        );
+
+    // Several bounded independent repairs are deliberate: a single greedy
     // restart can reproduce the same bad packing, while a small seed set
-    // usually recovers a valid layout without turning the Repair button into
-    // an unbounded optimizer.
-    for (std::size_t attempt = 0; attempt < 3; ++attempt) {
+    // usually recovers a valid layout without turning Repair into an
+    // unbounded optimizer.
+    for (std::size_t attempt = 0;
+         attempt < repairAttempts;
+         ++attempt) {
         if (repairOptions.control &&
             repairOptions.control->shouldStop()) {
             break;
