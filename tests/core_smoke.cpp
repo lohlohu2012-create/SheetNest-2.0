@@ -1221,6 +1221,56 @@ void testParallelNestingController() {
     assert(controller.cancelRequested() == false);
 }
 
+void testParallelNestingCancellation() {
+    std::vector<Instance> instances;
+    for (int i = 0; i < 10; ++i) {
+        instances.push_back({
+            "cancel-" + std::to_string(i),
+            Part{"cancel", rectangle(20, 20), {}}
+        });
+    }
+
+    Sheet sheet{100, 100, 0};
+    Options options;
+    options.rotations = {0, 90, 180, 270};
+    options.gapMm = 1.0;
+
+    ParallelNestingController controller;
+    ParallelNestingOptions parallel;
+    parallel.workers = 2;
+    parallel.iterations = 32;
+    parallel.timeBudgetMs = 10000;
+
+    std::atomic<std::size_t> completed{0};
+
+    parallel.onProgress =
+        [&](const NestingProgress& progress) {
+            if (progress.phase ==
+                NestingProgressPhase::IterationFinished) {
+                const auto count =
+                    completed.fetch_add(
+                        1,
+                        std::memory_order_relaxed
+                    ) + 1;
+
+                if (count == 1) {
+                    controller.requestCancel();
+                }
+            }
+        };
+
+    const auto result = controller.run(
+        instances,
+        sheet,
+        options,
+        parallel
+    );
+
+    (void)result;
+    assert(controller.cancelRequested());
+    assert(completed.load(std::memory_order_relaxed) < parallel.iterations);
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -1304,6 +1354,7 @@ int main() {
     testReadableValidationErrors();
     testMinimumSheets();
     testParallelNestingController();
+    testParallelNestingCancellation();
     testInstanceDiagnostics();
     testNestingBenchmark();
     testInterlockIntoHole();
