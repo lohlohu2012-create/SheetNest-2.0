@@ -329,7 +329,7 @@ Result ParallelNestingController::run(
         if (thread.joinable()) thread.join();
     }
 
-    const collected = collector.snapshot();
+    const auto collected = collector.snapshot();
 
     publish({
         NestingProgressPhase::CandidatesCollected,
