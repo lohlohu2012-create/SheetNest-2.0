@@ -8,6 +8,13 @@
 
 class NestView final : public QGraphicsView {
 public:
+    struct CuttingRouteOperation {
+        std::size_t operation{};
+        std::size_t sheetIndex{};
+        std::string instanceId;
+        bool inner{};
+        std::size_t contourIndex{};
+    };
     explicit NestView(QWidget* parent = nullptr);
 
     void showResult(
@@ -27,6 +34,10 @@ public:
 
     void setCuttingRouteVisible(bool visible);
     void setCuttingAnimationProgress(double progress);
+    void setCuttingAnimationOperation(int operation);
+    const std::vector<CuttingRouteOperation>& cuttingRouteOperations() const {
+        return cuttingRouteOperations_;
+    }
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
@@ -34,6 +45,8 @@ protected:
 private:
     bool cuttingRouteVisible_{false};
     double cuttingAnimationProgress_{1.0};
+    int cuttingAnimationOperation_{-1};
+    std::vector<CuttingRouteOperation> cuttingRouteOperations_;
 
     void addCuttingRoute(
         const sheetnest::Result& result,
