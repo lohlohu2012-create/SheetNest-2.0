@@ -45,6 +45,8 @@ struct AdaptiveRepairChange {
 
 struct AdaptiveRepairRound {
     std::size_t roundIndex{};
+    std::size_t repairedLevel{};
+    std::size_t validationSequence{};
     std::vector<std::vector<Placement>> beforeSheets;
     std::vector<std::vector<Placement>> afterSheets;
     std::vector<AdaptiveRepairChange> changes;
