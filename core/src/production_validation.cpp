@@ -1208,7 +1208,7 @@ bool repairProductionResult(
                     ":level:" + std::to_string(levelIndex) + "\\n";
                 for (const auto& id : signatureIds) {
                     repairLevelSignature += id;
-                    repairLevelSignature.push_back('\\n');
+                    repairLevelSignature.push_back('\n');
                 }
                 if (!attemptedRepairGroups.insert(repairLevelSignature).second) continue;
 
