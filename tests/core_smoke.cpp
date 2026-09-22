@@ -1318,6 +1318,80 @@ void testProductionValidator() {
 }
 
 
+
+void testAdaptiveDestroyAndRepair() {
+    std::vector<Instance> instances{
+        {"adr-1", Part{"adr-a", rectangle(10, 10), {}}},
+        {"adr-2", Part{"adr-b", rectangle(10, 10), {}}},
+        {"adr-3", Part{"adr-c", rectangle(10, 10), {}}},
+        {"adr-4", Part{"adr-d", rectangle(10, 10), {}}}
+    };
+
+    Sheet sheet{100, 100, 2.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 2;
+    options.gapMm = 2.0;
+    options.adaptiveRepairAttempts = 4;
+    options.adaptiveRepairMaxNeighbors = 4;
+    options.adaptiveRepairRounds = 2;
+
+    Result broken;
+    broken.sheets = {{
+        {"adr-1", 2.0, 2.0, 0},
+        {"adr-2", 5.0, 2.0, 0},
+        {"adr-3", 50.0, 50.0, 0},
+        {"adr-4", 70.0, 70.0, 0}
+    }};
+
+    const double originalFixedX = broken.sheets.front()[2].x;
+    const double originalFixedY = broken.sheets.front()[2].y;
+    const double originalFarX = broken.sheets.front()[3].x;
+    const double originalFarY = broken.sheets.front()[3].y;
+
+    const bool changed =
+        adaptiveDestroyAndRepairResult(
+            instances,
+            sheet,
+            options,
+            {"adr-1", "adr-2"},
+            broken
+        );
+
+    assert(changed);
+
+    const auto report =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            broken
+        );
+
+    assert(report.valid);
+    assert(broken.sheets.size() == 1);
+
+    bool sawFixed = false;
+    bool sawFar = false;
+
+    for (const auto& placement : broken.sheets.front()) {
+        if (placement.id == "adr-3") {
+            sawFixed = true;
+            assert(std::abs(placement.x - originalFixedX) < 1e-7);
+            assert(std::abs(placement.y - originalFixedY) < 1e-7);
+        }
+        if (placement.id == "adr-4") {
+            sawFar = true;
+            assert(std::abs(placement.x - originalFarX) < 1e-7);
+            assert(std::abs(placement.y - originalFarY) < 1e-7);
+        }
+    }
+
+    assert(sawFixed);
+    assert(sawFar);
+}
+
+
 void testAutomaticProductionRepair() {
     std::vector<Instance> instances{
         {"repair-1", Part{"repair-a", rectangle(10, 10), {}}},
@@ -1619,6 +1693,7 @@ int main() {
     testReadableValidationErrors();
     testMinimumSheets();
     testProductionValidator();
+    testAdaptiveDestroyAndRepair();
     testAutomaticProductionRepair();
     testCandidateCollectorAndGlobalOptimizer();
     testParallelNestingController();
