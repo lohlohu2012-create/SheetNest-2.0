@@ -1340,6 +1340,20 @@ void MainWindow::updateProgress(
     case sheetnest::NestingProgressPhase::IterationFinished:
         break;
 
+    case sheetnest::NestingProgressPhase::CandidatesCollected:
+        appendLog(
+            QString("Candidate Collector: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::GlobalOptimization:
+        appendLog(
+            QString("Global Optimizer: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
     case sheetnest::NestingProgressPhase::Completed:
         progress_->setValue(100);
         appendLog(
