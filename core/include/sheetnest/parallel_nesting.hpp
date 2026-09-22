@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 namespace sheetnest {
 
@@ -34,9 +36,26 @@ struct NestingProgress {
     std::string message;
 };
 
+class NestingCandidateCollector {
+public:
+    explicit NestingCandidateCollector(
+        std::size_t capacity = 8
+    );
+
+    void add(Result candidate);
+    std::vector<Result> snapshot() const;
+    std::size_t size() const;
+
+private:
+    std::size_t capacity_{8};
+    mutable std::mutex mutex_;
+    std::vector<Result> candidates_;
+};
+
 struct ParallelNestingOptions {
     std::size_t workers{};
     std::size_t iterations{24};
+    std::size_t candidateCapacity{8};
     std::uint64_t timeBudgetMs{120000};
     std::uint32_t seed{0x534E4553u};
     std::function<void(const NestingProgress&)> onProgress;
