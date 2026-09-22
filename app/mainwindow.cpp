@@ -576,6 +576,15 @@ void MainWindow::connectUi() {
                     .arg(static_cast<qulonglong>(validation_.missingIdCount))
             );
 
+            if (validation_.repairAttempts > 0) {
+                appendLog(
+                    QString("Auto Repair: %1; попыток=%2, время=%3 мс.")
+                        .arg(validation_.repaired ? "успешно" : "не удалось")
+                        .arg(static_cast<qulonglong>(validation_.repairAttempts))
+                        .arg(static_cast<qulonglong>(validation_.repairElapsedMs))
+                );
+            }
+
             exportButton_->setEnabled(
                 !result_.sheets.empty() &&
                 validation_.valid
