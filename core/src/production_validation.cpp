@@ -661,6 +661,10 @@ bool repairProductionResult(
     ProductionValidationReport bestFailureReport = initial;
     std::size_t actualAdaptiveRounds = 0;
     std::size_t largestAdaptiveGroup = 0;
+    bool selectedAdaptiveCandidate = false;
+    std::vector<std::string> adaptiveConflictIds;
+    std::unordered_set<std::string> adaptiveExtractedSet;
+    Result adaptiveBefore = result;
 
     auto seedIdsFromReport = [](
         const ProductionValidationReport& report
@@ -711,6 +715,18 @@ bool repairProductionResult(
                 break;
             }
 
+            if (round == 0) {
+                adaptiveConflictIds = seedIds;
+            }
+
+            for (const auto& id : seedIds) {
+                adaptiveExtractedSet.insert(id);
+            }
+
+            if (seedIds.empty()) {
+                break;
+            }
+
             largestAdaptiveGroup =
                 std::max(
                     largestAdaptiveGroup,
@@ -744,8 +760,9 @@ bool repairProductionResult(
                     validScore(localCandidate) <
                         validScore(bestValid)) {
                     bestValid =
-                        std::move(localCandidate);
+                        localCandidate;
                     foundValid = true;
+                    selectedAdaptiveCandidate = true;
                 }
                 break;
             }
@@ -793,8 +810,12 @@ bool repairProductionResult(
         bestFailureReport = validation;
 
         if (validation.valid) {
-            bestValid = std::move(incumbent);
-            foundValid = true;
+            if (!foundValid ||
+                validScore(incumbent) < validScore(bestValid)) {
+                bestValid = std::move(incumbent);
+                foundValid = true;
+                selectedAdaptiveCandidate = false;
+            }
         }
     }
 
@@ -885,6 +906,7 @@ bool repairProductionResult(
             validScore(candidate) < validScore(bestValid)) {
             bestValid = std::move(candidate);
             foundValid = true;
+            selectedAdaptiveCandidate = false;
         }
     }
 
@@ -922,6 +944,103 @@ bool repairProductionResult(
     completedReport.adaptiveRepairGroupSize = largestAdaptiveGroup;
     completedReport.repairElapsedMs = totalElapsedMs;
     completedReport.repaired = true;
+
+    if (selectedAdaptiveCandidate &&
+        actualAdaptiveRounds > 0 &&
+        !adaptiveConflictIds.empty()) {
+        std::unordered_set<std::string> conflictSet(
+            adaptiveConflictIds.begin(),
+            adaptiveConflictIds.end()
+        );
+
+        std::unordered_map<std::string, Placement> afterById;
+        std::unordered_map<std::string, std::size_t> afterSheetById;
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < bestValid.sheets.size();
+             ++sheetIndex) {
+            for (const auto& placement :
+                 bestValid.sheets[sheetIndex]) {
+                afterById[placement.id] = placement;
+                afterSheetById[placement.id] = sheetIndex;
+            }
+        }
+
+        auto samePlacement = [](
+            const Placement& a,
+            const Placement& b
+        ) {
+            constexpr double eps = 1e-6;
+            return a.id == b.id &&
+                   std::abs(a.x - b.x) <= eps &&
+                   std::abs(a.y - b.y) <= eps &&
+                   a.rotation == b.rotation;
+        };
+
+        completedReport.adaptiveConflictIds =
+            adaptiveConflictIds;
+
+        for (const auto& id : adaptiveExtractedSet) {
+            completedReport.adaptiveExtractedIds.push_back(id);
+        }
+
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < adaptiveBefore.sheets.size();
+             ++sheetIndex) {
+            for (const auto& before :
+                 adaptiveBefore.sheets[sheetIndex]) {
+                const auto afterIt = afterById.find(before.id);
+                if (afterIt == afterById.end()) {
+                    continue;
+                }
+
+                const auto afterSheetIt =
+                    afterSheetById.find(before.id);
+                if (afterSheetIt == afterSheetById.end()) {
+                    continue;
+                }
+
+                const bool moved =
+                    !samePlacement(before, afterIt->second) ||
+                    afterSheetIt->second != sheetIndex;
+
+                AdaptiveRepairChange change;
+                change.sheetIndex = sheetIndex;
+                change.before = before;
+                change.after = afterIt->second;
+                change.conflictGroup =
+                    conflictSet.contains(before.id);
+                change.extracted =
+                    adaptiveExtractedSet.contains(before.id);
+                change.moved = moved;
+                change.stationary = !moved;
+
+                completedReport.adaptiveChanges.push_back(change);
+
+                if (moved) {
+                    completedReport.adaptiveMovedIds.push_back(
+                        before.id
+                    );
+                } else {
+                    completedReport.adaptiveStationaryIds.push_back(
+                        before.id
+                    );
+                }
+            }
+        }
+
+        std::sort(
+            completedReport.adaptiveExtractedIds.begin(),
+            completedReport.adaptiveExtractedIds.end()
+        );
+        std::sort(
+            completedReport.adaptiveMovedIds.begin(),
+            completedReport.adaptiveMovedIds.end()
+        );
+        std::sort(
+            completedReport.adaptiveStationaryIds.begin(),
+            completedReport.adaptiveStationaryIds.end()
+        );
+    }
 
     if (reportOut) {
         *reportOut = completedReport;
