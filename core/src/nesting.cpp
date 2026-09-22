@@ -1246,9 +1246,18 @@ bool refillExistingSheets(
                     continue;
                 }
 
+                std::size_t bestTargetIndex = sourceIndex;
+                bool foundTarget = false;
+                double bestEnvelopeArea =
+                    std::numeric_limits<double>::infinity();
+                double bestMaxY =
+                    std::numeric_limits<double>::infinity();
+                SheetState bestTargetTrial;
+
                 for (std::size_t targetIndex = 0;
                      targetIndex < sourceIndex;
                      ++targetIndex) {
+                    if (shouldStop(options)) break;
 
                     SheetState targetTrial =
                         states[targetIndex];
@@ -1264,9 +1273,49 @@ bool refillExistingSheets(
                         continue;
                     }
 
+                    Bounds envelope =
+                        targetTrial.shapes.empty()
+                            ? Bounds{}
+                            : bounds(
+                                targetTrial.shapes.front().outer
+                            );
+
+                    for (std::size_t i = 1;
+                         i < targetTrial.shapes.size();
+                         ++i) {
+                        const auto& b =
+                            targetTrial.shapes[i].outerBounds;
+                        envelope.minX =
+                            std::min(envelope.minX, b.minX);
+                        envelope.minY =
+                            std::min(envelope.minY, b.minY);
+                        envelope.maxX =
+                            std::max(envelope.maxX, b.maxX);
+                        envelope.maxY =
+                            std::max(envelope.maxY, b.maxY);
+                    }
+
+                    const double envelopeArea =
+                        envelope.width() * envelope.height();
+
+                    if (!foundTarget ||
+                        envelopeArea + kEps < bestEnvelopeArea ||
+                        (std::abs(
+                             envelopeArea - bestEnvelopeArea
+                         ) <= kEps &&
+                         envelope.maxY + kEps < bestMaxY)) {
+                        bestTargetIndex = targetIndex;
+                        bestEnvelopeArea = envelopeArea;
+                        bestMaxY = envelope.maxY;
+                        bestTargetTrial = std::move(targetTrial);
+                        foundTarget = true;
+                    }
+                }
+
+                if (foundTarget) {
                     auto committed = states;
-                    committed[targetIndex] =
-                        std::move(targetTrial);
+                    committed[bestTargetIndex] =
+                        std::move(bestTargetTrial);
                     erasePlacement(
                         committed[sourceIndex],
                         sourcePos,
@@ -1276,7 +1325,6 @@ bool refillExistingSheets(
 
                     changed = true;
                     passChanged = true;
-                    break;
                 }
             }
         }
