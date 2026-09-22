@@ -25,7 +25,7 @@ public:
     );
 
     void clearResult();
-    void setCuttingRoute(const sheetnest::CuttingPath& route);
+    void setCuttingRoute(const sheetnest::CuttingPath& route, double sheetHeight);
     void setCuttingRouteVisible(bool visible);
     void setCuttingAnimationProgress(double progress);
     void setCuttingAnimationOperation(int operation);
@@ -44,6 +44,7 @@ private:
     int cuttingAnimationOperation_{-1};
     double cuttingAnimationOperationProgress_{0.0};
     sheetnest::CuttingPath cuttingRoute_;
+    double sheetHeight_{0.0};
 
     void addCuttingRoute();
     QGraphicsPathItem* addPartItem(
