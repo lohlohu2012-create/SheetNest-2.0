@@ -687,7 +687,12 @@ bool repairProductionResult(
     Result adaptiveBefore = result;
 
     auto seedIdsFromReport = [](
-        const ProductionValidationReport& report
+        const ProductionValidationReport& report,
+        const Result& candidate,
+        const std::vector<Instance>& allInstances,
+        double gapMm,
+        std::size_t maxNeighbors,
+        std::size_t roundIndex
     ) {
         std::vector<std::string> ids;
         std::unordered_set<std::string> seen;
@@ -701,6 +706,128 @@ bool repairProductionResult(
             if (!issue.relatedInstanceId.empty() &&
                 seen.insert(issue.relatedInstanceId).second) {
                 ids.push_back(issue.relatedInstanceId);
+            }
+        }
+
+        if (ids.empty() || maxNeighbors == 0) {
+            return ids;
+        }
+
+        std::unordered_map<std::string, const Instance*> instanceById;
+        instanceById.reserve(allInstances.size());
+        for (const auto& instance : allInstances) {
+            instanceById.emplace(instance.id, &instance);
+        }
+
+        struct CandidateNeighbor {
+            double distance{};
+            std::string id;
+        };
+
+        std::vector<CandidateNeighbor> neighbors;
+        const double roundScale =
+            0.35 + 0.35 * static_cast<double>(
+                std::min<std::size_t>(roundIndex, 3)
+            );
+
+        for (const auto& seedId : ids) {
+            const auto seedInstanceIt = instanceById.find(seedId);
+            if (seedInstanceIt == instanceById.end()) continue;
+
+            for (std::size_t sheetIndex = 0;
+                 sheetIndex < candidate.sheets.size();
+                 ++sheetIndex) {
+                const auto& placements = candidate.sheets[sheetIndex];
+
+                const auto seedIt = std::find_if(
+                    placements.begin(),
+                    placements.end(),
+                    [&](const Placement& placement) {
+                        return placement.id == seedId;
+                    }
+                );
+                if (seedIt == placements.end()) continue;
+
+                const auto seedShape =
+                    transform(*seedInstanceIt->second, *seedIt);
+                const auto seedBounds =
+                    bounds(seedShape.outer);
+
+                const double seedSpan =
+                    std::max(
+                        seedBounds.width(),
+                        seedBounds.height()
+                    );
+                const double searchRadius =
+                    std::max(
+                        gapMm * 2.0,
+                        seedSpan * roundScale
+                    );
+
+                const double centerX =
+                    (seedBounds.minX + seedBounds.maxX) * 0.5;
+                const double centerY =
+                    (seedBounds.minY + seedBounds.maxY) * 0.5;
+
+                for (const auto& placement : placements) {
+                    if (placement.id == seedId ||
+                        seen.contains(placement.id)) {
+                        continue;
+                    }
+
+                    const auto instanceIt =
+                        instanceById.find(placement.id);
+                    if (instanceIt == instanceById.end()) continue;
+
+                    const auto shape =
+                        transform(*instanceIt->second, placement);
+                    const auto placementBounds =
+                        bounds(shape.outer);
+
+                    const double dx =
+                        ((placementBounds.minX +
+                          placementBounds.maxX) * 0.5) - centerX;
+                    const double dy =
+                        ((placementBounds.minY +
+                          placementBounds.maxY) * 0.5) - centerY;
+                    const double distance =
+                        std::hypot(dx, dy);
+
+                    const double reach =
+                        searchRadius +
+                        0.5 * std::max(
+                            placementBounds.width(),
+                            placementBounds.height()
+                        );
+
+                    if (distance <= reach + kEps) {
+                        neighbors.push_back({
+                            distance,
+                            placement.id
+                        });
+                    }
+                }
+            }
+        }
+
+        std::sort(
+            neighbors.begin(),
+            neighbors.end(),
+            [](const CandidateNeighbor& a,
+               const CandidateNeighbor& b) {
+                if (std::abs(a.distance - b.distance) > kEps) {
+                    return a.distance < b.distance;
+                }
+                return a.id < b.id;
+            }
+        );
+
+        std::size_t added = 0;
+        for (const auto& neighbor : neighbors) {
+            if (added >= maxNeighbors) break;
+            if (seen.insert(neighbor.id).second) {
+                ids.push_back(neighbor.id);
+                ++added;
             }
         }
 
@@ -824,7 +951,14 @@ bool repairProductionResult(
             }
 
             const auto seedIds =
-                seedIdsFromReport(adaptiveReport);
+                seedIdsFromReport(
+                    adaptiveReport,
+                    adaptiveCandidate,
+                    instances,
+                    repairOptions.gapMm,
+                    repairOptions.adaptiveRepairMaxNeighbors,
+                    round
+                );
 
             if (seedIds.empty()) {
                 break;
@@ -1098,92 +1232,3 @@ bool repairProductionResult(
                  bestValid.sheets[sheetIndex]) {
                 afterById[placement.id] = placement;
                 afterSheetById[placement.id] = sheetIndex;
-            }
-        }
-
-        auto samePlacement = [](
-            const Placement& a,
-            const Placement& b
-        ) {
-            constexpr double eps = 1e-6;
-            return a.id == b.id &&
-                   std::abs(a.x - b.x) <= eps &&
-                   std::abs(a.y - b.y) <= eps &&
-                   a.rotation == b.rotation;
-        };
-
-        completedReport.adaptiveConflictIds =
-            adaptiveConflictIds;
-
-        for (const auto& id : adaptiveExtractedSet) {
-            completedReport.adaptiveExtractedIds.push_back(id);
-        }
-
-        for (std::size_t sheetIndex = 0;
-             sheetIndex < adaptiveBefore.sheets.size();
-             ++sheetIndex) {
-            for (const auto& before :
-                 adaptiveBefore.sheets[sheetIndex]) {
-                const auto afterIt = afterById.find(before.id);
-                if (afterIt == afterById.end()) {
-                    continue;
-                }
-
-                const auto afterSheetIt =
-                    afterSheetById.find(before.id);
-                if (afterSheetIt == afterSheetById.end()) {
-                    continue;
-                }
-
-                const bool moved =
-                    !samePlacement(before, afterIt->second) ||
-                    afterSheetIt->second != sheetIndex;
-
-                AdaptiveRepairChange change;
-                change.sheetIndex = sheetIndex;
-                change.afterSheetIndex = afterSheetIt->second;
-                change.before = before;
-                change.after = afterIt->second;
-                change.conflictGroup =
-                    conflictSet.contains(before.id);
-                change.extracted =
-                    adaptiveExtractedSet.contains(before.id);
-                change.moved = moved;
-                change.stationary = !moved;
-
-                completedReport.adaptiveChanges.push_back(change);
-
-                if (moved) {
-                    completedReport.adaptiveMovedIds.push_back(
-                        before.id
-                    );
-                } else {
-                    completedReport.adaptiveStationaryIds.push_back(
-                        before.id
-                    );
-                }
-            }
-        }
-
-        std::sort(
-            completedReport.adaptiveExtractedIds.begin(),
-            completedReport.adaptiveExtractedIds.end()
-        );
-        std::sort(
-            completedReport.adaptiveMovedIds.begin(),
-            completedReport.adaptiveMovedIds.end()
-        );
-        std::sort(
-            completedReport.adaptiveStationaryIds.begin(),
-            completedReport.adaptiveStationaryIds.end()
-        );
-    }
-
-    if (reportOut) {
-        *reportOut = completedReport;
-    }
-
-    return true;
-}
-
-} // namespace sheetnest
