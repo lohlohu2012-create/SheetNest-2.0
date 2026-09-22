@@ -386,15 +386,15 @@ std::vector<Candidate> candidatesFor(
                     ? 72
                     : (part.size() > 128 ? 96 : 128);
 
-            nfp::FeasibilityRegion obstacleRegion = region;
-            obstacleRegion.sheetBoundary.clear();
-
+            // Include both obstacle/NFP boundaries and the four sheet
+            // placement boundaries. The latter is essential when the only
+            // valid location lies along an edge of the usable sheet region.
             for (const auto& point :
                  nfp::pointsOnFeasibilityBoundary(
-                     obstacleRegion,
+                     region,
                      boundarySpacing,
                      boundaryBudget,
-                     false
+                     true
                  )) {
                 result.push_back({
                     point.x,
@@ -998,7 +998,3 @@ Result runAttempt(
         sheet,
         options,
         result
-    );
-
-    return result;
-}
