@@ -166,6 +166,21 @@ MainWindow::MainWindow(QWidget* parent)
     resize(1500, 900);
     statusBar()->showMessage("Готово");
     updateTechnologyPreview();
+
+    const technologyReport = validateBodor3kWTechnology();
+    if (!technologyReport.valid) {
+        appendLog(
+            QString("TECHNOLOGY DB: ОШИБКА • строк=%1 • invalid=%2 • duplicates=%3")
+                .arg(static_cast<qulonglong>(technologyReport.rows))
+                .arg(static_cast<qulonglong>(technologyReport.invalidRows))
+                .arg(static_cast<qulonglong>(technologyReport.duplicateRows))
+        );
+    } else {
+        appendLog(
+            QString("TECHNOLOGY DB: OK • Bodor 3 кВт • строк=%1")
+                .arg(static_cast<qulonglong>(technologyReport.rows))
+        );
+    }
 }
 
 MainWindow::~MainWindow() = default;
