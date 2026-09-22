@@ -1,6 +1,7 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_export.hpp"
-#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"\n#include "sheetnest/cutting.hpp"
+#include "sheetnest/benchmark.hpp"\n#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/dxf_export.hpp"\n#include "sheetnest/cutting.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/geometry.hpp"
@@ -2558,6 +2559,87 @@ void testNegativeGapBeforeZeroCollisionRevalidation() {
     std::abort();
 }
 
+void testEndToEndDxfToCam() {
+    const std::string dxf =
+        "0\nSECTION\n2\nENTITIES\n"
+        "0\nLWPOLYLINE\n8\nPART\n90\n4\n70\n1\n"
+        "10\n0\n20\n0\n10\n80\n20\n10\n50\n20\n10\n50\n0\n"
+        "0\nLWPOLYLINE\n8\nPART\n90\n4\n70\n1\n"
+        "10\n20\n10\n20\n30\n10\n30\n30\n10\n30\n20\n"
+        "0\nENDSEC\n0\nEOF\n";
+
+    const auto document = importDxf(dxf);
+    assert(document.valid());
+    const auto instances = instancesFromDxf(document, 2);
+    assert(instances.size() == 2);
+
+    Sheet sheet{120.0, 80.0, 2.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 8;
+    options.gapMm = 2.0;
+    options.enableOptimizer = true;
+    options.enableAutoRepair = true;
+
+    const auto result = nest(instances, sheet, options);
+    const auto validation =
+        validateProductionResult(instances, sheet, options, result);
+    assert(validation.valid);
+    assert(result.unplaced.empty());
+
+    const auto technology =
+        bodor3kWParameters(Material::CarbonSteel, 3.0);
+    PathOptions pathOptions;
+    pathOptions.rapidSpeedMMin = 120.0;
+    pathOptions.pierceSeconds = 0.25;
+    pathOptions.innerContoursFirst = true;
+
+    std::vector<CuttingContour> contours;
+    for (std::size_t sheetIndex = 0; sheetIndex < result.sheets.size(); ++sheetIndex) {
+        for (const auto& placement : result.sheets[sheetIndex]) {
+            auto it = std::find_if(
+                instances.begin(), instances.end(),
+                [&](const Instance& instance) { return instance.id == placement.id; }
+            );
+            assert(it != instances.end());
+
+            contours.push_back({
+                sheetIndex,
+                placement.id,
+                0,
+                false,
+                translate(
+                    rotate(it->part.outer, placement.rotation),
+                    placement.x,
+                    placement.y
+                )
+            });
+        }
+    }
+
+    const auto route =
+        planCuttingRoute(contours, technology, pathOptions);
+    assert(route.operations.size() == instances.size());
+    assert(route.totalSeconds > 0.0);
+    assert(route.totalCutLengthMm > 0.0);
+
+    for (std::size_t i = 1; i < route.operations.size(); ++i) {
+        assert(route.operations[i - 1].operation <
+               route.operations[i].operation);
+    }
+
+    const auto estimate =
+        estimateCuttingPath(route, technology, pathOptions);
+    assert(estimate.totalMinutes > 0.0);
+
+    const std::string exported =
+        exportNestDxf(result, instances, sheet);
+    assert(!exported.empty());
+    const auto roundTrip = importDxf(exported);
+    assert(roundTrip.valid());
+    assert(!roundTrip.contours.empty());
+}
+ 
 void testParallelCancellationPath() {
     std::vector<Instance> instances;
     for (int i = 0; i < 24; ++i) {
