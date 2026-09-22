@@ -43,6 +43,15 @@ struct AdaptiveRepairChange {
     bool stationary{};
 };
 
+struct AdaptiveRepairRound {
+    std::size_t roundIndex{};
+    std::vector<AdaptiveRepairChange> changes;
+    std::vector<std::string> conflictIds;
+    std::vector<std::string> extractedIds;
+    std::vector<std::string> movedIds;
+    std::vector<std::string> stationaryIds;
+};
+
 struct ProductionValidationReport {
     bool valid{true};
     std::size_t checkedPlacements{};
@@ -58,6 +67,7 @@ struct ProductionValidationReport {
     std::uint64_t repairElapsedMs{};
     bool repaired{};
     std::vector<AdaptiveRepairChange> adaptiveChanges;
+    std::vector<AdaptiveRepairRound> adaptiveHistory;
     std::vector<std::string> adaptiveConflictIds;
     std::vector<std::string> adaptiveExtractedIds;
     std::vector<std::string> adaptiveMovedIds;
