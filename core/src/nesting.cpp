@@ -487,16 +487,42 @@ std::vector<Candidate> candidatesFor(
             // objective-best points remain available even when the budget is
             // tight, while interior samples preserve concave/interlocking
             // opportunities.
-            const double boundarySpacing = std::clamp(
-                std::max(4.0, characteristicSize * 0.08),
-                4.0,
-                20.0
-            );
+            const bool smallPart =
+                options.enableSmallPartOptimization &&
+                materialArea(Part{"", part, {}}) <=
+                    std::max(
+                        1.0,
+                        sheetSize.width * sheetSize.height *
+                        std::clamp(
+                            options.smallPartAreaRatio,
+                            0.001,
+                            0.25
+                        )
+                    );
 
-            const std::size_t boundaryBudget =
-                part.size() > 256
+            const double boundarySpacing = smallPart
+                ? std::clamp(
+                    options.smallPartBoundarySpacingMm,
+                    0.25,
+                    10.0
+                )
+                : std::clamp(
+                    std::max(4.0, characteristicSize * 0.08),
+                    4.0,
+                    20.0
+                );
+
+            const std::size_t boundaryBudget = smallPart
+                ? std::max<std::size_t>(
+                    128,
+                    std::min<std::size_t>(
+                        options.smallPartCandidateBudget,
+                        2048
+                    )
+                )
+                : (part.size() > 256
                     ? 72
-                    : (part.size() > 128 ? 96 : 128);
+                    : (part.size() > 128 ? 96 : 128));
 
             for (const auto& point :
                  nfp::pointsOnFeasibilityBoundary(
@@ -532,7 +558,30 @@ std::vector<Candidate> candidatesFor(
         result.end()
     );
 
-    if (result.size() > 512) result.resize(512);
+    const std::size_t candidateLimit =
+        (options.enableSmallPartOptimization &&
+         materialArea(Part{"", part, {}}) <=
+             std::max(
+                 1.0,
+                 sheetSize.width * sheetSize.height *
+                 std::clamp(
+                     options.smallPartAreaRatio,
+                     0.001,
+                     0.25
+                 )
+             ))
+            ? std::max<std::size_t>(
+                512,
+                std::min<std::size_t>(
+                    options.smallPartCandidateBudget,
+                    2048
+                )
+            )
+            : 512;
+
+    if (result.size() > candidateLimit) {
+        result.resize(candidateLimit);
+    }
     (void)sheetSize;
     return result;
 }
@@ -1981,6 +2030,87 @@ Result runAttempt(
             if (placed) states.push_back(std::move(state));
         }
         if (!placed) result.unplaced.push_back(instance.id);
+    }
+
+    // Targeted residual-space refill. Only small parts are retried,
+    // and only against already-created sheets. No new sheet is opened by
+    // this pass, so the pass can only improve packing density.
+    if (options.enableSmallPartOptimization &&
+        !result.unplaced.empty() &&
+        !states.empty() &&
+        options.smallPartRefillPasses > 0) {
+
+        const double sheetArea =
+            std::max(1.0, sheet.width * sheet.height);
+        const double maxSmallArea =
+            sheetArea *
+            std::clamp(
+                options.smallPartAreaRatio,
+                0.001,
+                0.25
+            );
+
+        std::vector<std::string> remaining = result.unplaced;
+
+        for (std::size_t pass = 0;
+             pass < options.smallPartRefillPasses &&
+             !remaining.empty();
+             ++pass) {
+            if (shouldStop(options)) break;
+
+            std::stable_sort(
+                remaining.begin(),
+                remaining.end(),
+                [&](const std::string& a, const std::string& b) {
+                    const auto* ia = findInstance(instances, a);
+                    const auto* ib = findInstance(instances, b);
+                    const double aa =
+                        ia ? materialArea(ia->part) : 0.0;
+                    const double ab =
+                        ib ? materialArea(ib->part) : 0.0;
+                    if (std::abs(aa - ab) > kEps) {
+                        return aa < ab;
+                    }
+                    return a < b;
+                }
+            );
+
+            std::vector<std::string> nextRemaining;
+            nextRemaining.reserve(remaining.size());
+
+            for (const auto& id : remaining) {
+                const auto* instance =
+                    findInstance(instances, id);
+
+                if (!instance ||
+                    materialArea(instance->part) > maxSmallArea) {
+                    nextRemaining.push_back(id);
+                    continue;
+                }
+
+                if (shouldStop(options)) {
+                    nextRemaining.push_back(id);
+                    continue;
+                }
+
+                if (tryPlaceOnExistingSheets(
+                        *instance,
+                        states,
+                        states.size(),
+                        sheet,
+                        options,
+                        &stats
+                    )) {
+                    ++stats.refillMoves;
+                } else {
+                    nextRemaining.push_back(id);
+                }
+            }
+
+            remaining = std::move(nextRemaining);
+        }
+
+        result.unplaced = std::move(remaining);
     }
 
     result.sheets.reserve(states.size());
