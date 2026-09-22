@@ -604,6 +604,55 @@ void MainWindow::connectUi() {
         }
     );
 
+    connect(
+        repairPlayButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            toggleAdaptiveRepairAnimation();
+        }
+    );
+    connect(
+        repairPauseButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            pauseAdaptiveRepairAnimation();
+        }
+    );
+    connect(
+        repairPrevButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            stepAdaptiveRepairAnimation(-1);
+        }
+    );
+    connect(
+        repairNextButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            stepAdaptiveRepairAnimation(1);
+        }
+    );
+    connect(
+        repairSpeedCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            updateAdaptiveRepairAnimationUi();
+        }
+    );
+    connect(
+        repairAnimationTimer_,
+        &QTimer::timeout,
+        this,
+        [this] {
+            advanceAdaptiveRepairAnimation();
+        }
+    );
+
     connect(exportButton_, &QPushButton::clicked, this, [this] {
         exportDxf();
     });
@@ -643,6 +692,7 @@ void MainWindow::connectUi() {
             result_ = output.result;
             technology_ = output.technology;
             validation_ = output.validation;
+            resetAdaptiveRepairAnimation();
 
             {
                 const blocker =
@@ -676,8 +726,15 @@ void MainWindow::connectUi() {
                 if (repairStationaryLayer_) {
                     repairStationaryLayer_->setEnabled(hasHistory);
                 }
+                if (repairPlayButton_) {
+                    repairPlayButton_->setEnabled(hasHistory);
+                }
+                if (repairSpeedCombo_) {
+                    repairSpeedCombo_->setEnabled(hasHistory);
+                }
             }
 
+            updateAdaptiveRepairAnimationUi();
             populateDiagnostics();
             populateProductionValidation();
 
