@@ -647,10 +647,7 @@ std::vector<Polygon> computeUnionNfp(
                 pairwise.push_back(nfp);
                 if (control && pairwise.size() >= control->maxPairwisePolygons) {
                     control->complexityFallback();
-                    return {minkowskiConvexSum(
-                        conservativeConvexFallback(fixed).front(),
-                        reflected(conservativeConvexFallback(moving).front())
-                    )};
+                    break;
                 }
             }
         }
@@ -797,6 +794,8 @@ std::vector<Polygon> noFitPolygons(
     double clearanceMm,
     const NfpRunControl* control
 ) {
+    if (control && control->stop()) return {};
+
     const int normalizedRotation =
         ((rotation % 360) + 360) % 360;
 
@@ -804,8 +803,7 @@ std::vector<Polygon> noFitPolygons(
         fixed,
         moving,
         normalizedRotation,
-        clearanceMm,
-        control
+        clearanceMm
     );
 
     CacheStore& store = cacheStore();
