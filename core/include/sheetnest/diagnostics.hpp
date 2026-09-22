@@ -43,7 +43,8 @@ std::vector<InstanceDiagnostic> diagnoseNest(
 void enrichDiagnostics(
     std::vector<InstanceDiagnostic>& diagnostics,
     const CuttingPath& route,
-    const ProductionValidationReport& validation
+    const ProductionValidationReport& validation,
+    const Result* nestingResult = nullptr
 );
 
 } // namespace sheetnest
