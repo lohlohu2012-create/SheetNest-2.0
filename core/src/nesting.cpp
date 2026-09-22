@@ -210,6 +210,8 @@ bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
     return false;
 }
 
+double boundsDistance(const Bounds& a, const Bounds& b);
+
 double narrowSpaceScore(
     const PlacedShape& shape,
     const SheetState& state,
