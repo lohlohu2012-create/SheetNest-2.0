@@ -278,6 +278,15 @@ std::vector<Candidate> candidatesFor(
 ) {
     const Polygon rotatedPart = rotate(part, rotation);
     const auto pb = bounds(rotatedPart);
+
+    // Rotate moving holes once per part/rotation instead of once per placed
+    // detail. This removes a repeated geometry transform from the NFP hot path.
+    std::vector<Polygon> rotatedHoles;
+    rotatedHoles.reserve(holes.size());
+    for (const auto& hole : holes) {
+        rotatedHoles.push_back(rotate(hole, rotation));
+    }
+
     const double minX = margin - pb.minX;
     const double minY = margin - pb.minY;
 
@@ -287,8 +296,9 @@ std::vector<Candidate> candidatesFor(
 
     const double g = std::max(0.0, gap);
 
-    auto addRingCandidates = [&](const Polygon& ring) {
-        const auto b = bounds(ring);
+    auto addRingCandidates = [&](const Polygon& ring,
+                                  const Bounds* knownBounds = nullptr) {
+        const auto b = knownBounds ? *knownBounds : bounds(ring);
 
         const double xs[] = {
             b.minX - pb.maxX - g,
@@ -434,11 +444,11 @@ std::vector<Candidate> candidatesFor(
 
     for (const auto& placed : sheet.shapes) {
         if (control && control->shouldStop()) break;
-        addRingCandidates(placed.outer);
+        addRingCandidates(placed.outer, &placed.outerBounds);
 
-        for (const auto& hole : holes) {
+        for (const auto& rotatedHole : rotatedHoles) {
             addMovingHoleCandidates(
-                rotate(hole, rotation),
+                rotatedHole,
                 placed.outer
             );
         }
