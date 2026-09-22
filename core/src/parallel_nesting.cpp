@@ -500,14 +500,18 @@ Result ParallelNestingController::run(
             best.utilization,
             0,
             0,
-            "Production Validator: FAIL → Auto Repair (" +
+            "Production Validator: FAIL → Adaptive Auto Repair; " +
                 std::to_string(
                     std::max<std::size_t>(
                         1,
                         nestingOptions.autoRepairAttempts
                     )
                 ) +
-                " попыток)"
+                " попыток, бюджет " +
+                std::to_string(
+                    nestingOptions.autoRepairTimeBudgetMs
+                ) +
+                " мс; выбирается лучший валидный кандидат"
         });
 
         Result repaired = best;
