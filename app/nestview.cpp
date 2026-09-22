@@ -227,6 +227,7 @@ void NestView::addCuttingRoute(
     const QColor inactiveColor("#475569");
     const QColor headColor("#ffffff");
     const double pi = std::acos(-1.0);
+    constexpr double kVisualCutSpeedMMin = 20.0;
 
     struct RouteEvent {
         enum class Kind { Rapid, Pierce, Cut };
@@ -466,7 +467,8 @@ void NestView::addCuttingRoute(
             );
             line->setZValue(40.0);
 
-            if (complete || local > 0.0) {
+            if (targetTime >= elapsed - 1e-9 &&
+                targetTime <= nextElapsed + 1e-9) {
                 const Point pos{
                     event.from.x +
                         (event.to.x - event.from.x) * local,
@@ -553,7 +555,8 @@ void NestView::addCuttingRoute(
             );
             path->setZValue(41.0);
 
-            if (complete || local > 0.0) {
+            if (targetTime >= elapsed - 1e-9 &&
+                targetTime <= nextElapsed + 1e-9) {
                 currentHead = drawTo;
                 currentParent = event.parent;
                 currentOperation = event.operation;
