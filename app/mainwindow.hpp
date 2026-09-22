@@ -5,6 +5,7 @@
 
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting.hpp"
+#include "sheetnest/cutting_path.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_model.hpp"
@@ -29,6 +30,7 @@ class NestView;
 struct CalculationOutput {
     sheetnest::Result result;
     sheetnest::CuttingEstimate cutting;
+    sheetnest::CuttingPath cuttingRoute;
     sheetnest::CuttingParameters technology;
     std::vector<sheetnest::InstanceDiagnostic> diagnostics;
     sheetnest::ProductionValidationReport validation;
@@ -123,7 +125,8 @@ private:
     QCheckBox* rotation0_{};
     QCheckBox* rotation90_{};
     QCheckBox* rotation180_{};
-    QCheckBox* rotation270_{};\n    QCheckBox* cuttingRouteCheck_{};
+    QCheckBox* rotation270_{};
+    QCheckBox* cuttingRouteCheck_{};
     QPushButton* laserPlayButton_{};
     QPushButton* laserPauseButton_{};
     QPushButton* laserResetButton_{};
