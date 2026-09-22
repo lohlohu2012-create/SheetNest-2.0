@@ -598,6 +598,25 @@ std::vector<Polygon> conservativeConvexFallback(const Polygon& polygon) {
     }};
 }
 
+std::vector<Polygon> conservativeNfpFallback(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation
+) {
+    const auto fixedFallback = conservativeConvexFallback(fixed);
+    const auto movingFallback = conservativeConvexFallback(
+        rotate(moving, rotation)
+    );
+    if (fixedFallback.empty() || movingFallback.empty()) return {};
+
+    const auto fallback = minkowskiConvexSum(
+        fixedFallback.front(),
+        reflected(movingFallback.front())
+    );
+    if (fallback.size() < 3) return {};
+    return {fallback};
+}
+
 std::vector<Polygon> decomposeWithFallback(
     const Polygon& polygon,
     const NfpRunControl* control
@@ -627,7 +646,9 @@ std::vector<Polygon> computeUnionNfp(
     const Polygon& moving,
     const NfpRunControl* control
 ) {
-    if (control && control->stop()) return {};
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, 0);
+    }
     const auto fixedPieces = decomposeWithFallback(fixed, control);
     const auto movingPieces = decomposeWithFallback(moving, control);
 
@@ -635,13 +656,17 @@ std::vector<Polygon> computeUnionNfp(
     pairwise.reserve(fixedPieces.size() * movingPieces.size());
 
     for (const auto& fixedPiece : fixedPieces) {
-        if (control && control->stop()) return {};
+        if (control && control->stop()) {
+            return conservativeNfpFallback(fixed, moving, 0);
+        }
         if (control && pairwise.size() >= control->maxPairwisePolygons) {
             control->complexityFallback();
             break;
         }
         for (const auto& movingPiece : movingPieces) {
-            if (control && control->stop()) return {};
+            if (control && control->stop()) {
+                return conservativeNfpFallback(fixed, moving, 0);
+            }
             const auto reflectedPiece = reflected(movingPiece);
             const auto nfp = minkowskiConvexSum(
                 fixedPiece,
@@ -657,23 +682,16 @@ std::vector<Polygon> computeUnionNfp(
         }
     }
 
-    if (control && control->stop()) return {};
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, 0);
+    }
     auto unionResult = unionPolygons(pairwise, control);
     if (!unionResult.empty()) return unionResult;
 
     // Last-resort conservative NFP. This keeps the placement pipeline alive
     // for numerically pathological contours instead of returning an empty
     // forbidden region and producing parsed=1/candidates=0 diagnostics.
-    const auto fixedFallback = conservativeConvexFallback(fixed);
-    const auto movingFallback = conservativeConvexFallback(moving);
-    if (fixedFallback.empty() || movingFallback.empty()) return {};
-
-    const auto fallback = minkowskiConvexSum(
-        fixedFallback.front(),
-        reflected(movingFallback.front())
-    );
-    if (fallback.size() < 3) return {};
-    return {fallback};
+    return conservativeNfpFallback(fixed, moving, 0);
 }
 
 } // namespace
@@ -806,7 +824,9 @@ std::vector<Polygon> noFitPolygons(
     double clearanceMm,
     const NfpRunControl* control
 ) {
-    if (control && control->stop()) return {};
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, normalizedRotation);
+    }
 
     const int normalizedRotation =
         ((rotation % 360) + 360) % 360;
@@ -856,6 +876,14 @@ std::vector<Polygon> noFitPolygons(
         movingCanonical,
         control
     );
+
+    // A deadline is request-scoped and must never poison the shared cache with
+    // an incomplete/partial NFP. Return a conservative fallback and leave the
+    // normal cache untouched when the guard stopped the computation.
+    if (control && control->shouldStop && control->shouldStop()) {
+        control->stop();
+        return conservativeNfpFallback(fixed, moving, normalizedRotation);
+    }
 
     {
         std::lock_guard<std::mutex> lock(store.mutex);
@@ -1009,7 +1037,8 @@ std::vector<Point> noFitVertices(
         fixed,
         moving,
         rotation,
-        clearanceMm
+        clearanceMm,
+        control
     );
 
     vertices.reserve(
