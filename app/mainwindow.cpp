@@ -333,7 +333,7 @@ void MainWindow::buildUi() {
     benchmarkExportButton_->setEnabled(false);
     controlLayout->addWidget(benchmarkExportButton_);
 
-    controlLayout->addWidget(exportButton_);
+    cuttingRouteCheck_ = new QCheckBox("Показать маршрут лазера");\n    cuttingRouteCheck_->setChecked(true);\n    cuttingRouteCheck_->setToolTip("Пробивка, внутренние и внешние контуры, rapid-переходы и направление движения");\n    controlLayout->addWidget(cuttingRouteCheck_);\n\n    controlLayout->addWidget(exportButton_);
 
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
@@ -341,7 +341,7 @@ void MainWindow::buildUi() {
     log_->setMinimumHeight(160);
     controlLayout->addWidget(log_, 1);
 
-    view_ = new NestView;
+    view_ = new NestView;\n    view_->setCuttingRouteVisible(true);
 
     auto* repairViewPanel = new QWidget;
     auto* repairViewLayout = new QVBoxLayout(repairViewPanel);
