@@ -1822,6 +1822,240 @@ void MainWindow::updateProgress(
     }
 }
 
+void MainWindow::resetAdaptiveRepairAnimation() {
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    repairAnimationPlaying_ = false;
+    repairAnimationSession_ = false;
+    repairAnimationFrame_ = -1;
+    updateAdaptiveRepairAnimationUi();
+}
+
+void MainWindow::toggleAdaptiveRepairAnimation() {
+    if (validation_.adaptiveHistory.empty()) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    if (!repairAnimationSession_) {
+        int selectedRound =
+            repairRoundCombo_
+                ? repairRoundCombo_->currentData().toInt()
+                : -1;
+
+        if (selectedRound > 0) {
+            repairAnimationFrame_ =
+                std::clamp(
+                    (selectedRound - 1) * 4,
+                    0,
+                    totalFrames - 1
+                );
+        } else {
+            repairAnimationFrame_ = 0;
+        }
+
+        repairAnimationSession_ = true;
+    }
+
+    if (repairAnimationFrame_ >= totalFrames - 1) {
+        repairAnimationFrame_ = 0;
+    }
+
+    repairAnimationPlaying_ = true;
+    updateAdaptiveRepairAnimationUi();
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->start();
+    }
+
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::pauseAdaptiveRepairAnimation() {
+    repairAnimationPlaying_ = false;
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    updateAdaptiveRepairAnimationUi();
+}
+
+void MainWindow::stepAdaptiveRepairAnimation(int direction) {
+    if (validation_.adaptiveHistory.empty() ||
+        direction == 0) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    if (!repairAnimationSession_) {
+        int selectedRound =
+            repairRoundCombo_
+                ? repairRoundCombo_->currentData().toInt()
+                : -1;
+
+        repairAnimationFrame_ =
+            selectedRound > 0
+                ? std::clamp(
+                    (selectedRound - 1) * 4,
+                    0,
+                    totalFrames - 1
+                )
+                : 0;
+        repairAnimationSession_ = true;
+    }
+
+    repairAnimationPlaying_ = false;
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    repairAnimationFrame_ =
+        std::clamp(
+            repairAnimationFrame_ + direction,
+            0,
+            totalFrames - 1
+        );
+
+    updateAdaptiveRepairAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::advanceAdaptiveRepairAnimation() {
+    if (!repairAnimationPlaying_ ||
+        validation_.adaptiveHistory.empty()) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    ++repairAnimationFrame_;
+
+    if (repairAnimationFrame_ >= totalFrames) {
+        repairAnimationFrame_ = totalFrames - 1;
+        repairAnimationPlaying_ = false;
+
+        if (repairAnimationTimer_) {
+            repairAnimationTimer_->stop();
+        }
+    }
+
+    updateAdaptiveRepairAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::updateAdaptiveRepairAnimationUi() {
+    const bool hasHistory =
+        !validation_.adaptiveHistory.empty();
+
+    if (!hasHistory) {
+        if (repairPlayButton_) repairPlayButton_->setEnabled(false);
+        if (repairPauseButton_) repairPauseButton_->setEnabled(false);
+        if (repairPrevButton_) repairPrevButton_->setEnabled(false);
+        if (repairNextButton_) repairNextButton_->setEnabled(false);
+        if (repairSpeedCombo_) repairSpeedCombo_->setEnabled(false);
+        if (repairStageLabel_) {
+            repairStageLabel_->setText("Анимация: нет истории");
+        }
+        return;
+    }
+
+    if (repairPlayButton_) {
+        repairPlayButton_->setEnabled(!repairAnimationPlaying_);
+    }
+    if (repairPauseButton_) {
+        repairPauseButton_->setEnabled(repairAnimationPlaying_);
+    }
+    if (repairPrevButton_) {
+        repairPrevButton_->setEnabled(true);
+    }
+    if (repairNextButton_) {
+        repairNextButton_->setEnabled(true);
+    }
+    if (repairSpeedCombo_) {
+        repairSpeedCombo_->setEnabled(true);
+    }
+
+    if (repairSpeedCombo_ &&
+        repairAnimationTimer_) {
+        const double speed =
+            repairSpeedCombo_->currentData().toDouble();
+        const int interval =
+            std::max(
+                150,
+                static_cast<int>(
+                    900.0 /
+                    std::max(0.25, speed)
+                )
+            );
+        repairAnimationTimer_->setInterval(interval);
+    }
+
+    if (!repairAnimationSession_ ||
+        repairAnimationFrame_ < 0) {
+        if (repairStageLabel_) {
+            repairStageLabel_->setText(
+                QString("Анимация: готово • %1 раундов")
+                    .arg(
+                        static_cast<qulonglong>(
+                            validation_.adaptiveHistory.size()
+                        )
+                    )
+            );
+        }
+        return;
+    }
+
+    const int roundIndex =
+        repairAnimationFrame_ / 4 + 1;
+    const int stage =
+        repairAnimationFrame_ % 4;
+
+    const QString stages[] = {
+        "Конфликт",
+        "Извлечение деталей",
+        "Локальная перепаковка",
+        "Production Validator"
+    };
+
+    if (repairRoundCombo_) {
+        const QSignalBlocker blocker(repairRoundCombo_);
+        const int index =
+            repairRoundCombo_->findData(roundIndex);
+        if (index >= 0) {
+            repairRoundCombo_->setCurrentIndex(index);
+        }
+    }
+
+    if (repairStageLabel_) {
+        repairStageLabel_->setText(
+            QString("Раунд %1 • этап %2/4: %3%4")
+                .arg(roundIndex)
+                .arg(stage + 1)
+                .arg(stages[stage])
+                .arg(
+                    repairAnimationPlaying_
+                        ? " • воспроизведение"
+                        : ""
+                )
+        );
+    }
+}
+
 void MainWindow::refreshAdaptiveRepairView() {
     if (!view_) return;
 
