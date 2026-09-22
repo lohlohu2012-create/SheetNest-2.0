@@ -1133,23 +1133,33 @@ std::vector<Point> pointsOnFeasibilityBoundary(
         points.push_back(p);
     };
 
-    // Every segment gets at least one analytically best point. This avoids
-    // losing an entire long NFP edge just because a global sampling budget is
-    // tight. The point is chosen by the current lexicographic objective.
+    // When the number of segments exceeds the global budget, favor
+    // the longest segments and reserve part of the budget for an interior
+    // sample. Endpoint-only sampling is especially weak on long feasibility
+    // edges because both endpoints can fail collision checks while the middle
+    // of the same edge is valid.
     if (segments.size() >= budget) {
-        std::nth_element(
+        const std::size_t selectedSegments =
+            std::max<std::size_t>(1, budget / 2);
+
+        std::sort(
             segments.begin(),
-            segments.begin() +
-                static_cast<std::ptrdiff_t>(
-                    std::min<std::size_t>(segments.size(), budget) - 1
-                ),
             segments.end(),
             [](const SegmentWork& a, const SegmentWork& b) {
+                if (std::abs(a.length - b.length) > kPointEps) {
+                    return a.length > b.length;
+                }
                 return std::tie(a.bestY, a.bestX) <
                        std::tie(b.bestY, b.bestX);
             }
         );
-        segments.resize(std::min<std::size_t>(segments.size(), budget));
+
+        segments.resize(
+            std::min<std::size_t>(
+                segments.size(),
+                selectedSegments
+            )
+        );
 
         for (const auto& work : segments) {
             const Point a = work.segment.a;
@@ -1160,6 +1170,16 @@ std::vector<Point> pointsOnFeasibilityBoundary(
             } else {
                 appendPoint(a);
             }
+        }
+
+        for (const auto& work : segments) {
+            if (points.size() >= budget) break;
+            if (work.length + kPointEps < spacing) continue;
+
+            appendPoint({
+                (work.segment.a.x + work.segment.b.x) * 0.5,
+                (work.segment.a.y + work.segment.b.y) * 0.5
+            });
         }
     } else {
         for (const auto& work : segments) {
