@@ -55,23 +55,40 @@ static constexpr TechnologyRow kBodor3kW[] = {
 
 CuttingParameters bodor3kWParameters(Material material, double thicknessMm) {
     CuttingParameters result{material, thicknessMm, 0.0, {}};
-    const TechnologyRow* best = nullptr;
-    double distance = std::numeric_limits<double>::infinity();
+    const TechnologyRow* lower = nullptr;
+    const TechnologyRow* upper = nullptr;
 
     for (const auto& row : kBodor3kW) {
-        if (row.material != material) {
-            continue;
+        if (row.material != material) continue;
+
+        if (row.thicknessMm <= thicknessMm &&
+            (!lower || row.thicknessMm > lower->thicknessMm)) {
+            lower = &row;
         }
-        const double d = std::abs(row.thicknessMm - thicknessMm);
-        if (d < distance) {
-            distance = d;
-            best = &row;
+        if (row.thicknessMm >= thicknessMm &&
+            (!upper || row.thicknessMm < upper->thicknessMm)) {
+            upper = &row;
         }
     }
 
-    if (best) {
-        result.speedMMin = best->speedMMin;
-        result.assistGas = best->gas;
+    // Interpolate inside the technology table instead of snapping to the
+    // nearest thickness. This keeps cutting-time estimates continuous when
+    // the operator enters a thickness between reference rows.
+    if (lower && upper && lower != upper &&
+        upper->thicknessMm > lower->thicknessMm) {
+        const double t =
+            (thicknessMm - lower->thicknessMm) /
+            (upper->thicknessMm - lower->thicknessMm);
+        result.speedMMin =
+            lower->speedMMin +
+            (upper->speedMMin - lower->speedMMin) * t;
+        result.assistGas = lower->gas;
+    } else if (lower) {
+        result.speedMMin = lower->speedMMin;
+        result.assistGas = lower->gas;
+    } else if (upper) {
+        result.speedMMin = upper->speedMMin;
+        result.assistGas = upper->gas;
     }
 
     return result;
