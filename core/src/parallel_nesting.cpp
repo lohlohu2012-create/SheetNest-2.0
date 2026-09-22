@@ -1,5 +1,4 @@
 #include "sheetnest/parallel_nesting.hpp"
-#include "sheetnest/production_validation.hpp"
 #include "sheetnest/production_validator.hpp"
 
 #include <algorithm>
@@ -456,8 +455,7 @@ Result ParallelNestingController::run(
             "Production Validator: OK"
         });
 
-        if (!hasValidatedCandidate ||
-            optimizedBest.utilization < 0.0 ||
+        if (optimizedBest.utilization < 0.0 ||
             betterResult(candidate, optimizedBest)) {
             optimizedBest = std::move(candidate);
         }
