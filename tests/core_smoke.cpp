@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 #include <atomic>
-#include <cstdlib>
+#include <cstdlib>\n#include <chrono>
 
 using namespace sheetnest;
 
@@ -2536,6 +2536,54 @@ void testNegativeGapBeforeZeroCollisionRevalidation() {
     assert(authorized &&
            "Negative regression: Gap must not appear before zero-Collision revalidation");
     std::abort();
+}
+
+void testParallelCancellationPath() {
+    std::vector<Instance> instances;
+    for (int i = 0; i < 24; ++i) {
+        instances.push_back({
+            "cancel-" + std::to_string(i),
+            Part{"cancel-part", rectangle(20.0, 10.0), {}}
+        });
+    }
+
+    Sheet sheet{500.0, 500.0, 2.0};
+    Options nestingOptions;
+    nestingOptions.rotations = {0, 90};
+    nestingOptions.iterations = 200;
+    nestingOptions.gapMm = 2.0;
+
+    auto controller = std::make_shared<ParallelNestingController>();
+    ParallelNestingOptions parallel;
+    parallel.workers = 2;
+    parallel.iterations = 200;
+    parallel.timeBudgetMs = 10000;
+    parallel.candidateCapacity = 4;
+
+    std::atomic<bool> cancellationObserved{false};
+    parallel.onProgress = [controller, &cancellationObserved](const NestingProgress& progress) {
+        if (progress.phase == NestingProgressPhase::IterationFinished) {
+            cancellationObserved.store(true, std::memory_order_relaxed);
+            controller->requestCancel();
+        }
+    };
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = controller->run(
+        instances,
+        sheet,
+        nestingOptions,
+        parallel
+    );
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started
+    ).count();
+
+    assert(cancellationObserved.load(std::memory_order_relaxed));
+    assert(controller->cancelRequested());
+    assert(elapsed < 10000);
+    assert(result.sheets.size() <= instances.size());
+    assert(result.unplaced.size() <= instances.size());
 }
 
 void testAdaptiveRepairNewCollisionPriority() {
