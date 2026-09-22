@@ -35,6 +35,7 @@ public:
     void setCuttingRouteVisible(bool visible);
     void setCuttingAnimationProgress(double progress);
     void setCuttingAnimationOperation(int operation);
+    void setCuttingAnimationOperationProgress(int operation, double progress);
     const std::vector<CuttingRouteOperation>& cuttingRouteOperations() const {
         return cuttingRouteOperations_;
     }
@@ -46,6 +47,7 @@ private:
     bool cuttingRouteVisible_{false};
     double cuttingAnimationProgress_{1.0};
     int cuttingAnimationOperation_{-1};
+    double cuttingAnimationOperationProgress_{0.0};
     std::vector<CuttingRouteOperation> cuttingRouteOperations_;
 
     void addCuttingRoute(
