@@ -909,6 +909,9 @@ bool repairProductionResult(
                 std::min<std::size_t>(roundIndex, 3)
             );
 
+        const double requiredGap =
+            std::max(0.0, gapMm);
+
         for (const auto& seedId : ids) {
             const auto seedInstanceIt = instanceById.find(seedId);
             if (seedInstanceIt == instanceById.end()) continue;
@@ -956,15 +959,24 @@ bool repairProductionResult(
                         ((placementBounds.minY + placementBounds.maxY) * 0.5) -
                         centerY;
                     const double distance = std::hypot(dx, dy);
-                    const double reach =
-                        searchRadius +
-                        0.5 * std::max(
-                            placementBounds.width(),
-                            placementBounds.height()
-                        );
 
-                    if (distance <= reach + kEps) {
-                        const auto priorityIt =
+                    // Center proximity alone is not sufficient for Adaptive
+                    // Repair. A neighbor is extracted only when its exact
+                    // geometry can actually block the seed: overlap or a
+                    // boundary clearance violation. This prevents unrelated
+                    // nearby parts from being repeatedly disturbed.
+                    const bool exactOverlap =
+                        materialOverlap(seedShape, shape);
+                    const double exactBoundaryDistance =
+                        minBoundaryDistance(seedShape, shape);
+                    const bool violatesClearance =
+                        exactBoundaryDistance + kEps < requiredGap;
+
+                    if (!exactOverlap && !violatesClearance) {
+                        continue;
+                    }
+
+                    const auto priorityIt =
                             seedPriority.find(seedId);
                         const int priority =
                             priorityIt == seedPriority.end()
@@ -977,7 +989,7 @@ bool repairProductionResult(
                         neighbors.push_back({
                             priority,
                             severity,
-                            distance,
+                            exactOverlap ? 0.0 : exactBoundaryDistance,
                             placement.id
                         });
                     }
@@ -1124,6 +1136,7 @@ bool repairProductionResult(
             );
         std::size_t previousIssueSeverity =
             issueSeverityScore(adaptiveReport);
+        std::unordered_set<std::string> attemptedRepairGroups;
 
         for (std::size_t round = 0;
              round < std::max<std::size_t>(
@@ -1148,6 +1161,24 @@ bool repairProductionResult(
                 );
 
             if (seedIds.empty()) {
+                break;
+            }
+
+            std::vector<std::string> signatureIds = seedIds;
+            std::sort(signatureIds.begin(), signatureIds.end());
+            std::string repairGroupSignature;
+            for (const auto& id : signatureIds) {
+                repairGroupSignature += id;
+                repairGroupSignature.push_back('\n');
+            }
+
+            // Do not spend another repair round on an identical conflict
+            // neighborhood. If geometry and diagnostics lead us back to the
+            // same group, the previous attempt already exhausted that local
+            // repair opportunity.
+            if (!attemptedRepairGroups.insert(
+                    std::move(repairGroupSignature)
+                ).second) {
                 break;
             }
 
@@ -1498,38 +1529,3 @@ bool repairProductionResult(
                 change.stationary = !moved;
 
                 completedReport.adaptiveChanges.push_back(change);
-
-                if (moved) {
-                    completedReport.adaptiveMovedIds.push_back(
-                        before.id
-                    );
-                } else {
-                    completedReport.adaptiveStationaryIds.push_back(
-                        before.id
-                    );
-                }
-            }
-        }
-
-        std::sort(
-            completedReport.adaptiveExtractedIds.begin(),
-            completedReport.adaptiveExtractedIds.end()
-        );
-        std::sort(
-            completedReport.adaptiveMovedIds.begin(),
-            completedReport.adaptiveMovedIds.end()
-        );
-        std::sort(
-            completedReport.adaptiveStationaryIds.begin(),
-            completedReport.adaptiveStationaryIds.end()
-        );
-    }
-
-    if (reportOut) {
-        *reportOut = completedReport;
-    }
-
-    return true;
-}
-
-} // namespace sheetnest
