@@ -200,7 +200,12 @@ void NestView::showResult(
     const Result& result,
     const std::vector<Instance>& instances,
     const Sheet& sheet,
-    const sheetnest::ProductionValidationReport* repairVisualization
+    const sheetnest::ProductionValidationReport* repairVisualization,
+    int repairRound,
+    bool showConflict,
+    bool showExtracted,
+    bool showMoved,
+    bool showStationary
 ) {
     clearResult();
 
@@ -216,14 +221,29 @@ void NestView::showResult(
                        std::vector<sheetnest::AdaptiveRepairChange>>
         repairGhostsBySheet;
 
+    const std::vector<sheetnest::AdaptiveRepairChange>* selectedChanges =
+        nullptr;
+    if (repairVisualization &&
+        repairVisualization->repaired) {
+        if (repairRound > 0) {
+            for (const auto& history :
+                 repairVisualization->adaptiveHistory) {
+                if (static_cast<int>(history.roundIndex) ==
+                    repairRound) {
+                    selectedChanges = &history.changes;
+                    break;
+                }
+            }
+        } else if (!repairVisualization->adaptiveChanges.empty()) {
+            selectedChanges = &repairVisualization->adaptiveChanges;
+        }
+    }
+
     const bool hasAdaptiveRepair =
-        repairVisualization &&
-        repairVisualization->repaired &&
-        !repairVisualization->adaptiveChanges.empty();
+        selectedChanges && !selectedChanges->empty();
 
     if (hasAdaptiveRepair) {
-        for (const auto& change :
-             repairVisualization->adaptiveChanges) {
+        for (const auto& change : *selectedChanges) {
             repairChangesById[change.after.id] = change;
             repairGhostsBySheet[change.sheetIndex].push_back(change);
         }
@@ -281,7 +301,7 @@ void NestView::showResult(
                         byId.find(change.before.id);
 
                     if (instanceIt == byId.end()) continue;
-                    if (!change.extracted) continue;
+                    if (!change.extracted || !showExtracted) continue;
 
                     addRepairOverlay(
                         sheetItem,
@@ -321,49 +341,30 @@ void NestView::showResult(
                 changeIt != repairChangesById.end()) {
                 const auto& change = changeIt->second;
 
-                QColor baseColor = partColor(i);
-                if (change.stationary) {
-                    baseColor = QColor("#475569");
-                    partItem->setOpacity(0.62);
-                } else if (change.moved) {
-                    baseColor = QColor("#10b981");
-                }
-
-                partItem->setBrush(
-                    QBrush(baseColor)
-                );
-
-                QPen basePen(
-                    change.stationary
-                        ? QColor("#94a3b8")
-                        : QColor("#34d399"),
-                    change.stationary ? 1.2 : 2.0
-                );
-                basePen.setCosmetic(true);
-                partItem->setPen(basePen);
-
-                if (change.moved) {
+                if (change.moved && showMoved) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
                         placement,
                         QColor("#22d3ee"),
                         Qt::SolidLine,
-                        2.6,
+                        2.8,
                         true
                     )->setToolTip(
                         QString("Новая позиция: %1")
                             .arg(QString::fromStdString(
                                 placement.id))
                     );
-                } else if (change.stationary) {
+                }
+
+                if (change.stationary && showStationary) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
                         placement,
                         QColor("#94a3b8"),
                         Qt::DashDotLine,
-                        1.5,
+                        1.7,
                         true
                     )->setToolTip(
                         QString("Осталась неподвижной: %1")
@@ -372,14 +373,14 @@ void NestView::showResult(
                     );
                 }
 
-                if (change.conflictGroup) {
+                if (change.conflictGroup && showConflict) {
                     addRepairOverlay(
                         sheetItem,
                         *it->second,
                         placement,
                         QColor("#ff4d5e"),
                         Qt::SolidLine,
-                        3.2,
+                        3.4,
                         true
                     )->setToolTip(
                         QString("Конфликтующая группа: %1")
