@@ -18,6 +18,7 @@ enum class NestingProgressPhase {
     IterationFinished,
     CandidatesCollected,
     GlobalOptimization,
+    ProductionValidation,
     Completed,
     Cancelled,
     TimedOut
