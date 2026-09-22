@@ -518,6 +518,8 @@ void MainWindow::buildUi() {
 
     repairViewLayout->addWidget(repairControls);
     repairViewLayout->addWidget(view_, 1);
+
+    diagnosticsTable_ = new QTableWidget(0, 16);
     diagnosticsTable_->setHorizontalHeaderLabels({
         "instanceId", "unitId", "Source ID", "Лист", "Этап", "Сообщение",
         "CAM ops", "CAM sec", "Repair", "Final"
