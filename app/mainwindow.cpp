@@ -1656,6 +1656,11 @@ void MainWindow::calculate() {
     setBusy(true);
     calculationStartedMs_ = QDateTime::currentMSecsSinceEpoch();
     lastProgressMs_ = calculationStartedMs_;
+    lastProgressStage_ = "Starting";
+    lastProgressWorker_ = 0;
+    lastProgressPlaced_ = 0;
+    lastProgressSkipped_ = instances_.size();
+    lastProgressSheets_ = 0;
     watchdogTriggered_ = false;
     userCancelRequested_ = false;
     if (calculationWatchdog_) {
@@ -2252,6 +2257,11 @@ void MainWindow::updateProgress(
     const sheetnest::NestingProgress& progress
 ) {
     lastProgressMs_ = QDateTime::currentMSecsSinceEpoch();
+    lastProgressStage_ = QString::fromStdString(progress.message);
+    lastProgressWorker_ = progress.workerIndex;
+    lastProgressPlaced_ = progress.placed;
+    lastProgressSkipped_ = progress.skipped;
+    lastProgressSheets_ = progress.sheets;
     if (progress.totalIterations > 0) {
         const auto completed =
             std::min(
@@ -3093,8 +3103,14 @@ void MainWindow::calculationWatchdogTick() {
 
     if (sinceProgress >= 15000) {
         progressDetails_->setText(
-            QString("Расчёт продолжается… последний прогресс %1 с назад.")
+            QString("Расчёт продолжается… последний heartbeat %1 с назад.\n"
+                    "Стадия: %2\nWorker: %3 • листов: %4 • размещено: %5 • пропущено: %6")
                 .arg(static_cast<qlonglong>(sinceProgress / 1000))
+                .arg(lastProgressStage_.isEmpty() ? "unknown" : lastProgressStage_)
+                .arg(static_cast<qulonglong>(lastProgressWorker_ + 1))
+                .arg(static_cast<qulonglong>(lastProgressSheets_))
+                .arg(static_cast<qulonglong>(lastProgressPlaced_))
+                .arg(static_cast<qulonglong>(lastProgressSkipped_))
         );
     }
 
