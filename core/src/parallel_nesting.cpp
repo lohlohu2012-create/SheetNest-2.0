@@ -32,8 +32,11 @@ const char* phaseMessage(NestingProgressPhase phase) {
     case NestingProgressPhase::WorkerStarted: return "Worker запущен";
     case NestingProgressPhase::IterationFinished: return "Итерация завершена";
     case NestingProgressPhase::CandidatesCollected: return "Кандидаты собраны";
+    case NestingProgressPhase::NfpSearch: return "NFP feasibility search";
     case NestingProgressPhase::GlobalOptimization: return "Глобальная оптимизация";
     case NestingProgressPhase::ProductionValidation: return "Production Validator";
+    case NestingProgressPhase::AutoRepair: return "Adaptive Auto Repair";
+    case NestingProgressPhase::Finalizing: return "Финализация результата";
     case NestingProgressPhase::Completed: return "Расчёт завершён";
     case NestingProgressPhase::Cancelled: return "Расчёт отменён";
     case NestingProgressPhase::TimedOut: return "Достигнут лимит времени";
@@ -363,6 +366,24 @@ Result ParallelNestingController::run(
         Result candidate = collected[i];
 
         publish({
+            NestingProgressPhase::NfpSearch,
+            0,
+            workerCount,
+            completedIterations.load(
+                std::memory_order_relaxed
+            ),
+            totalIterations,
+            instances.size() - candidate.unplaced.size(),
+            candidate.unplaced.size(),
+            candidate.sheets.size(),
+            candidate.utilization,
+            0,
+            0,
+            "NFP feasibility: проверка допустимых областей и collision candidates для кандидата " +
+                std::to_string(i + 1) + "/" + std::to_string(collected.size())
+        });
+
+        publish({
             NestingProgressPhase::GlobalOptimization,
             0,
             workerCount,
@@ -566,6 +587,21 @@ Result ParallelNestingController::run(
             });
         }
     }
+
+    publish({
+        NestingProgressPhase::Finalizing,
+        0,
+        workerCount,
+        completedIterations.load(std::memory_order_relaxed),
+        totalIterations,
+        instances.size() - best.unplaced.size(),
+        best.unplaced.size(),
+        best.sheets.size(),
+        best.utilization,
+        0,
+        0,
+        "Финализация: сохранение лучшего результата и контроль instanceId"
+    });
 
     best.productionValidated = true;
     best.productionValid = validation.valid;
