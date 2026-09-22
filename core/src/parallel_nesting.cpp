@@ -125,7 +125,10 @@ Result ParallelNestingController::run(
                 ).count()
             );
 
-        if (control->deadline > now) {
+        if (control->deadline ==
+            Clock::time_point::max()) {
+            event.remainingMs = 0;
+        } else if (control->deadline > now) {
             event.remainingMs =
                 static_cast<std::uint64_t>(
                     std::chrono::duration_cast<std::chrono::milliseconds>(
