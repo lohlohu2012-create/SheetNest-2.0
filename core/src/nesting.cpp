@@ -232,6 +232,7 @@ bool fitsSheet(
 
 std::vector<Candidate> candidatesFor(
     const Polygon& part,
+    const std::vector<Polygon>& holes,
     int rotation,
     const SheetState& sheet,
     const Sheet& sheetSize,
@@ -341,8 +342,74 @@ std::vector<Candidate> candidatesFor(
         }
     };
 
+    auto addMovingHoleCandidates = [&](const Polygon& movingHole,
+                                   const Polygon& fixedRing) {
+        if (movingHole.size() < 3 || fixedRing.size() < 3) {
+            return;
+        }
+
+        constexpr std::size_t kMaxPairs = 256;
+        const std::size_t pairCount =
+            std::min(kMaxPairs, movingHole.size() * fixedRing.size());
+
+        if (pairCount == 0) return;
+
+        const std::size_t stride =
+            std::max<std::size_t>(
+                1,
+                static_cast<std::size_t>(
+                    std::sqrt(
+                        static_cast<double>(
+                            std::max<std::size_t>(1, pairCount)
+                        )
+                    )
+                )
+            );
+
+        std::size_t emitted = 0;
+        for (std::size_t hi = 0;
+             hi < movingHole.size() && emitted < kMaxPairs;
+             hi += stride) {
+            const auto& holePoint = movingHole[hi];
+
+            for (std::size_t fi = 0;
+                 fi < fixedRing.size() && emitted < kMaxPairs;
+                 fi += stride) {
+                const auto& fixedPoint = fixedRing[fi];
+
+                result.push_back({
+                    fixedPoint.x - holePoint.x,
+                    fixedPoint.y - holePoint.y,
+                    fixedPoint.y - holePoint.y,
+                    fixedPoint.x - holePoint.x
+                });
+                ++emitted;
+
+                if (g <= 0.0 || emitted >= kMaxPairs) continue;
+
+                result.push_back({
+                    fixedPoint.x - holePoint.x + g,
+                    fixedPoint.y - holePoint.y + g,
+                    fixedPoint.y - holePoint.y + g,
+                    fixedPoint.x - holePoint.x + g
+                });
+                ++emitted;
+            }
+        }
+    };
+
     for (const auto& placed : sheet.shapes) {
         addRingCandidates(placed.outer);
+
+        // Symmetric interlocking: align the boundary of each hole in the
+        // moving part with the already placed outer contour. Exact material
+        // overlap and clearance checks remain authoritative.
+        for (const auto& hole : holes) {
+            addMovingHoleCandidates(
+                rotate(hole, rotation),
+                placed.outer
+            );
+        }
 
         // Continuous NFP feasibility boundary: candidate positions are
         // generated along the entire admissible boundary, not only at NFP
@@ -515,6 +582,7 @@ bool placeOnSheet(
 
         for (const auto& candidate : candidatesFor(
                  instance.part.outer,
+                 instance.part.holes,
                  rotation,
                  state,
                  sheet,
