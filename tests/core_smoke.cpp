@@ -719,6 +719,48 @@ void testNfpUnionAndCache() {
     assert(afterSecond.entries == 1);
 }
 
+void testNfpDegenerateFallback() {
+    nfp::clearCache();
+
+    // Intentionally malformed bow-tie contour: the production pipeline must
+    // not turn a decomposition failure into an empty NFP/candidate set.
+    Polygon malformedFixed{
+        {0.0, 0.0},
+        {30.0, 30.0},
+        {0.0, 30.0},
+        {30.0, 0.0}
+    };
+    Polygon moving = rectangle(5.0, 5.0);
+
+    const auto polygons = nfp::noFitPolygons(
+        malformedFixed,
+        moving,
+        0,
+        0.0
+    );
+    assert(!polygons.empty());
+
+    const auto region = nfp::feasibilityRegion(
+        malformedFixed,
+        moving,
+        0,
+        -10.0,
+        -10.0,
+        40.0,
+        40.0,
+        1.0
+    );
+    assert(!region.boundary.empty());
+
+    const auto sampled = nfp::pointsOnFeasibilityBoundary(
+        region,
+        1.0,
+        64,
+        true
+    );
+    assert(!sampled.empty());
+}
+
 void testConcaveUnionNfp() {
     nfp::clearCache();
 
@@ -2005,15 +2047,14 @@ void testParallelNestingCancellation() {
 
 void testDenseSmallPartPlacement() {
     // Stress scenario: many small instances must exploit narrow remaining
-    // spaces instead of prematurely opening another sheet. The assertion is
-    // intentionally geometric: after nesting, every placed small part is
-    // checked against the sheet and every unoccupied probe corridor that is
-    // large enough for another part must have been considered by the search.
-    std::vector<Instance> parts;
-    constexpr int kInstances = 96;
-    for (int i = 0; i < kInstances; ++i) {
-        parts.push_back({
-            "dense-small-" + std::to_string(i),
+    // spaces instead of prematurely opening another sheet. The first fixture
+    // is intentionally chosen so a dense 9x9 lattice fits on ONE sheet; this
+    // catches candidate starvation that would otherwise create a second sheet.
+    std::vector<Instance> dense;
+    constexpr int kDenseInstances = 81;
+    for (int i = 0; i < kDenseInstances; ++i) {
+        dense.push_back({
+            "dense-small-one-sheet-" + std::to_string(i),
             Part{"dense-small", rectangle(9.0, 4.0), {}}
         });
     }
@@ -2029,6 +2070,29 @@ void testDenseSmallPartPlacement() {
     options.smallPartBoundarySpacingMm = 1.0;
     options.smallPartRefillPasses = 4;
     options.enableOptimizer = true;
+
+    const auto oneSheetResult = nest(dense, sheet, options);
+
+    assert(oneSheetResult.unplaced.empty());
+    assert(oneSheetResult.sheets.size() == 1);
+
+    std::size_t densePlacedCount = 0;
+    for (const auto& placements : oneSheetResult.sheets) {
+        densePlacedCount += placements.size();
+    }
+    assert(densePlacedCount == static_cast<std::size_t>(kDenseInstances));
+
+    // A second, larger fixture verifies that the same strategy scales to a
+    // high instance count without silently losing parts or exploding sheet
+    // count. Two sheets are sufficient for this quantity.
+    std::vector<Instance> parts;
+    constexpr int kInstances = 162;
+    for (int i = 0; i < kInstances; ++i) {
+        parts.push_back({
+            "dense-small-" + std::to_string(i),
+            Part{"dense-small", rectangle(9.0, 4.0), {}}
+        });
+    }
 
     const auto result = nest(parts, sheet, options);
 
@@ -2409,6 +2473,7 @@ int main(int argc, char** argv) {
     testFeasibilitySegmentCoverage();
     testFeasibilityGap();
     testNfpUnionAndCache();
+    testNfpDegenerateFallback();
     testConcaveUnionNfp();
     testConcaveNfpCandidates();
     testReadableValidationErrors();
