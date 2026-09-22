@@ -5,6 +5,21 @@
 #include <unordered_map>
 
 namespace sheetnest {
+namespace {
+
+const char* failureReasonCode(NestingFailureReason reason) {
+    switch (reason) {
+    case NestingFailureReason::None: return "None";
+    case NestingFailureReason::NoFeasiblePosition: return "NoFeasiblePosition";
+    case NestingFailureReason::Timeout: return "Timeout";
+    case NestingFailureReason::InvalidGeometry: return "InvalidGeometry";
+    case NestingFailureReason::RepairExhausted: return "RepairExhausted";
+    case NestingFailureReason::Cancelled: return "Cancelled";
+    }
+    return "None";
+}
+
+} // namespace
 
 std::vector<InstanceDiagnostic> diagnoseNest(
     const std::vector<Instance>& instances,
@@ -61,7 +76,8 @@ std::vector<InstanceDiagnostic> diagnoseNest(
 void enrichDiagnostics(
     std::vector<InstanceDiagnostic>& diagnostics,
     const CuttingPath& route,
-    const ProductionValidationReport& validation
+    const ProductionValidationReport& validation,
+    const Result* nestingResult
 ) {
     std::unordered_map<std::string, std::size_t> operationCounts;
     std::unordered_map<std::string, double> operationSeconds;
@@ -83,12 +99,25 @@ void enrichDiagnostics(
         diagnostic.repairAttempts = validation.repairAttempts;
         diagnostic.adaptiveRepairRounds = validation.adaptiveRepairRounds;
 
-        // Candidate/NFP telemetry is populated by the nesting engine when
-        // per-instance counters are available. Keep zero as an explicit
-        // "not instrumented for this run" value rather than inventing data.
         diagnostic.candidateChecks = 0;
+        diagnostic.nfpChecks = 0;
         diagnostic.nfpTimeouts = 0;
         diagnostic.nfpFallbacks = 0;
+        diagnostic.nestingElapsedMs = 0;
+        diagnostic.failureReason = "None";
+
+        if (nestingResult) {
+            for (const auto& telemetry : nestingResult->instanceTelemetry) {
+                if (telemetry.instanceId != diagnostic.instanceId) continue;
+                diagnostic.candidateChecks = telemetry.candidateChecks;
+                diagnostic.nfpChecks = telemetry.nfpChecks;
+                diagnostic.nfpTimeouts = telemetry.nfpTimeouts;
+                diagnostic.nfpFallbacks = telemetry.nfpFallbacks;
+                diagnostic.nestingElapsedMs = telemetry.elapsedMs;
+                diagnostic.failureReason = failureReasonCode(telemetry.reason);
+                break;
+            }
+        }
 
         if (diagnostic.status == InstanceDiagnosticStatus::Placed) {
             diagnostic.finalStatus = "Placed";
