@@ -100,9 +100,9 @@ struct Options {
     // without ever reducing the configured physical gap.
     bool enableSmallPartOptimization{true};
     double smallPartAreaRatio{0.08};
-    std::size_t smallPartCandidateBudget{1024};
-    double smallPartBoundarySpacingMm{2.5};
-    std::size_t smallPartRefillPasses{2};
+    std::size_t smallPartCandidateBudget{1536};
+    double smallPartBoundarySpacingMm{1.0};
+    std::size_t smallPartRefillPasses{4};
 
     std::shared_ptr<NestingRunControl> control{};
 };
