@@ -1,5 +1,6 @@
 #include "sheetnest/nesting.hpp"
 #include "sheetnest/nfp.hpp"
+#include "sheetnest/production_validator.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1932,6 +1933,19 @@ Result nest(
             // Keep searching when explicitly requested; the utilization
             // comparison still decides whether another restart is better.
         }
+    }
+
+    if (options.enableProductionValidation) {
+        const auto validation = validateProductionResult(
+            instances,
+            sheet,
+            options,
+            best
+        );
+
+        best.productionValidated = true;
+        best.productionValid = validation.valid;
+        best.productionIssueCount = validation.issues.size();
     }
 
     return best;
