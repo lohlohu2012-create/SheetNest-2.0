@@ -976,8 +976,18 @@ void testNfpInternalTimeoutAndComplexityGuard() {
         0.0,
         &timeoutGuard
     );
-    (void)timedOut;
+    assert(!timedOut.empty());
     assert(timeoutCount > 0);
+
+    const auto timedVertices = nfp::noFitVertices(
+        rectangle(40.0, 30.0),
+        rectangle(10.0, 8.0),
+        90,
+        0.0,
+        &timeoutGuard
+    );
+    assert(!timedVertices.empty());
+    assert(timeoutCount > 1);
 
     nfp::NfpRunControl complexityGuard;
     complexityGuard.maxInputVertices = 3;
