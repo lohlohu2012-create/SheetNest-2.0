@@ -9,6 +9,7 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/parallel_nesting.hpp"
 
 class QComboBox;
 class QCheckBox;
@@ -51,13 +52,15 @@ private:
     void updateTechnologyPreview();
     void refreshInstances();
     void appendLog(const QString& text);
+    void updateProgress(const sheetnest::NestingProgress& progress);
     void setBusy(bool busy);
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
         sheetnest::Sheet sheet,
         sheetnest::Options options,
-        sheetnest::CuttingParameters technology
+        sheetnest::CuttingParameters technology,
+        sheetnest::ParallelNestingOptions parallelOptions
     ) const;
 
     sheetnest::BenchmarkResult performBenchmark(
@@ -85,6 +88,8 @@ private:
     QDoubleSpinBox* marginSpin_{};
     QDoubleSpinBox* gapSpin_{};
     QSpinBox* iterationsSpin_{};
+    QSpinBox* workersSpin_{};
+    QSpinBox* timeBudgetSpin_{};
 
     QCheckBox* rotation0_{};
     QCheckBox* rotation90_{};
@@ -95,6 +100,7 @@ private:
     QLabel* partCountLabel_{};
     QLabel* techLabel_{};
     QLabel* resultLabel_{};
+    QLabel* progressDetails_{};
     QProgressBar* progress_{};
     QPlainTextEdit* log_{};
     QTableWidget* partTable_{};
@@ -105,11 +111,13 @@ private:
     QPushButton* calculateButton_{};
     QPushButton* benchmarkButton_{};
     QPushButton* benchmarkExportButton_{};
+    QPushButton* stopButton_{};
     QPushButton* exportButton_{};
 
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
 
+    std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
     QFutureWatcher<CalculationOutput>* watcher_{};
     QFutureWatcher<sheetnest::BenchmarkResult>* benchmarkWatcher_{};
 };
