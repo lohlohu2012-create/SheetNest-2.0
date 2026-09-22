@@ -2745,7 +2745,12 @@ bool adaptiveDestroyAndRepairResult(
         return ordered;
     };
 
-    Result bestResult = result;
+    // Keep the best state of the previous repair round as the baseline
+    // for the next round. Attempts inside one round remain independent so
+    // they can explore different orders, but completed rounds are now truly
+    // sequential instead of all restarting from the same stripped layout.
+    std::vector<SheetState> roundBaselineStates = strippedStates;
+    std::vector<SheetState> bestStates = strippedStates;
     bool foundComplete = false;
     double bestLocalScore =
         std::numeric_limits<double>::infinity();
@@ -2768,10 +2773,6 @@ bool adaptiveDestroyAndRepairResult(
             1,
             8
         );
-    // A round is a complete local destroy/repair search. Later rounds reuse
-    // the same compact conflict neighborhood but explore different packing
-    // orders, allowing a failed first repair to be recovered without opening
-    // a new sheet or touching unrelated placements.
     const std::size_t attempts =
         std::min<std::size_t>(
             32,
@@ -2779,119 +2780,141 @@ bool adaptiveDestroyAndRepairResult(
         );
     NestingStats adaptiveStats = result.stats;
 
-    for (std::size_t attempt = 0;
-         attempt < attempts;
-         ++attempt) {
+    for (std::size_t round = 0;
+         round < repairRounds && round * attemptsPerRound < attempts;
+         ++round) {
         if (shouldStop(options)) break;
 
-        const std::size_t round =
-            attempt / attemptsPerRound;
-        const std::size_t attemptInRound =
-            attempt % attemptsPerRound;
+        bool roundFoundComplete = false;
+        double roundBestScore =
+            std::numeric_limits<double>::infinity();
+        std::vector<SheetState> roundBestStates;
 
-        auto trialStates = strippedStates;
-        const auto ordered = makeOrder(
-            round * attemptsPerRound + attemptInRound
-        );
-        bool success = true;
-
-        for (const auto* instance : ordered) {
-            if (shouldStop(options)) {
-                success = false;
-                break;
-            }
-
-            bool placed = false;
-            std::size_t bestSheetIndex =
-                trialStates.size();
-            SheetState bestSheetState;
-            double bestSheetScore =
-                std::numeric_limits<double>::infinity();
-
-            for (const auto sheetIndex : affectedSheets) {
-                SheetState trial =
-                    trialStates[sheetIndex];
-
-                if (!placeOnSheet(
-                        *instance,
-                        sheet,
-                        options,
-                        trial,
-                        effectiveRotations(options),
-                        &adaptiveStats
-                    )) {
-                    continue;
-                }
-
-                const double score =
-                    sheetEnvelopeScore(trial);
-
-                if (!placed ||
-                    score + kEps < bestSheetScore) {
-                    placed = true;
-                    bestSheetIndex = sheetIndex;
-                    bestSheetState = std::move(trial);
-                    bestSheetScore = score;
-                }
-            }
-
-            if (!placed) {
-                success = false;
-                break;
-            }
-
-            trialStates[bestSheetIndex] =
-                std::move(bestSheetState);
-        }
-
-        if (!success) continue;
-
-        double localScore = 0.0;
-        for (const auto sheetIndex : affectedSheets) {
-            localScore +=
-                sheetEnvelopeScore(trialStates[sheetIndex]);
-        }
-
-        if (!foundComplete ||
-            localScore + kEps < bestLocalScore) {
-            foundComplete = true;
-            bestLocalScore = localScore;
-
-            bestResult.sheets.clear();
-            bestResult.sheets.reserve(
-                trialStates.size()
+        const std::size_t roundAttemptCount =
+            std::min(
+                attemptsPerRound,
+                attempts - round * attemptsPerRound
             );
 
-            double placedArea = 0.0;
-            for (const auto& state : trialStates) {
-                bestResult.sheets.push_back(
-                    state.placements
-                );
-                placedArea += state.placedArea;
+        for (std::size_t attemptInRound = 0;
+             attemptInRound < roundAttemptCount;
+             ++attemptInRound) {
+            if (shouldStop(options)) break;
+
+            const std::size_t attempt =
+                round * attemptsPerRound + attemptInRound;
+
+            // Every attempt in this round starts from the same round baseline;
+            // the winning baseline is committed only after the round finishes.
+            auto trialStates = roundBaselineStates;
+            const auto ordered = makeOrder(attempt);
+            bool success = true;
+
+            for (const auto* instance : ordered) {
+                if (shouldStop(options)) {
+                    success = false;
+                    break;
+                }
+
+                bool placed = false;
+                std::size_t bestSheetIndex =
+                    trialStates.size();
+                SheetState bestSheetState;
+                double bestSheetScore =
+                    std::numeric_limits<double>::infinity();
+
+                for (const auto sheetIndex : affectedSheets) {
+                    SheetState trial =
+                        trialStates[sheetIndex];
+
+                    if (!placeOnSheet(
+                            *instance,
+                            sheet,
+                            options,
+                            trial,
+                            effectiveRotations(options),
+                            &adaptiveStats
+                        )) {
+                        continue;
+                    }
+
+                    const double score =
+                        sheetEnvelopeScore(trial);
+
+                    if (!placed ||
+                        score + kEps < bestSheetScore) {
+                        placed = true;
+                        bestSheetIndex = sheetIndex;
+                        bestSheetState = std::move(trial);
+                        bestSheetScore = score;
+                    }
+                }
+
+                if (!placed) {
+                    success = false;
+                    break;
+                }
+
+                trialStates[bestSheetIndex] =
+                    std::move(bestSheetState);
             }
 
-            const double sheetArea =
-                std::max(
-                    0.0,
-                    sheet.width * sheet.height
-                );
+            if (!success) continue;
 
-            bestResult.utilization =
-                (sheetArea > 0.0 &&
-                 !bestResult.sheets.empty())
-                    ? placedArea /
-                      (sheetArea * bestResult.sheets.size())
-                    : 0.0;
+            double localScore = 0.0;
+            for (const auto sheetIndex : affectedSheets) {
+                localScore +=
+                    sheetEnvelopeScore(trialStates[sheetIndex]);
+            }
 
-            bestResult.stats = adaptiveStats;
-            ++bestResult.stats.refillMoves;
-            ++bestResult.stats.optimizerPasses;
+            if (!roundFoundComplete ||
+                localScore + kEps < roundBestScore) {
+                roundFoundComplete = true;
+                roundBestScore = localScore;
+                roundBestStates = std::move(trialStates);
+            }
+        }
+
+        // A failed round cannot provide a meaningful baseline for the next
+        // round, so stop without replacing the best completed result.
+        if (!roundFoundComplete) {
+            break;
+        }
+
+        // This is the key sequential repair step: the best completed local
+        // repair becomes the starting state of the next adaptive round.
+        roundBaselineStates = roundBestStates;
+
+        if (!foundComplete ||
+            roundBestScore + kEps < bestLocalScore) {
+            foundComplete = true;
+            bestLocalScore = roundBestScore;
+            bestStates = roundBaselineStates;
         }
     }
-
     if (!foundComplete) {
         return false;
     }
+
+    Result bestResult = result;
+    bestResult.sheets.clear();
+    bestResult.sheets.reserve(bestStates.size());
+
+    double placedArea = 0.0;
+    for (const auto& state : bestStates) {
+        bestResult.sheets.push_back(state.placements);
+        placedArea += state.placedArea;
+    }
+
+    const double sheetArea =
+        std::max(0.0, sheet.width * sheet.height);
+    bestResult.utilization =
+        (sheetArea > 0.0 && !bestResult.sheets.empty())
+            ? placedArea / (sheetArea * bestResult.sheets.size())
+            : 0.0;
+    bestResult.stats = adaptiveStats;
+    ++bestResult.stats.refillMoves;
+    ++bestResult.stats.optimizerPasses;
 
     if (extractedIdsOut) {
         extractedIdsOut->assign(
