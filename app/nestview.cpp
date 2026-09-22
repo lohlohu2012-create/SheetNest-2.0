@@ -249,6 +249,20 @@ void NestView::showResult(
         }
     }
 
+    Result displayResult = result;
+
+    if (repairVisualization &&
+        repairRound > 0) {
+        for (const auto& history :
+             repairVisualization->adaptiveHistory) {
+            if (static_cast<int>(history.roundIndex) ==
+                repairRound) {
+                displayResult.sheets = history.afterSheets;
+                break;
+            }
+        }
+    }
+
     const bool hasAdaptiveRepair =
         selectedChanges && !selectedChanges->empty();
 
@@ -263,7 +277,7 @@ void NestView::showResult(
     double cursorY = 0.0;
 
     for (std::size_t sheetIndex = 0;
-         sheetIndex < result.sheets.size();
+         sheetIndex < displayResult.sheets.size();
          ++sheetIndex) {
 
         auto* sheetItem = new QGraphicsRectItem(
@@ -330,7 +344,7 @@ void NestView::showResult(
             }
         }
 
-        const auto& placements = result.sheets[sheetIndex];
+        const auto& placements = displayResult.sheets[sheetIndex];
 
         for (std::size_t i = 0; i < placements.size(); ++i) {
             const auto& placement = placements[i];
