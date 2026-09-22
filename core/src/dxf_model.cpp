@@ -63,7 +63,8 @@ DxfPreflightReport preflightDxf(const DxfDocument& document) {
     report.valid =
         report.validParts == document.contours.size() &&
         !document.contours.empty() &&
-        !document.hasErrors();
+        !document.contours.empty() &&
+        report.invalidParts == 0;
 
     return report;
 }
