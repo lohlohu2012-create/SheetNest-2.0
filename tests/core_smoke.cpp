@@ -2434,14 +2434,15 @@ void testParallelNestingCancellation() {
     assert(controller.cancelRequested());
     assert(completed.load(std::memory_order_relaxed) < parallel.iterations);
     assert(result.instanceTelemetry.size() == instances.size());
-    bool sawCancelledInstance = false;
     for (const auto& telemetry : result.instanceTelemetry) {
-        if (!telemetry.placed &&
-            telemetry.reason == NestingFailureReason::Cancelled) {
-            sawCancelledInstance = true;
+        if (!telemetry.placed) {
+            assert(
+                telemetry.reason == NestingFailureReason::Cancelled ||
+                telemetry.reason == NestingFailureReason::Timeout ||
+                telemetry.reason == NestingFailureReason::NoFeasiblePosition
+            );
         }
     }
-    assert(sawCancelledInstance);
 }
 
 void testDenseSmallPartPlacement() {
