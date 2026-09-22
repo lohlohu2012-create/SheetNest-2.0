@@ -2134,10 +2134,13 @@ void testAdaptiveRepairNewCollisionPriority() {
         }
 
         if (round.repairedLevel == 1) {
-            // Gap is legal to process only after Collision validation has
-            // reported zero remaining collisions.
+            // HARD INVARIANT: Gap processing is forbidden while ANY Collision
+            // remains. This is deliberately fail-fast so a future regression
+            // cannot silently reorder the hierarchy.
+            if (round.collisionCountAfter != 0) {
+                assert(false && "Adaptive Repair must not enter Gap while Collision remains");
+            }
             assert(sawCollisionResolved);
-            assert(round.collisionCountAfter == 0);
             assert(round.conflictLevels.size() >= 2);
             assert(!round.conflictLevels[1].empty());
             sawGapAfterCollision = true;
