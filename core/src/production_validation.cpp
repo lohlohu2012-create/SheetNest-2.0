@@ -723,10 +723,6 @@ bool repairProductionResult(
                 adaptiveExtractedSet.insert(id);
             }
 
-            if (seedIds.empty()) {
-                break;
-            }
-
             largestAdaptiveGroup =
                 std::max(
                     largestAdaptiveGroup,
@@ -1005,6 +1001,7 @@ bool repairProductionResult(
 
                 AdaptiveRepairChange change;
                 change.sheetIndex = sheetIndex;
+                change.afterSheetIndex = afterSheetIt->second;
                 change.before = before;
                 change.after = afterIt->second;
                 change.conflictGroup =
