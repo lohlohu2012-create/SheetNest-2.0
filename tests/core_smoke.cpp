@@ -2124,6 +2124,46 @@ void testAdaptiveRepairLocalityAndDeduplication() {
     std::sort(signatures.begin(), signatures.end());
     assert(std::adjacent_find(signatures.begin(), signatures.end()) ==
            signatures.end());
+
+    // The adaptive history must also be free of repeated physical placement
+    // states, not just repeated conflict-group IDs. This catches A -> B -> A
+    // repair cycles that can otherwise use different conflict signatures.
+    std::vector<std::string> stateSignatures;
+    for (const auto& round : repairReport.adaptiveHistory) {
+        std::vector<std::string> tokens;
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < round.afterSheets.size();
+             ++sheetIndex) {
+            for (const auto& placement : round.afterSheets[sheetIndex]) {
+                const auto qx = static_cast<long long>(
+                    std::llround(placement.x * 1000000.0)
+                );
+                const auto qy = static_cast<long long>(
+                    std::llround(placement.y * 1000000.0)
+                );
+                tokens.push_back(
+                    std::to_string(sheetIndex) + ":" +
+                    placement.id + ":" +
+                    std::to_string(placement.rotation) + ":" +
+                    std::to_string(qx) + ":" +
+                    std::to_string(qy)
+                );
+            }
+        }
+        std::sort(tokens.begin(), tokens.end());
+        std::string stateSignature;
+        for (const auto& token : tokens) {
+            stateSignature += token;
+            stateSignature.push_back('|');
+        }
+        stateSignatures.push_back(std::move(stateSignature));
+    }
+
+    std::sort(stateSignatures.begin(), stateSignatures.end());
+    assert(std::adjacent_find(
+               stateSignatures.begin(),
+               stateSignatures.end()
+           ) == stateSignatures.end());
 }
 
 
