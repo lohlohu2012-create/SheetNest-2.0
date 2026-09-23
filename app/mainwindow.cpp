@@ -995,9 +995,11 @@ void MainWindow::connectUi() {
             }
 
             appendLog(
-                QString("NFP telemetry: таймауты=%1, complexity fallback=%2.")
+                QString("NFP telemetry: таймауты=%1, complexity fallback=%2, cache hit=%3, miss=%4.")
                     .arg(static_cast<qulonglong>(result_.stats.nfpTimeouts))
                     .arg(static_cast<qulonglong>(result_.stats.nfpComplexityFallbacks))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpCacheHits))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpCacheMisses))
             );
 
             appendLog(
