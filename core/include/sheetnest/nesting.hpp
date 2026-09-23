@@ -69,6 +69,10 @@ struct InstanceNestingTelemetry {
     std::size_t nfpTimeouts{};
     std::size_t nfpFallbacks{};
     std::uint64_t elapsedMs{};
+    std::size_t repairRounds{};
+    std::size_t repairConflictRounds{};
+    bool repairExtracted{};
+    bool repairMoved{};
     bool placed{};
 };
 
