@@ -3009,6 +3009,10 @@ void testAdaptiveRepairNewCollisionPriority() {
 } // namespace
 
 int main(int argc, char** argv) {
+    assert(std::string(productionPipelineStageName(ProductionPipelineStage::Nesting)) == "Nesting");
+    assert(std::string(productionPipelineStageName(ProductionPipelineStage::Complete)) == "Complete");
+    assert(std::string(productionPipelineStageName(ProductionPipelineStage::Failed)) == "Failed");
+
     if (argc > 1 &&
         std::string(argv[1]) == "--negative-gap-ordering") {
         testNegativeGapBeforeZeroCollisionRevalidation();
