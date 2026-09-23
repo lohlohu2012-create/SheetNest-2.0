@@ -24,6 +24,7 @@ struct BenchmarkCase {
     std::size_t optimizerPasses{};
     std::size_t nfpTimeouts{};
     std::size_t nfpComplexityFallbacks{};
+    std::size_t nfpTimeoutFallbacks{};
     std::size_t nfpCacheHits{};
     std::size_t nfpCacheMisses{};
     std::vector<std::string> placedInstanceIds;
