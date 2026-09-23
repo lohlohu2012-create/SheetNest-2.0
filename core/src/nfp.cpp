@@ -19,7 +19,7 @@ namespace {
 constexpr double kEps = 1e-9;
 constexpr double kPointEps = 1e-8;
 constexpr double kQuant = 1e6;
-constexpr std::size_t kMaxCacheEntries = 2048;
+constexpr std::size_t kMaxCacheEntries = 4096;
 
 struct SegmentPiece {
     Point a{};
