@@ -21,6 +21,7 @@ class QPlainTextEdit;
 class QLabel;
 class QProgressBar;
 class QSpinBox;
+class QSlider;
 class QPushButton;
 class QTableWidget;
 class QTabWidget;
