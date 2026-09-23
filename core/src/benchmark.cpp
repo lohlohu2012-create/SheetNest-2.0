@@ -41,6 +41,7 @@ BenchmarkCase runCase(
     benchmark.optimizerPasses = result.stats.optimizerPasses;
     benchmark.nfpTimeouts = result.stats.nfpTimeouts;
     benchmark.nfpComplexityFallbacks = result.stats.nfpComplexityFallbacks;
+    benchmark.nfpTimeoutFallbacks = result.stats.nfpTimeoutFallbacks;
     benchmark.nfpCacheHits = result.stats.nfpCacheHits;
     benchmark.nfpCacheMisses = result.stats.nfpCacheMisses;
     std::unordered_set<std::string> skipped(
