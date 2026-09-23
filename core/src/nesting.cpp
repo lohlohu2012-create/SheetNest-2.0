@@ -767,7 +767,9 @@ std::vector<Candidate> fallbackGridCandidates(
     const Polygon& part,
     int rotation,
     const Sheet& sheet,
-    double margin
+    double margin,
+    std::size_t columns = 32,
+    std::size_t rows = 16
 ) {
     std::vector<Candidate> result;
 
@@ -783,23 +785,21 @@ std::vector<Candidate> fallbackGridCandidates(
 
     // Emergency-only recovery path. NFP candidates are always preferred;
     // every grid point is still validated by the exact polygon predicate.
-    // Emergency fallback is intentionally bounded: NFP remains the primary
-    // search path. 512 exact-predicate samples are enough to recover from an
-    // incomplete NFP boundary without multiplying worst-case runtime by 4.
-    constexpr std::size_t kColumns = 32;
-    constexpr std::size_t kRows = 16;
+    // The caller may increase density only when NFP itself timed out, where
+    // a narrow feasible corridor is more likely to be under-sampled.
+    columns = std::max<std::size_t>(2, columns);
+    rows = std::max<std::size_t>(2, rows);
+    result.reserve(columns * rows);
 
-    result.reserve(kColumns * kRows);
-
-    for (std::size_t iy = 0; iy < kRows; ++iy) {
+    for (std::size_t iy = 0; iy < rows; ++iy) {
         const double ty =
             static_cast<double>(iy) /
-            static_cast<double>(kRows - 1);
+            static_cast<double>(rows - 1);
 
-        for (std::size_t ix = 0; ix < kColumns; ++ix) {
+        for (std::size_t ix = 0; ix < columns; ++ix) {
             const double tx =
                 static_cast<double>(ix) /
-                static_cast<double>(kColumns - 1);
+                static_cast<double>(columns - 1);
 
             const double x = minX + (maxX - minX) * tx;
             const double y = minY + (maxY - minY) * ty;
@@ -935,14 +935,25 @@ bool placeOnSheet(
 
     // Recovery for an incomplete NFP boundary sample. This path is only
     // entered after all true-shape candidates failed and is still protected
-    // by the exact collision and clearance predicate.
+    // by the exact collision and clearance predicate. When NFP timed out,
+    // use a denser deterministic grid to recover narrow feasible corridors.
+    // A controller timeout/cancel is still authoritative and never gets
+    // bypassed by this recovery path.
     if (!found) {
+        const std::size_t nfpTimeoutsBefore = stats ? stats->nfpTimeouts : 0;
+        const bool nfpTimedOut = stats && stats->nfpTimeouts > nfpTimeoutsBefore;
+        const std::size_t fallbackColumns = nfpTimedOut ? 48 : 32;
+        const std::size_t fallbackRows = nfpTimedOut ? 24 : 16;
         for (int rotation : rotations) {
+            if (shouldStop(options)) return false;
             for (const auto& candidate : fallbackGridCandidates(
                      instance.part.outer,
                      rotation,
                      sheet,
-                     sheet.edgeMarginMm)) {
+                     sheet.edgeMarginMm,
+                     fallbackColumns,
+                     fallbackRows)) {
+                if (shouldStop(options)) return false;
                 if (stats) ++stats->candidateChecks;
 
                 const auto shape =
