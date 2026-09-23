@@ -534,10 +534,10 @@ void MainWindow::buildUi() {
     repairViewLayout->addWidget(repairControls);
     repairViewLayout->addWidget(view_, 1);
 
-    diagnosticsTable_ = new QTableWidget(0, 23);
+    diagnosticsTable_ = new QTableWidget(0, 24);
     diagnosticsTable_->setHorizontalHeaderLabels({
         "instanceId", "unitId", "Source ID", "Лист", "Этап", "Сообщение",
-        "CAM ops", "CAM sec", "Repair", "Кандидаты", "NFP checks", "NFP timeout", "NFP fallback", "Bounds reject", "Collision reject", "Feasible", "Repair rounds", "Repair conflicts", "Extracted", "Moved", "Failure reason", "Nesting ms", "Final"
+        "CAM ops", "CAM sec", "Repair", "Кандидаты", "NFP checks", "NFP timeout", "NFP fallback", "NFP timeout fallback", "Bounds reject", "Collision reject", "Feasible", "Repair rounds", "Repair conflicts", "Extracted", "Moved", "Failure reason", "Nesting ms", "Final"
     });
     diagnosticsTable_->horizontalHeader()->setStretchLastSection(true);
     diagnosticsTable_->setSelectionBehavior(
@@ -545,12 +545,12 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 17);
+    benchmarkTable_ = new QTableWidget(0, 18);
     benchmarkTable_->setHorizontalHeaderLabels({
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
         "Использование", "Кандидаты", "Collision checks", "NFP checks",
         "Refill moves", "Exchange attempts", "Sheets eliminated",
-        "Optimizer passes", "NFP timeouts", "NFP fallbacks", "Placed IDs", "Skipped IDs"
+        "Optimizer passes", "NFP timeouts", "NFP complexity fallbacks", "NFP timeout fallbacks", "Placed IDs", "Skipped IDs"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1422,6 +1422,7 @@ void MainWindow::populateDiagnostics() {
             QString::number(static_cast<qulonglong>(d.nfpChecks)),
             QString::number(static_cast<qulonglong>(d.nfpTimeouts)),
             QString::number(static_cast<qulonglong>(d.nfpFallbacks)),
+            QString::number(static_cast<qulonglong>(d.nfpTimeoutFallbacks)),
             QString::number(static_cast<qulonglong>(d.boundsRejections)),
             QString::number(static_cast<qulonglong>(d.collisionRejections)),
             QString::number(static_cast<qulonglong>(d.feasibleCandidates)),
@@ -1434,7 +1435,7 @@ void MainWindow::populateDiagnostics() {
             QString::fromStdString(d.finalStatus)
         };
 
-        for (int column = 0; column < 23; ++column) {
+        for (int column = 0; column < 24; ++column) {
             diagnosticsTable_->setItem(
                 static_cast<int>(i),
                 column,
@@ -1530,6 +1531,7 @@ void MainWindow::populateBenchmark(
             QString::number(static_cast<qulonglong>(b.optimizerPasses)),
             QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
             QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+            QString::number(static_cast<qulonglong>(b.nfpTimeoutFallbacks)),
             QString::fromStdString(std::accumulate(
                 b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
                 std::string{},
@@ -1546,7 +1548,7 @@ void MainWindow::populateBenchmark(
             ))
         };
 
-        for (int column = 0; column < 17; ++column) {
+        for (int column = 0; column < 18; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
