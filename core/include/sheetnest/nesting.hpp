@@ -48,6 +48,9 @@ struct NestingStats {
     std::size_t optimizerPasses{};
     std::size_t nfpTimeouts{};
     std::size_t nfpComplexityFallbacks{};
+    std::size_t boundsRejections{};
+    std::size_t collisionRejections{};
+    std::size_t feasibleCandidates{};
 };
 
 enum class NestingFailureReason {
@@ -68,6 +71,9 @@ struct InstanceNestingTelemetry {
     std::size_t nfpChecks{};
     std::size_t nfpTimeouts{};
     std::size_t nfpFallbacks{};
+    std::size_t boundsRejections{};
+    std::size_t collisionRejections{};
+    std::size_t feasibleCandidates{};
     std::uint64_t elapsedMs{};
     std::size_t repairRounds{};
     std::size_t repairConflictRounds{};
