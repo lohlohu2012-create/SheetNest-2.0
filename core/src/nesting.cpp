@@ -817,6 +817,7 @@ bool placeOnSheet(
                 sheet.width + kEps ||
             rotatedBounds.height() + 2.0 * margin >
                 sheet.height + kEps) {
+            if (stats) ++stats->boundsRejections;
             continue;
         }
 
@@ -837,7 +838,10 @@ bool placeOnSheet(
             const auto shape =
                 transformed(instance, rotation, candidate.x, candidate.y);
 
-            if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) continue;
+            if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) {
+                if (stats) ++stats->boundsRejections;
+                continue;
+            }
 
             bool collision = false;
             const auto nearby = state.spatialIndex.query(
@@ -856,7 +860,12 @@ bool placeOnSheet(
                     break;
                 }
             }
-            if (collision) continue;
+            if (collision) {
+                if (stats) ++stats->collisionRejections;
+                continue;
+            }
+
+            if (stats) ++stats->feasibleCandidates;
 
             const auto merged = combinedBounds(state.shapes, shape);
             Candidate score = candidate;
@@ -901,7 +910,10 @@ bool placeOnSheet(
                 const auto shape =
                     transformed(instance, rotation, candidate.x, candidate.y);
 
-                if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) continue;
+                if (!fitsSheet(shape, sheet, sheet.edgeMarginMm)) {
+                    if (stats) ++stats->boundsRejections;
+                    continue;
+                }
 
                 bool collision = false;
                 const auto nearby = state.spatialIndex.query(
@@ -920,7 +932,12 @@ bool placeOnSheet(
                         break;
                     }
                 }
-                if (collision) continue;
+                if (collision) {
+                    if (stats) ++stats->collisionRejections;
+                    continue;
+                }
+
+                if (stats) ++stats->feasibleCandidates;
 
                 const auto merged = combinedBounds(state.shapes, shape);
                 Candidate score = candidate;
@@ -2225,6 +2242,9 @@ Result runAttempt(
         telemetry.nfpChecks += stats.nfpChecks - statsBeforeInstance.nfpChecks;
         telemetry.nfpTimeouts += stats.nfpTimeouts - statsBeforeInstance.nfpTimeouts;
         telemetry.nfpFallbacks += stats.nfpComplexityFallbacks - statsBeforeInstance.nfpComplexityFallbacks;
+        telemetry.boundsRejections += stats.boundsRejections - statsBeforeInstance.boundsRejections;
+        telemetry.collisionRejections += stats.collisionRejections - statsBeforeInstance.collisionRejections;
+        telemetry.feasibleCandidates += stats.feasibleCandidates - statsBeforeInstance.feasibleCandidates;
         telemetry.elapsedMs = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - telemetryStarted
