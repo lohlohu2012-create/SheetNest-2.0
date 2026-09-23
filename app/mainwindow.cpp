@@ -887,8 +887,8 @@ void MainWindow::connectUi() {
             result_ = output.result;
             technology_ = output.technology;
             validation_ = output.validation;
-            result_.cuttingRoute = output.cuttingRoute;
-            view_->setCuttingRoute(result_.cuttingRoute, sheet_.height);
+            cuttingRoute_ = output.cuttingRoute;
+            view_->setCuttingRoute(cuttingRoute_, sheet_.height);
             populateLaserOperationSelector();
             resetAdaptiveRepairAnimation();
             resetLaserAnimation();
@@ -1377,7 +1377,7 @@ void MainWindow::populateDiagnostics() {
     );
     enrichDiagnostics(
         diagnostics,
-        result_.cuttingRoute,
+        cuttingRoute_,
         validation_,
         &result_
     );
@@ -2149,7 +2149,7 @@ void MainWindow::exportBenchmarkResults() {
 
 // Production Validator: final export gate
 void MainWindow::exportCam() {
-    if (result_.cuttingRoute.operations.empty()) {
+    if (cuttingRoute_.operations.empty()) {
         QMessageBox::information(
             this,
             "Экспорт CAM",
@@ -2158,7 +2158,7 @@ void MainWindow::exportCam() {
         return;
     }
 
-    const auto report = validateCuttingPath(result_.cuttingRoute);
+    const auto report = validateCuttingPath(cuttingRoute_);
     if (!report.valid) {
         QMessageBox::warning(
             this,
@@ -2186,7 +2186,7 @@ void MainWindow::exportCam() {
 
     const std::string program =
         exportCamProgram(
-            result_.cuttingRoute,
+            cuttingRoute_,
             technology_,
             exportOptions
         );
@@ -2223,8 +2223,8 @@ void MainWindow::exportCam() {
     appendLog(
         QString("CAM экспортирован: %1 • операций %2 • %3 с")
             .arg(fileName)
-            .arg(static_cast<qulonglong>(result_.cuttingRoute.operations.size()))
-            .arg(result_.cuttingRoute.totalSeconds, 0, 'f', 1)
+            .arg(static_cast<qulonglong>(cuttingRoute_.operations.size()))
+            .arg(cuttingRoute_.totalSeconds, 0, 'f', 1)
     );
     statusBar()->showMessage("CAM программа сохранена");
 }
@@ -2744,7 +2744,7 @@ void MainWindow::refreshAdaptiveRepairView() {
         );
     }
 
-    view_->setCuttingRoute(result_.cuttingRoute, sheet_.height);
+    view_->setCuttingRoute(cuttingRoute_, sheet_.height);
     view_->showResult(
         result_,
         instances_,
@@ -3030,7 +3030,7 @@ void MainWindow::updateLaserAnimationUi() {
         cuttingRouteCheck_ &&
         cuttingRouteCheck_->isChecked() &&
         !result_.sheets.empty() &&
-        !result_.cuttingRoute.operations.empty();
+        !cuttingRoute_.operations.empty();
 
     if (laserPlayButton_) laserPlayButton_->setEnabled(
         hasRoute && !laserAnimationPlaying_);
@@ -3048,7 +3048,7 @@ void MainWindow::updateLaserAnimationUi() {
         !laserAnimationPlaying_ &&
         laserAnimationOperation_ >= 0 &&
         static_cast<std::size_t>(laserAnimationOperation_) <
-            result_.cuttingRoute.operations.size();
+            cuttingRoute_.operations.size();
 
     const auto setContourControl = [hasSelectedContour](QWidget* widget) {
         if (widget) widget->setEnabled(hasSelectedContour);
@@ -3075,22 +3075,22 @@ void MainWindow::updateLaserAnimationUi() {
     std::size_t activeOperation = 0;
     if (laserAnimationOperation_ >= 0 &&
         static_cast<std::size_t>(laserAnimationOperation_) <
-            result_.cuttingRoute.operations.size()) {
+            cuttingRoute_.operations.size()) {
         activeOperation =
             static_cast<std::size_t>(laserAnimationOperation_);
         for (std::size_t i = 0; i < activeOperation; ++i) {
-            elapsedSeconds += result_.cuttingRoute.operations[i].totalSeconds;
+            elapsedSeconds += cuttingRoute_.operations[i].totalSeconds;
         }
-        const auto& op = result_.cuttingRoute.operations[activeOperation];
+        const auto& op = cuttingRoute_.operations[activeOperation];
         const double p = std::clamp(laserContourProgress_, 0.0, 1.0);
         elapsedSeconds += op.rapidSeconds +
             op.pierceSeconds +
             op.cuttingSeconds * p;
     } else {
         const double p = std::clamp(laserAnimationProgress_, 0.0, 1.0);
-        const double total = result_.cuttingRoute.totalSeconds;
+        const double total = cuttingRoute_.totalSeconds;
         elapsedSeconds = total * p;
-        const std::size_t operationCount = result_.cuttingRoute.operations.size();
+        const std::size_t operationCount = cuttingRoute_.operations.size();
         if (operationCount == 0) {
             activeOperation = 0;
         } else {
@@ -3105,7 +3105,7 @@ void MainWindow::updateLaserAnimationUi() {
     }
 
     const double remainingSeconds =
-        std::max(0.0, result_.cuttingRoute.totalSeconds - elapsedSeconds);
+        std::max(0.0, cuttingRoute_.totalSeconds - elapsedSeconds);
     const int percent =
         static_cast<int>(std::lround(
             std::clamp(laserAnimationProgress_, 0.0, 1.0) * 100.0
@@ -3243,7 +3243,7 @@ void MainWindow::setBusy(bool busy) {
     exportCamButton_->setEnabled(
         !busy &&
         validation_.pipelineValid &&
-        !result_.cuttingRoute.operations.empty()
+        !cuttingRoute_.operations.empty()
     );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
 
