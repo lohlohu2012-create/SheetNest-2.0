@@ -2530,6 +2530,14 @@ void testDenseSmallPartPlacement() {
         assert(telemetry.reason == NestingFailureReason::None);
         assert(!telemetry.instanceId.empty());
         assert(!telemetry.unitId.empty());
+        assert(telemetry.candidateChecks > 0);
+        assert(telemetry.feasibleCandidates > 0);
+        assert(
+            telemetry.boundsRejections +
+            telemetry.collisionRejections +
+            telemetry.feasibleCandidates <=
+            telemetry.candidateChecks
+        );
     }
 
     // With 9x4 parts, 1 mm technological gap and a 100x50 sheet, a dense
