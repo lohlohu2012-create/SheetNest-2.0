@@ -846,10 +846,16 @@ std::vector<Polygon> noFitPolygons(
         const auto it = store.entries.find(key);
         if (it != store.entries.end()) {
             ++store.hits;
+            if (control && control->cacheHitCount) {
+                ++(*control->cacheHitCount);
+            }
             cachedPolygons = it->second.polygons;
             cacheHit = true;
         } else {
             ++store.misses;
+            if (control && control->cacheMissCount) {
+                ++(*control->cacheMissCount);
+            }
         }
     }
 
