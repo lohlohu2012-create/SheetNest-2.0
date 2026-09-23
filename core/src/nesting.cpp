@@ -1596,6 +1596,37 @@ bool refillExistingSheets(
                     usableWidth * usableHeight;
                 const double instanceArea = materialArea(instance->part);
 
+                // Build the envelope lower bounds once for this source
+                // instance. The states are unchanged while targets are being
+                // evaluated, so recomputing the same bounds inside every
+                // target check only adds CPU overhead.
+                std::vector<Bounds> targetLowerBounds(sourceIndex);
+                std::vector<bool> targetHasGeometry(sourceIndex, false);
+                for (std::size_t targetIndex = 0;
+                     targetIndex < sourceIndex;
+                     ++targetIndex) {
+                    if (states[targetIndex].shapes.empty()) continue;
+
+                    Bounds lowerBound =
+                        states[targetIndex].shapes.front().outerBounds;
+                    for (std::size_t i = 1;
+                         i < states[targetIndex].shapes.size();
+                         ++i) {
+                        const auto& b =
+                            states[targetIndex].shapes[i].outerBounds;
+                        lowerBound.minX =
+                            std::min(lowerBound.minX, b.minX);
+                        lowerBound.minY =
+                            std::min(lowerBound.minY, b.minY);
+                        lowerBound.maxX =
+                            std::max(lowerBound.maxX, b.maxX);
+                        lowerBound.maxY =
+                            std::max(lowerBound.maxY, b.maxY);
+                    }
+                    targetLowerBounds[targetIndex] = lowerBound;
+                    targetHasGeometry[targetIndex] = true;
+                }
+
                 for (std::size_t targetIndex = 0;
                      targetIndex < sourceIndex;
                      ++targetIndex) {
@@ -1621,24 +1652,9 @@ bool refillExistingSheets(
                     // current envelope is already worse cannot improve it.
                     // This prunes only provably dominated targets and leaves
                     // true-shape feasibility untouched.
-                    if (foundTarget && !states[targetIndex].shapes.empty()) {
-                        Bounds lowerBound =
-                            states[targetIndex].shapes.front().outerBounds;
-                        for (std::size_t i = 1;
-                             i < states[targetIndex].shapes.size();
-                             ++i) {
-                            const auto& b =
-                                states[targetIndex].shapes[i].outerBounds;
-                            lowerBound.minX =
-                                std::min(lowerBound.minX, b.minX);
-                            lowerBound.minY =
-                                std::min(lowerBound.minY, b.minY);
-                            lowerBound.maxX =
-                                std::max(lowerBound.maxX, b.maxX);
-                            lowerBound.maxY =
-                                std::max(lowerBound.maxY, b.maxY);
-                        }
-
+                    if (foundTarget && targetHasGeometry[targetIndex]) {
+                        const auto& lowerBound =
+                            targetLowerBounds[targetIndex];
                         const double lowerBoundArea =
                             lowerBound.width() * lowerBound.height();
 
