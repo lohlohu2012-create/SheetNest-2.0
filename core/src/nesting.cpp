@@ -528,6 +528,8 @@ std::vector<Candidate> candidatesFor(
     if (stats) {
         nfpControl.timeoutCount = &stats->nfpTimeouts;
         nfpControl.complexityFallbackCount = &stats->nfpComplexityFallbacks;
+        nfpControl.cacheHitCount = &stats->nfpCacheHits;
+        nfpControl.cacheMissCount = &stats->nfpCacheMisses;
     }
 
     for (const auto& placed : sheet.shapes) {
