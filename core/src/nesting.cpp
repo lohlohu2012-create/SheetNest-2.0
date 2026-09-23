@@ -2370,6 +2370,91 @@ Result runAttempt(
         result.unplaced = std::move(remaining);
     }
 
+    // Bounded new-sheet recovery: residual instances may have failed because
+    // the original ordering exhausted the useful candidate search budget.
+    // Give each residual instance one deterministic attempt on a fresh sheet.
+    // This is deliberately separate from the residual-space refill so it can
+    // never create an unbounded sheet-generation loop.
+    if (!result.unplaced.empty() && !shouldStop(options)) {
+        std::vector<std::string> recovered;
+        recovered.reserve(result.unplaced.size());
+
+        for (const auto& id : result.unplaced) {
+            if (shouldStop(options)) break;
+
+            const auto* instance = findInstance(instances, id);
+            if (!instance) continue;
+
+            SheetState recoveryState;
+            const auto before = stats;
+            const bool placed = placeOnSheet(
+                *instance,
+                sheet,
+                options,
+                recoveryState,
+                effectiveRotations(options),
+                &stats
+            );
+
+            const auto telemetryIt = std::find_if(
+                result.instanceTelemetry.begin(),
+                result.instanceTelemetry.end(),
+                [&](const InstanceNestingTelemetry& telemetry) {
+                    return telemetry.instanceId == id;
+                }
+            );
+
+            if (telemetryIt != result.instanceTelemetry.end()) {
+                telemetryIt->candidateChecks +=
+                    stats.candidateChecks - before.candidateChecks;
+                telemetryIt->collisionChecks +=
+                    stats.collisionChecks - before.collisionChecks;
+                telemetryIt->nfpChecks +=
+                    stats.nfpChecks - before.nfpChecks;
+                telemetryIt->nfpTimeouts +=
+                    stats.nfpTimeouts - before.nfpTimeouts;
+                telemetryIt->nfpFallbacks +=
+                    stats.nfpComplexityFallbacks -
+                    before.nfpComplexityFallbacks;
+                telemetryIt->boundsRejections +=
+                    stats.boundsRejections - before.boundsRejections;
+                telemetryIt->collisionRejections +=
+                    stats.collisionRejections -
+                    before.collisionRejections;
+                telemetryIt->feasibleCandidates +=
+                    stats.feasibleCandidates -
+                    before.feasibleCandidates;
+            }
+
+            if (placed) {
+                states.push_back(std::move(recoveryState));
+                recovered.push_back(id);
+
+                if (telemetryIt != result.instanceTelemetry.end()) {
+                    telemetryIt->placed = true;
+                    telemetryIt->reason = NestingFailureReason::None;
+                }
+            }
+        }
+
+        if (!recovered.empty()) {
+            result.unplaced.erase(
+                std::remove_if(
+                    result.unplaced.begin(),
+                    result.unplaced.end(),
+                    [&](const std::string& id) {
+                        return std::find(
+                            recovered.begin(),
+                            recovered.end(),
+                            id
+                        ) != recovered.end();
+                    }
+                ),
+                result.unplaced.end()
+            );
+        }
+    }
+
     result.sheets.reserve(states.size());
     double placedArea = 0.0;
     for (auto& state : states) {
