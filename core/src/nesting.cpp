@@ -859,6 +859,7 @@ bool placeOnSheet(
             continue;
         }
 
+        const std::size_t nfpTimeoutsBefore = stats ? stats->nfpTimeouts : 0;
         for (const auto& candidate : candidatesFor(
                  instance.part.outer,
                  instance.part.holes,
@@ -940,7 +941,6 @@ bool placeOnSheet(
     // A controller timeout/cancel is still authoritative and never gets
     // bypassed by this recovery path.
     if (!found) {
-        const std::size_t nfpTimeoutsBefore = stats ? stats->nfpTimeouts : 0;
         const bool nfpTimedOut = stats && stats->nfpTimeouts > nfpTimeoutsBefore;
         const std::size_t fallbackColumns = nfpTimedOut ? 48 : 32;
         const std::size_t fallbackRows = nfpTimedOut ? 24 : 16;
