@@ -109,8 +109,8 @@ TechnologyValidationReport validateBodor3kWTechnology() {
 
 CuttingParameters bodor3kWParameters(Material material, double thicknessMm) {
     CuttingParameters result{material, thicknessMm, 0.0, {}};
-    const TechnologyRow* lower = nullptr;
-    const TechnologyRow* upper = nullptr;
+    const TechnologyRowData* lower = nullptr;
+    const TechnologyRowData* upper = nullptr;
 
     for (const auto& row : kBodor3kW) {
         if (row.material != material) continue;
