@@ -167,7 +167,7 @@ MainWindow::MainWindow(QWidget* parent)
     statusBar()->showMessage("Готово");
     updateTechnologyPreview();
 
-    const technologyReport = validateBodor3kWTechnology();
+    const auto technologyReport = validateBodor3kWTechnology();
     if (!technologyReport.valid) {
         appendLog(
             QString("TECHNOLOGY DB: ОШИБКА • строк=%1 • invalid=%2 • duplicates=%3")
@@ -1877,7 +1877,7 @@ CalculationOutput MainWindow::performCalculation(
     routeOptions.pierceSeconds = 0.25;
     output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
 
-    const camValidation = validateCuttingPath(output.cuttingRoute);
+    const auto camValidation = validateCuttingPath(output.cuttingRoute);
     if (!camValidation.valid) {
         output.validation.pipelineStage = ProductionPipelineStage::Failed;
         output.validation.pipelineMessage =
@@ -1887,7 +1887,7 @@ CalculationOutput MainWindow::performCalculation(
         output.validation.pipelineMessage = "CAM Validation: OK.";
     }
 
-    const exportedDxf =
+    const auto exportedDxf =
         exportNestDxf(output.result, instances, sheet);
     if (exportedDxf.empty()) {
         output.validation.pipelineStage = ProductionPipelineStage::Failed;
@@ -1898,7 +1898,7 @@ CalculationOutput MainWindow::performCalculation(
     }
 
     if (!exportedDxf.empty()) {
-        const auto roundTripDocument = importDxf(exportedDxf);
+        const auto roundTripDocument = sheetnest::importDxf(exportedDxf);
         const auto roundTripPreflight = preflightDxf(roundTripDocument);
         if (!roundTripPreflight.valid) {
             output.validation.pipelineStage = ProductionPipelineStage::Failed;
