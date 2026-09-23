@@ -3090,18 +3090,18 @@ void MainWindow::updateLaserAnimationUi() {
         const double p = std::clamp(laserAnimationProgress_, 0.0, 1.0);
         const double total = cuttingRoute.totalSeconds;
         elapsedSeconds = total * p;
-        activeOperation = std::min(
-            cuttingRoute.operations.empty()
-                ? std::size_t(0)
-                : cuttingRoute.operations.size() - 1,
-            static_cast<std::size_t>(
-                std::floor(
-                    p * static_cast<double>(
-                        std::max<std::size_t>(1, cuttingRoute.operations.size())
-                    )
-                )
-            )
-        );
+        const std::size_t operationCount = cuttingRoute.operations.size();
+        if (operationCount == 0) {
+            activeOperation = 0;
+        } else {
+            const auto candidate = static_cast<std::size_t>(
+                std::floor(p * static_cast<double>(operationCount))
+            );
+            activeOperation = std::min(
+                operationCount - 1,
+                candidate
+            );
+        }
     }
 
     const double remainingSeconds =
