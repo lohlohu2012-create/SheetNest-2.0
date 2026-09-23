@@ -546,8 +546,29 @@ std::vector<Candidate> candidatesFor(
         // Continuous NFP feasibility boundary: candidate positions are
         // generated along the entire admissible boundary, not only at NFP
         // vertices. Final collision/clearance checks remain authoritative.
-        if (placementMaxX >= placementMinX &&
-            placementMaxY >= placementMinY) {
+        // Safe NFP broad phase: if the expanded AABB of the fixed
+        // outer contour cannot intersect the moving part's admissible
+        // translation domain, the forbidden region is completely outside
+        // the search rectangle and computing its NFP cannot add a candidate.
+        // Ring/hole candidates above remain available; exact collision checks
+        // remain authoritative for every candidate that is emitted.
+        const double forbiddenMinX =
+            placed.outerBounds.minX - pb.maxX - g;
+        const double forbiddenMaxX =
+            placed.outerBounds.maxX - pb.minX + g;
+        const double forbiddenMinY =
+            placed.outerBounds.minY - pb.maxY - g;
+        const double forbiddenMaxY =
+            placed.outerBounds.maxY - pb.minY + g;
+        const bool nfpDomainIntersects =
+            placementMaxX >= placementMinX &&
+            placementMaxY >= placementMinY &&
+            forbiddenMaxX >= placementMinX - kEps &&
+            forbiddenMinX <= placementMaxX + kEps &&
+            forbiddenMaxY >= placementMinY - kEps &&
+            forbiddenMinY <= placementMaxY + kEps;
+
+        if (nfpDomainIntersects) {
             if (control && control->shouldStop()) break;
             if (stats) ++stats->nfpChecks;
 
