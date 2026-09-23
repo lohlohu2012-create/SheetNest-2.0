@@ -112,6 +112,7 @@ private:
     sheetnest::Sheet sheet_;
     sheetnest::Options options_;
     sheetnest::CuttingParameters technology_;
+    sheetnest::CuttingPath cuttingRoute_;
     QString currentFile_;
 
     NestView* view_{};
