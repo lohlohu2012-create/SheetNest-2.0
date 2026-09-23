@@ -2611,6 +2611,71 @@ void testDenseSmallPartPlacement() {
     assert(result.unplaced.empty());
 }
 
+void testPlacementAccountingAfterRefill() {
+    // Regression for the post-refill reconciliation path: every requested
+    // instance must occur exactly once either in final sheets or in unplaced.
+    // This deliberately uses enough small parts to exercise multiple refill
+    // passes while keeping the fixture deterministic and fast.
+    std::vector<Instance> parts;
+    constexpr int kInstances = 120;
+    parts.reserve(kInstances);
+    for (int i = 0; i < kInstances; ++i) {
+        parts.push_back({
+            "accounting-" + std::to_string(i),
+            Part{"accounting-part", rectangle(7.0, 5.0), {}}
+        });
+    }
+
+    Sheet sheet{100.0, 60.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 10;
+    options.gapMm = 1.0;
+    options.enableSmallPartOptimization = true;
+    options.smallPartAreaRatio = 0.30;
+    options.smallPartCandidateBudget = 1536;
+    options.smallPartBoundarySpacingMm = 1.0;
+    options.smallPartRefillPasses = 6;
+    options.enableOptimizer = true;
+
+    const auto result = nest(parts, sheet, options);
+
+    std::unordered_set<std::string> requested;
+    for (const auto& instance : parts) {
+        assert(requested.insert(instance.id).second);
+    }
+
+    std::unordered_set<std::string> placed;
+    for (const auto& placements : result.sheets) {
+        for (const auto& placement : placements) {
+            assert(requested.contains(placement.id));
+            assert(placed.insert(placement.id).second);
+        }
+    }
+
+    std::unordered_set<std::string> unplaced;
+    for (const auto& id : result.unplaced) {
+        assert(requested.contains(id));
+        assert(unplaced.insert(id).second);
+        assert(!placed.contains(id));
+    }
+
+    assert(placed.size() + unplaced.size() == requested.size());
+    assert(result.instanceTelemetry.size() == parts.size());
+
+    for (const auto& telemetry : result.instanceTelemetry) {
+        assert(requested.contains(telemetry.instanceId));
+        const bool isPlaced = placed.contains(telemetry.instanceId);
+        const bool isUnplaced = unplaced.contains(telemetry.instanceId);
+        assert(isPlaced != isUnplaced);
+        assert(telemetry.placed == isPlaced);
+
+        if (isPlaced) {
+            assert(telemetry.reason == NestingFailureReason::None);
+        }
+    }
+}
+
 void testMinimumSheets() {
     std::vector<Instance> parts;
     for (int i = 0; i < 3; ++i) {
@@ -3108,6 +3173,7 @@ int main(int argc, char** argv) {
     testConcaveNfpCandidates();
     testReadableValidationErrors();
     testDenseSmallPartPlacement();
+    testPlacementAccountingAfterRefill();
     testMinimumSheets();
     testProductionValidator();
     testSpatialIndexBroadPhase();
