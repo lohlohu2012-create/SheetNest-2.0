@@ -23,6 +23,7 @@
 #include <vector>
 #include <atomic>
 #include <cstdlib>
+#include <unordered_set>
 #include <chrono>
 
 using namespace sheetnest;
