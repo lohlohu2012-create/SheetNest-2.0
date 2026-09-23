@@ -653,27 +653,58 @@ std::vector<Candidate> candidatesFor(
     );
 
     if (result.size() > candidateLimit) {
-        if (options.enableSmallPartOptimization &&
-            materialArea(Part{"", part, {}}) <=
-                std::max(
-                    1.0,
-                    sheetSize.width * sheetSize.height *
-                    std::clamp(
-                        options.smallPartAreaRatio,
-                        0.001,
-                        0.25
+        if (smallPart) {
+            // For dense small-part packing, Y/X order alone can discard the
+            // candidates that actually close a narrow residual gap. Evaluate
+            // a bounded front pool with the same cheap broad-phase contact
+            // score used by placeOnSheet, then keep a deterministic spatial
+            // sample from the remainder so distant feasibility segments are
+            // still represented.
+            const std::size_t contactPool =
+                std::min(
+                    result.size(),
+                    std::max<std::size_t>(
+                        candidateLimit,
+                        std::min<std::size_t>(
+                            result.size(),
+                            candidateLimit * 4
+                        )
                     )
-                )) {
-            // Keep the best score-front candidates, but do not let the
-            // Y/X sort erase entire feasibility-boundary segments. The
-            // remainder of the budget is sampled deterministically across
-            // the full candidate set, preserving narrow/interlocking spaces
-            // that may occur far from the current lowest-Y frontier.
-            const std::size_t frontBudget =
-                std::max<std::size_t>(
-                    1,
-                    candidateLimit * 3 / 5
                 );
+
+            for (std::size_t i = 0; i < contactPool; ++i) {
+                const auto candidateShape =
+                    transformed(
+                        Instance{
+                            "small-candidate",
+                            Part{"small-candidate", part, holes}
+                        },
+                        rotation,
+                        result[i].x,
+                        result[i].y
+                    );
+                result[i].scoreContact = narrowSpaceScore(
+                    candidateShape,
+                    sheet,
+                    sheetSize,
+                    gap
+                );
+            }
+
+            std::stable_sort(
+                result.begin(),
+                result.begin() +
+                    static_cast<std::ptrdiff_t>(contactPool),
+                [](const Candidate& a, const Candidate& b) {
+                    if (a.scoreContact > b.scoreContact + kEps) return true;
+                    if (b.scoreContact > a.scoreContact + kEps) return false;
+                    return std::tie(a.scoreY, a.scoreX) <
+                           std::tie(b.scoreY, b.scoreX);
+                }
+            );
+
+            const std::size_t frontBudget =
+                std::max<std::size_t>(1, candidateLimit * 7 / 10);
             const std::size_t distributedBudget =
                 candidateLimit - frontBudget;
 
@@ -681,36 +712,40 @@ std::vector<Candidate> candidatesFor(
             diversified.reserve(candidateLimit);
 
             for (std::size_t i = 0;
-                 i < frontBudget && i < result.size();
+                 i < frontBudget && i < contactPool;
                  ++i) {
                 diversified.push_back(result[i]);
             }
 
             if (distributedBudget > 0 &&
                 result.size() > frontBudget) {
+                const std::size_t tailStart =
+                    std::min(frontBudget, result.size() - 1);
                 const std::size_t tailSize =
-                    result.size() - frontBudget;
+                    result.size() - tailStart;
 
                 for (std::size_t k = 0;
                      k < distributedBudget;
                      ++k) {
                     const std::size_t index =
-                        frontBudget +
+                        tailStart +
                         (k * (tailSize - 1)) /
                         std::max<std::size_t>(
                             1,
                             distributedBudget - 1
                         );
 
-                    if (diversified.empty() ||
-                        std::abs(
-                            diversified.back().x - result[index].x
-                        ) > 1e-6 ||
-                        std::abs(
-                            diversified.back().y - result[index].y
-                        ) > 1e-6) {
-                        diversified.push_back(result[index]);
+                    const auto& candidate = result[index];
+                    bool duplicate = false;
+                    for (const auto& selected : diversified) {
+                        if (std::abs(selected.x - candidate.x) <= 1e-6 &&
+                            std::abs(selected.y - candidate.y) <= 1e-6) {
+                            duplicate = true;
+                            break;
+                        }
                     }
+
+                    if (!duplicate) diversified.push_back(candidate);
                 }
             }
 
