@@ -2004,6 +2004,8 @@ void MainWindow::exportBenchmarkResults() {
         object["optimizerPasses"] = static_cast<qint64>(b.optimizerPasses);
         object["nfpTimeouts"] = static_cast<qint64>(b.nfpTimeouts);
         object["nfpComplexityFallbacks"] = static_cast<qint64>(b.nfpComplexityFallbacks);
+        object["nfpCacheHits"] = static_cast<qint64>(b.nfpCacheHits);
+        object["nfpCacheMisses"] = static_cast<qint64>(b.nfpCacheMisses);
         QJsonArray placed;
         for (const auto& id : b.placedInstanceIds) {
             placed.append(QString::fromStdString(id));
@@ -2027,6 +2029,8 @@ void MainWindow::exportBenchmarkResults() {
             t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
             t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
             t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+            t["nfpCacheHits"] = static_cast<qint64>(item.nfpCacheHits);
+            t["nfpCacheMisses"] = static_cast<qint64>(item.nfpCacheMisses);
             t["repairRounds"] = static_cast<qint64>(item.repairRounds);
             t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
             t["repairExtracted"] = item.repairExtracted;
@@ -2061,7 +2065,7 @@ void MainWindow::exportBenchmarkResults() {
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,nfpCacheHits,nfpCacheMisses,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -2086,6 +2090,8 @@ void MainWindow::exportBenchmarkResults() {
                 QString::number(static_cast<qulonglong>(b.optimizerPasses)),
                 QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
                 QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+                QString::number(static_cast<qulonglong>(b.nfpCacheHits)),
+                QString::number(static_cast<qulonglong>(b.nfpCacheMisses)),
                 QString::fromStdString(std::accumulate(
                     b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
                     std::string{},
@@ -2112,6 +2118,8 @@ void MainWindow::exportBenchmarkResults() {
                         t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
                         t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
                         t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+                        t["nfpCacheHits"] = static_cast<qint64>(item.nfpCacheHits);
+                        t["nfpCacheMisses"] = static_cast<qint64>(item.nfpCacheMisses);
                         t["repairRounds"] = static_cast<qint64>(item.repairRounds);
                         t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
                         t["repairExtracted"] = item.repairExtracted;
@@ -2125,7 +2133,7 @@ void MainWindow::exportBenchmarkResults() {
                 }()
             };
 
-            for (int i = 0; i < 18; ++i) {
+            for (int i = 0; i < 20; ++i) {
                 if (i > 0) row += ',';
                 appendCsvField(row, values[i]);
             }
