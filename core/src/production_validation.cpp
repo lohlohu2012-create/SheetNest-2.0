@@ -785,6 +785,46 @@ bool repairProductionResult(
         };
     };
 
+    // Adaptive repair is transactional. Treat a candidate with the same
+    // placement state as a no-op, even if the repair routine rebuilt its
+    // internal containers. This prevents consuming repair rounds on geometry
+    // that did not actually change.
+    auto samePlacementState = [](
+        const Result& a,
+        const Result& b
+    ) {
+        if (a.sheets.size() != b.sheets.size()) return false;
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < a.sheets.size();
+             ++sheetIndex) {
+            if (a.sheets[sheetIndex].size() !=
+                b.sheets[sheetIndex].size()) {
+                return false;
+            }
+
+            std::unordered_map<std::string, Placement> aById;
+            std::unordered_map<std::string, Placement> bById;
+            for (const auto& placement : a.sheets[sheetIndex]) {
+                aById[placement.id] = placement;
+            }
+            for (const auto& placement : b.sheets[sheetIndex]) {
+                bById[placement.id] = placement;
+            }
+            if (aById.size() != bById.size()) return false;
+
+            for (const auto& [id, placement] : aById) {
+                const auto it = bById.find(id);
+                if (it == bById.end()) return false;
+                if (placement.rotation != it->second.rotation ||
+                    std::abs(placement.x - it->second.x) > 1e-6 ||
+                    std::abs(placement.y - it->second.y) > 1e-6) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
     Result bestValid;
     bool foundValid = false;
     std::size_t actualAttempts = 0;
@@ -1232,6 +1272,12 @@ bool repairProductionResult(
                 if (!adaptiveDestroyAndRepairResult(
                         instances, sheet, repairOptions, levelIds,
                         levelCandidate, &levelExtractedIds)) {
+                    continue;
+                }
+
+                if (samePlacementState(levelBefore, levelCandidate)) {
+                    // No physical change: do not count or record a fake repair
+                    // round and do not advance the repair hierarchy.
                     continue;
                 }
 
