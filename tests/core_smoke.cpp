@@ -2524,6 +2524,13 @@ void testDenseSmallPartPlacement() {
         }
     }
     assert(placedCount == static_cast<std::size_t>(kInstances));
+    assert(result.instanceTelemetry.size() == parts.size());
+    for (const auto& telemetry : result.instanceTelemetry) {
+        assert(telemetry.placed);
+        assert(telemetry.reason == NestingFailureReason::None);
+        assert(!telemetry.instanceId.empty());
+        assert(!telemetry.unitId.empty());
+    }
 
     // With 9x4 parts, 1 mm technological gap and a 100x50 sheet, a dense
     // layout has substantial opportunity for narrow strip reuse. Requiring
