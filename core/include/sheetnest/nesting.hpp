@@ -48,6 +48,8 @@ struct NestingStats {
     std::size_t optimizerPasses{};
     std::size_t nfpTimeouts{};
     std::size_t nfpComplexityFallbacks{};
+    std::size_t nfpCacheHits{};
+    std::size_t nfpCacheMisses{};
     std::size_t boundsRejections{};
     std::size_t collisionRejections{};
     std::size_t feasibleCandidates{};
