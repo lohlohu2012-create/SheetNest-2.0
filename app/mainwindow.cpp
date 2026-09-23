@@ -952,16 +952,17 @@ void MainWindow::connectUi() {
                         "Не размещено: %3\n"
                         "Использование: %4%\n"
                         "Production Validator: %5\n"
-                         "Pipeline: %6\n"
-                        "Длина реза: %6 м\n"
-                        "Пробивок: %7\n"
-                        "Время лазерной резки: %8 ч %9 мин")
+                        "Pipeline: %6\n"
+                        "Длина реза: %7 м\n"
+                        "Пробивок: %8\n"
+                        "Время лазерной резки: %9 ч %10 мин")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(static_cast<int>(
                         instances_.size() - result_.unplaced.size()))
                     .arg(static_cast<int>(result_.unplaced.size()))
                     .arg(result_.utilization * 100.0, 0, 'f', 1)
                     .arg(validation_.valid ? "OK" : "ОШИБКА")
+                    .arg(QString::fromUtf8(productionPipelineStageName(validation_.pipelineStage)))
                     .arg(output.cutting.contourLengthMm / 1000.0, 0, 'f', 2)
                     .arg(output.cutting.pierces)
                     .arg(hours)
@@ -1001,12 +1002,10 @@ void MainWindow::connectUi() {
 
             appendLog(
                 QString("Production Pipeline: %1; stage=%2; %3")
-                    .arg(validation_.valid ? "OK" : "ОШИБКА")
-                    .arg(static_cast<qulonglong>(validation_.collisionCount))
-                    .arg(static_cast<qulonglong>(validation_.gapViolationCount))
-                    .arg(static_cast<qulonglong>(validation_.marginViolationCount))
-                    .arg(static_cast<qulonglong>(validation_.duplicateIdCount))
-                    .arg(static_cast<qulonglong>(validation_.missingIdCount))
+                    .arg(validation_.pipelineValid ? "COMPLETE" : "ОШИБКА")
+                    .arg(QString::fromUtf8(
+                        productionPipelineStageName(validation_.pipelineStage)))
+                    .arg(QString::fromStdString(validation_.pipelineMessage))
             );
 
             if (validation_.repairAttempts > 0 ||
