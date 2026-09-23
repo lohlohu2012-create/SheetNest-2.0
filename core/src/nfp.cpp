@@ -839,37 +839,36 @@ std::vector<Polygon> noFitPolygons(
     );
 
     CacheStore& store = cacheStore();
+    std::vector<Polygon> cachedPolygons;
+    bool cacheHit = false;
     {
         std::lock_guard<std::mutex> lock(store.mutex);
         const auto it = store.entries.find(key);
         if (it != store.entries.end()) {
             ++store.hits;
-
-            const auto [fixedCanonical, fixedOrigin] = canonicalize(fixed);
-            const auto [movingCanonical, movingOrigin] =
-                canonicalize(rotate(moving, normalizedRotation));
-
-            (void)fixedCanonical;
-            return [&] {
-                std::vector<Polygon> restored;
-                restored.reserve(it->second.polygons.size());
-
-                const double dx = fixedOrigin.x - movingOrigin.x;
-                const double dy = fixedOrigin.y - movingOrigin.y;
-
-                for (const auto& polygon : it->second.polygons) {
-                    restored.push_back(translate(polygon, dx, dy));
-                }
-                return restored;
-            }();
+            cachedPolygons = it->second.polygons;
+            cacheHit = true;
+        } else {
+            ++store.misses;
         }
-
-        ++store.misses;
     }
 
     const auto [fixedCanonical, fixedOrigin] = canonicalize(fixed);
     const auto [movingCanonical, movingOrigin] =
         canonicalize(rotate(moving, normalizedRotation));
+
+    if (cacheHit) {
+        std::vector<Polygon> restored;
+        restored.reserve(cachedPolygons.size());
+
+        const double dx = fixedOrigin.x - movingOrigin.x;
+        const double dy = fixedOrigin.y - movingOrigin.y;
+
+        for (const auto& polygon : cachedPolygons) {
+            restored.push_back(translate(polygon, dx, dy));
+        }
+        return restored;
+    }
 
     const auto computed = computeUnionNfp(
         fixedCanonical,
