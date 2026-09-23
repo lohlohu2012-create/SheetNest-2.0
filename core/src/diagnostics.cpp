@@ -117,6 +117,9 @@ void enrichDiagnostics(
                 diagnostic.nfpChecks = telemetry.nfpChecks;
                 diagnostic.nfpTimeouts = telemetry.nfpTimeouts;
                 diagnostic.nfpFallbacks = telemetry.nfpFallbacks;
+                diagnostic.boundsRejections = telemetry.boundsRejections;
+                diagnostic.collisionRejections = telemetry.collisionRejections;
+                diagnostic.feasibleCandidates = telemetry.feasibleCandidates;
                 diagnostic.nestingElapsedMs = telemetry.elapsedMs;
                 diagnostic.repairRounds = telemetry.repairRounds;
                 diagnostic.repairConflictRounds = telemetry.repairConflictRounds;
