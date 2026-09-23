@@ -1954,6 +1954,10 @@ void MainWindow::exportBenchmarkResults() {
             t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
             t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
             t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+            t["repairRounds"] = static_cast<qint64>(item.repairRounds);
+            t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
+            t["repairExtracted"] = item.repairExtracted;
+            t["repairMoved"] = item.repairMoved;
             t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
             telemetry.append(t);
         }
@@ -2035,6 +2039,10 @@ void MainWindow::exportBenchmarkResults() {
                         t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
                         t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
                         t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+                        t["repairRounds"] = static_cast<qint64>(item.repairRounds);
+                        t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
+                        t["repairExtracted"] = item.repairExtracted;
+                        t["repairMoved"] = item.repairMoved;
                         t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
                         telemetry.append(t);
                     }
