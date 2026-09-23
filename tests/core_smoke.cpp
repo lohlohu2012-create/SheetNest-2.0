@@ -796,6 +796,9 @@ void testDxfExportRoundTrip() {
 
     const auto roundTrip = importDxf(exported, 0.05);
     assert(roundTrip.valid());
+    const auto roundTripPreflight = preflightDxf(roundTrip);
+    assert(roundTripPreflight.valid);
+    assert(roundTripPreflight.validParts == 1);
     assert(roundTrip.contours.size() == 1);
     assert(roundTrip.contours.front().holes.size() == 1);
 }
