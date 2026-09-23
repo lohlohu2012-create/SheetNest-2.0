@@ -1530,10 +1530,32 @@ bool refillExistingSheets(
                     std::numeric_limits<double>::infinity();
                 SheetState bestTargetTrial;
 
+                const double usableWidth = std::max(
+                    0.0,
+                    sheet.width - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+                );
+                const double usableHeight = std::max(
+                    0.0,
+                    sheet.height - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+                );
+                const double usableSheetArea =
+                    usableWidth * usableHeight;
+                const double instanceArea = materialArea(instance->part);
+
                 for (std::size_t targetIndex = 0;
                      targetIndex < sourceIndex;
                      ++targetIndex) {
                     if (shouldStop(options)) break;
+
+                    // Safe area lower bound: if the material already placed
+                    // on a sheet plus this instance exceeds the usable sheet
+                    // area, no geometric arrangement can fit it there. This
+                    // avoids an expensive NFP attempt without rejecting any
+                    // physically feasible placement.
+                    if (states[targetIndex].placedArea + instanceArea >
+                        usableSheetArea + kEps) {
+                        continue;
+                    }
 
                     SheetState targetTrial =
                         states[targetIndex];
