@@ -2089,17 +2089,22 @@ Result runAttempt(
             instance.id,
             instance.unitId.empty() ? instance.id + ":unit-1" : instance.unitId,
             NestingFailureReason::None,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            false,
-            false,
-            false
+            0, // candidateChecks
+            0, // collisionChecks
+            0, // nfpChecks
+            0, // nfpTimeouts
+            0, // nfpFallbacks
+            0, // nfpCacheHits
+            0, // nfpCacheMisses
+            0, // boundsRejections
+            0, // collisionRejections
+            0, // feasibleCandidates
+            0, // elapsedMs
+            0, // repairRounds
+            0, // repairConflictRounds
+            false, // repairExtracted
+            false, // repairMoved
+            false  // placed
         });
     }
 
