@@ -842,6 +842,7 @@ bool placeOnSheet(
     }
 
     const double margin = std::max(0.0, sheet.edgeMarginMm);
+    const std::size_t nfpTimeoutsBefore = stats ? stats->nfpTimeouts : 0;
 
     for (int rotation : rotations) {
         if (shouldStop(options)) return false;
@@ -859,7 +860,6 @@ bool placeOnSheet(
             continue;
         }
 
-        const std::size_t nfpTimeoutsBefore = stats ? stats->nfpTimeouts : 0;
         for (const auto& candidate : candidatesFor(
                  instance.part.outer,
                  instance.part.holes,
