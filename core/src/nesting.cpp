@@ -2007,11 +2007,27 @@ bool compactResult(
             double bestEnvelopeArea =
                 std::numeric_limits<double>::infinity();
 
+            const double usableWidth = std::max(
+                0.0,
+                sheet.width - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+            );
+            const double usableHeight = std::max(
+                0.0,
+                sheet.height - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+            );
+            const double usableSheetArea = usableWidth * usableHeight;
+            const double instanceArea = materialArea(instance->part);
+
             for (std::size_t targetIndex = 0;
                  targetIndex < sourceIndex;
                  ++targetIndex) {
 
                 auto& target = states[targetIndex];
+
+                if (target.placedArea + instanceArea >
+                    usableSheetArea + kEps) {
+                    continue;
+                }
 
                 const std::size_t oldShapeCount =
                     target.shapes.size();
