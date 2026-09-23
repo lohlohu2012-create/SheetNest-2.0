@@ -103,6 +103,7 @@ void enrichDiagnostics(
         diagnostic.nfpChecks = 0;
         diagnostic.nfpTimeouts = 0;
         diagnostic.nfpFallbacks = 0;
+        diagnostic.nfpTimeoutFallbacks = 0;
         diagnostic.nestingElapsedMs = 0;
         diagnostic.repairRounds = 0;
         diagnostic.repairConflictRounds = 0;
@@ -117,6 +118,7 @@ void enrichDiagnostics(
                 diagnostic.nfpChecks = telemetry.nfpChecks;
                 diagnostic.nfpTimeouts = telemetry.nfpTimeouts;
                 diagnostic.nfpFallbacks = telemetry.nfpFallbacks;
+                diagnostic.nfpTimeoutFallbacks = telemetry.nfpTimeoutFallbacks;
                 diagnostic.nfpCacheHits = telemetry.nfpCacheHits;
                 diagnostic.nfpCacheMisses = telemetry.nfpCacheMisses;
                 diagnostic.boundsRejections = telemetry.boundsRejections;
