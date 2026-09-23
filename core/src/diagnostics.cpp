@@ -104,6 +104,10 @@ void enrichDiagnostics(
         diagnostic.nfpTimeouts = 0;
         diagnostic.nfpFallbacks = 0;
         diagnostic.nestingElapsedMs = 0;
+        diagnostic.repairRounds = 0;
+        diagnostic.repairConflictRounds = 0;
+        diagnostic.repairExtracted = false;
+        diagnostic.repairMoved = false;
         diagnostic.failureReason = "None";
 
         if (nestingResult) {
@@ -114,6 +118,10 @@ void enrichDiagnostics(
                 diagnostic.nfpTimeouts = telemetry.nfpTimeouts;
                 diagnostic.nfpFallbacks = telemetry.nfpFallbacks;
                 diagnostic.nestingElapsedMs = telemetry.elapsedMs;
+                diagnostic.repairRounds = telemetry.repairRounds;
+                diagnostic.repairConflictRounds = telemetry.repairConflictRounds;
+                diagnostic.repairExtracted = telemetry.repairExtracted;
+                diagnostic.repairMoved = telemetry.repairMoved;
                 diagnostic.failureReason = failureReasonCode(telemetry.reason);
                 break;
             }
