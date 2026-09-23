@@ -2525,6 +2525,14 @@ void testDenseSmallPartPlacement() {
     assert(!result.sheets.empty());
     assert(result.sheets.size() <= 2);
 
+    // Final telemetry must agree with the authoritative placement list after
+    // small-part refill/recovery. This catches stale "unplaced" states.
+    assert(result.instanceTelemetry.size() == parts.size());
+    for (const auto& telemetry : result.instanceTelemetry) {
+        assert(telemetry.placed);
+        assert(telemetry.reason == NestingFailureReason::None);
+    }
+
     std::size_t placedCount = 0;
     for (const auto& placements : result.sheets) {
         placedCount += placements.size();
