@@ -10,6 +10,19 @@
 
 namespace sheetnest {
 
+enum class ProductionPipelineStage {
+    Nesting,
+    ProductionValidation,
+    CamRoute,
+    CamValidation,
+    DxfExport,
+    DxfRoundTrip,
+    Complete,
+    Failed
+};
+
+const char* productionPipelineStageName(ProductionPipelineStage stage);
+
 enum class ProductionValidationIssueType {
     Collision,
     Gap,
@@ -63,6 +76,9 @@ struct AdaptiveRepairRound {
 
 struct ProductionValidationReport {
     bool valid{true};
+    bool pipelineValid{false};
+    ProductionPipelineStage pipelineStage{ProductionPipelineStage::Nesting};
+    std::string pipelineMessage;
     std::size_t checkedPlacements{};
     std::size_t collisionCount{};
     std::size_t gapViolationCount{};
