@@ -942,6 +942,9 @@ bool placeOnSheet(
     // bypassed by this recovery path.
     if (!found) {
         const bool nfpTimedOut = stats && stats->nfpTimeouts > nfpTimeoutsBefore;
+        if (nfpTimedOut && stats) {
+            ++stats->nfpTimeoutFallbacks;
+        }
         const std::size_t fallbackColumns = nfpTimedOut ? 48 : 32;
         const std::size_t fallbackRows = nfpTimedOut ? 24 : 16;
         for (int rotation : rotations) {
@@ -2441,6 +2444,7 @@ Result runAttempt(
         telemetry.nfpChecks += stats.nfpChecks - statsBeforeInstance.nfpChecks;
         telemetry.nfpTimeouts += stats.nfpTimeouts - statsBeforeInstance.nfpTimeouts;
         telemetry.nfpFallbacks += stats.nfpComplexityFallbacks - statsBeforeInstance.nfpComplexityFallbacks;
+        telemetry.nfpTimeoutFallbacks += stats.nfpTimeoutFallbacks - statsBeforeInstance.nfpTimeoutFallbacks;
         telemetry.nfpCacheHits += stats.nfpCacheHits - statsBeforeInstance.nfpCacheHits;
         telemetry.nfpCacheMisses += stats.nfpCacheMisses - statsBeforeInstance.nfpCacheMisses;
         telemetry.boundsRejections += stats.boundsRejections - statsBeforeInstance.boundsRejections;
