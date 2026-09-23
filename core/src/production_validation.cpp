@@ -11,6 +11,20 @@
 #include <tuple>
 
 namespace sheetnest {
+const char* productionPipelineStageName(ProductionPipelineStage stage) {
+    switch (stage) {
+    case ProductionPipelineStage::Nesting: return "Nesting";
+    case ProductionPipelineStage::ProductionValidation: return "ProductionValidation";
+    case ProductionPipelineStage::CamRoute: return "CamRoute";
+    case ProductionPipelineStage::CamValidation: return "CamValidation";
+    case ProductionPipelineStage::DxfExport: return "DxfExport";
+    case ProductionPipelineStage::DxfRoundTrip: return "DxfRoundTrip";
+    case ProductionPipelineStage::Complete: return "Complete";
+    case ProductionPipelineStage::Failed: return "Failed";
+    }
+    return "Unknown";
+}
+
 namespace {
 
 constexpr double kEps = 1e-7;
