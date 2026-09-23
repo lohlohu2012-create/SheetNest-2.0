@@ -952,6 +952,7 @@ void MainWindow::connectUi() {
                         "Не размещено: %3\n"
                         "Использование: %4%\n"
                         "Production Validator: %5\n"
+                         "Pipeline: %6\n"
                         "Длина реза: %6 м\n"
                         "Пробивок: %7\n"
                         "Время лазерной резки: %8 ч %9 мин")
@@ -999,7 +1000,7 @@ void MainWindow::connectUi() {
             );
 
             appendLog(
-                QString("Production Validator: %1; collision=%2, gap=%3, margin=%4, duplicate ID=%5, missing ID=%6.")
+                QString("Production Pipeline: %1; stage=%2; %3")
                     .arg(validation_.valid ? "OK" : "ОШИБКА")
                     .arg(static_cast<qulonglong>(validation_.collisionCount))
                     .arg(static_cast<qulonglong>(validation_.gapViolationCount))
@@ -3236,11 +3237,11 @@ void MainWindow::setBusy(bool busy) {
     exportButton_->setEnabled(
         !busy &&
         !result_.sheets.empty() &&
-        validation_.valid
+        validation_.pipelineValid
     );
     exportCamButton_->setEnabled(
         !busy &&
-        validation_.valid &&
+        validation_.pipelineValid &&
         !cuttingRoute.operations.empty()
     );
     benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
