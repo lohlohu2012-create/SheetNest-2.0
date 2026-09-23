@@ -858,7 +858,7 @@ bool repairProductionResult(
         std::string signature;
         for (const auto& token : tokens) {
             signature += token;
-            signature.push_back('\\n');
+            signature.push_back('\n');
         }
         return signature;
     };
