@@ -2224,6 +2224,8 @@ Result runAttempt(
         telemetry.nfpChecks += stats.nfpChecks - statsBeforeInstance.nfpChecks;
         telemetry.nfpTimeouts += stats.nfpTimeouts - statsBeforeInstance.nfpTimeouts;
         telemetry.nfpFallbacks += stats.nfpComplexityFallbacks - statsBeforeInstance.nfpComplexityFallbacks;
+        telemetry.nfpCacheHits += stats.nfpCacheHits - statsBeforeInstance.nfpCacheHits;
+        telemetry.nfpCacheMisses += stats.nfpCacheMisses - statsBeforeInstance.nfpCacheMisses;
         telemetry.boundsRejections += stats.boundsRejections - statsBeforeInstance.boundsRejections;
         telemetry.collisionRejections += stats.collisionRejections - statsBeforeInstance.collisionRejections;
         telemetry.feasibleCandidates += stats.feasibleCandidates - statsBeforeInstance.feasibleCandidates;
@@ -2398,6 +2400,10 @@ Result runAttempt(
                 telemetryIt->nfpFallbacks +=
                     stats.nfpComplexityFallbacks -
                     before.nfpComplexityFallbacks;
+                telemetryIt->nfpCacheHits +=
+                    stats.nfpCacheHits - before.nfpCacheHits;
+                telemetryIt->nfpCacheMisses +=
+                    stats.nfpCacheMisses - before.nfpCacheMisses;
                 telemetryIt->boundsRejections +=
                     stats.boundsRejections - before.boundsRejections;
                 telemetryIt->collisionRejections +=
