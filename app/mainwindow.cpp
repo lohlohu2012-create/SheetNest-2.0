@@ -2234,12 +2234,14 @@ void MainWindow::exportDxf() {
         return;
     }
 
-    if (!validation_.valid) {
+    if (!validation_.pipelineValid) {
         QMessageBox::warning(
             this,
-            "Production Validator",
-            "Раскладка не прошла Production Validator. "
-            "Экспорт DXF заблокирован до устранения ошибок."
+            "Production Pipeline",
+            "Раскладка не прошла полный Production Pipeline. "
+            "Экспорт DXF заблокирован. Стадия: " +
+            QString::fromUtf8(productionPipelineStageName(validation_.pipelineStage)) +
+            ". " + QString::fromStdString(validation_.pipelineMessage)
         );
         return;
     }
