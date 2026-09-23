@@ -588,6 +588,42 @@ Result ParallelNestingController::run(
         }
     }
 
+    if (!validation.adaptiveHistory.empty() ||
+        !validation.adaptiveChanges.empty()) {
+        for (auto& telemetry : best.instanceTelemetry) {
+            telemetry.repairRounds = validation.adaptiveRepairRounds;
+
+            for (const auto& round : validation.adaptiveHistory) {
+                const bool conflict = std::find(
+                    round.conflictIds.begin(),
+                    round.conflictIds.end(),
+                    telemetry.instanceId
+                ) != round.conflictIds.end();
+                const bool extracted = std::find(
+                    round.extractedIds.begin(),
+                    round.extractedIds.end(),
+                    telemetry.instanceId
+                ) != round.extractedIds.end();
+
+                if (conflict) {
+                    ++telemetry.repairConflictRounds;
+                }
+                telemetry.repairExtracted =
+                    telemetry.repairExtracted || extracted;
+            }
+
+            for (const auto& change : validation.adaptiveChanges) {
+                if (change.before.id != telemetry.instanceId) {
+                    continue;
+                }
+                telemetry.repairMoved =
+                    telemetry.repairMoved || change.moved;
+                telemetry.repairExtracted =
+                    telemetry.repairExtracted || change.extracted;
+            }
+        }
+    }
+
     publish({
         NestingProgressPhase::Finalizing,
         0,
