@@ -534,7 +534,7 @@ void MainWindow::buildUi() {
     repairViewLayout->addWidget(repairControls);
     repairViewLayout->addWidget(view_, 1);
 
-    diagnosticsTable_ = new QTableWidget(0, 16);
+    diagnosticsTable_ = new QTableWidget(0, 20);
     diagnosticsTable_->setHorizontalHeaderLabels({
         "instanceId", "unitId", "Source ID", "Лист", "Этап", "Сообщение",
         "CAM ops", "CAM sec", "Repair", "Final"
@@ -1420,12 +1420,16 @@ void MainWindow::populateDiagnostics() {
             QString::number(static_cast<qulonglong>(d.nfpChecks)),
             QString::number(static_cast<qulonglong>(d.nfpTimeouts)),
             QString::number(static_cast<qulonglong>(d.nfpFallbacks)),
+            QString::number(static_cast<qulonglong>(d.repairRounds)),
+            QString::number(static_cast<qulonglong>(d.repairConflictRounds)),
+            d.repairExtracted ? "yes" : "no",
+            d.repairMoved ? "yes" : "no",
             QString::fromStdString(d.failureReason),
             QString::number(static_cast<qulonglong>(d.nestingElapsedMs)),
             QString::fromStdString(d.finalStatus)
         };
 
-        for (int column = 0; column < 16; ++column) {
+        for (int column = 0; column < 20; ++column) {
             diagnosticsTable_->setItem(
                 static_cast<int>(i),
                 column,
