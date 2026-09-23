@@ -48,6 +48,7 @@ struct NestingStats {
     std::size_t optimizerPasses{};
     std::size_t nfpTimeouts{};
     std::size_t nfpComplexityFallbacks{};
+    std::size_t nfpTimeoutFallbacks{};
     std::size_t nfpCacheHits{};
     std::size_t nfpCacheMisses{};
     std::size_t boundsRejections{};
@@ -73,6 +74,7 @@ struct InstanceNestingTelemetry {
     std::size_t nfpChecks{};
     std::size_t nfpTimeouts{};
     std::size_t nfpFallbacks{};
+    std::size_t nfpTimeoutFallbacks{};
     std::size_t nfpCacheHits{};
     std::size_t nfpCacheMisses{};
     std::size_t boundsRejections{};
