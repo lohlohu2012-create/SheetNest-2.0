@@ -1798,6 +1798,38 @@ bool localRepack(
         placedArea += state.placedArea;
     }
 
+    // Final telemetry reconciliation. Small-part refill and residual recovery
+    // can place an instance after its initial attempt marked it unplaced.
+    // Recompute the authoritative placed flag from the final sheet list so
+    // diagnostics never report a stale "NoFeasiblePosition" for a recovered
+    // instance.
+    {
+        std::unordered_set<std::string> finalPlacedIds;
+        for (const auto& sheetPlacements : result.sheets) {
+            for (const auto& placement : sheetPlacements) {
+                finalPlacedIds.insert(placement.id);
+            }
+        }
+
+        for (auto& telemetry : result.instanceTelemetry) {
+            if (finalPlacedIds.contains(telemetry.instanceId)) {
+                telemetry.placed = true;
+                telemetry.reason = NestingFailureReason::None;
+            }
+        }
+
+        result.unplaced.erase(
+            std::remove_if(
+                result.unplaced.begin(),
+                result.unplaced.end(),
+                [&](const std::string& id) {
+                    return finalPlacedIds.contains(id);
+                }
+            ),
+            result.unplaced.end()
+        );
+    }
+
     const double sheetArea =
         std::max(0.0, sheet.width * sheet.height);
 
