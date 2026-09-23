@@ -809,17 +809,25 @@ void testNfpUnionAndCache() {
     Polygon a = rectangle(20, 20);
     Polygon b = rectangle(10, 10);
 
-    const auto first = nfp::noFitPolygons(a, b, 0, 2.0);
+    std::size_t runHits = 0;
+    std::size_t runMisses = 0;
+    nfp::NfpRunControl runControl;
+    runControl.cacheHitCount = &runHits;
+    runControl.cacheMissCount = &runMisses;
+
+    const auto first = nfp::noFitPolygons(a, b, 0, 2.0, &runControl);
     const auto afterFirst = nfp::cacheStats();
     assert(!first.empty());
     assert(afterFirst.misses == 1);
     assert(afterFirst.entries == 1);
+    assert(runMisses == 1);
 
     const auto second = nfp::noFitPolygons(
         translate(a, 1000, 1000),
         translate(b, 2000, 3000),
         0,
-        2.0
+        2.0,
+        &runControl
     );
     const auto afterSecond = nfp::cacheStats();
 
@@ -827,6 +835,8 @@ void testNfpUnionAndCache() {
     assert(afterSecond.hits == 1);
     assert(afterSecond.misses == 1);
     assert(afterSecond.entries == 1);
+    assert(runHits == 1);
+    assert(runMisses == 1);
 }
 
 void testNfpComplexContourMatrix() {
