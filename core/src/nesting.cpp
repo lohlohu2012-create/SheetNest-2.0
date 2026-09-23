@@ -1611,6 +1611,46 @@ bool refillExistingSheets(
                         continue;
                     }
 
+                    // The refill objective is lexicographic:
+                    //   1) minimize the resulting envelope area;
+                    //   2) minimize maxY.
+                    // The current sheet envelope is a mathematically safe
+                    // lower bound for the result after adding the instance:
+                    // adding geometry can never shrink min/max coordinates.
+                    // Once a better candidate is already found, sheets whose
+                    // current envelope is already worse cannot improve it.
+                    // This prunes only provably dominated targets and leaves
+                    // true-shape feasibility untouched.
+                    if (foundTarget && !states[targetIndex].shapes.empty()) {
+                        Bounds lowerBound =
+                            states[targetIndex].shapes.front().outerBounds;
+                        for (std::size_t i = 1;
+                             i < states[targetIndex].shapes.size();
+                             ++i) {
+                            const auto& b =
+                                states[targetIndex].shapes[i].outerBounds;
+                            lowerBound.minX =
+                                std::min(lowerBound.minX, b.minX);
+                            lowerBound.minY =
+                                std::min(lowerBound.minY, b.minY);
+                            lowerBound.maxX =
+                                std::max(lowerBound.maxX, b.maxX);
+                            lowerBound.maxY =
+                                std::max(lowerBound.maxY, b.maxY);
+                        }
+
+                        const double lowerBoundArea =
+                            lowerBound.width() * lowerBound.height();
+
+                        if (lowerBoundArea > bestEnvelopeArea + kEps ||
+                            (std::abs(
+                                 lowerBoundArea - bestEnvelopeArea
+                             ) <= kEps &&
+                             lowerBound.maxY > bestMaxY + kEps)) {
+                            continue;
+                        }
+                    }
+
                     SheetState targetTrial =
                         states[targetIndex];
 
