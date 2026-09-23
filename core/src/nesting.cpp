@@ -745,8 +745,11 @@ std::vector<Candidate> fallbackGridCandidates(
 
     // Emergency-only recovery path. NFP candidates are always preferred;
     // every grid point is still validated by the exact polygon predicate.
-    constexpr std::size_t kColumns = 64;
-    constexpr std::size_t kRows = 32;
+    // Emergency fallback is intentionally bounded: NFP remains the primary
+    // search path. 512 exact-predicate samples are enough to recover from an
+    // incomplete NFP boundary without multiplying worst-case runtime by 4.
+    constexpr std::size_t kColumns = 32;
+    constexpr std::size_t kRows = 16;
 
     result.reserve(kColumns * kRows);
 
