@@ -34,6 +34,10 @@ struct InstanceDiagnostic {
     std::size_t nfpTimeouts{};
     std::size_t nfpFallbacks{};
     std::uint64_t nestingElapsedMs{};
+    std::size_t repairRounds{};
+    std::size_t repairConflictRounds{};
+    bool repairExtracted{};
+    bool repairMoved{};
     std::string failureReason;
     std::string finalStatus;
 };
