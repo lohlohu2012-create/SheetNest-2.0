@@ -350,6 +350,26 @@ std::vector<Candidate> candidatesFor(
     result.push_back({minX, minY, margin, margin});
 
     const double g = std::max(0.0, gap);
+    const double placementMinX = margin - pb.minX;
+    const double placementMinY = margin - pb.minY;
+    const double placementMaxX = sheetSize.width - margin - pb.maxX;
+    const double placementMaxY = sheetSize.height - margin - pb.maxY;
+    const double partArea = materialArea(Part{"", part, {}});
+    const double smallPartThreshold =
+        std::max(
+            1.0,
+            sheetSize.width * sheetSize.height *
+            std::clamp(options.smallPartAreaRatio, 0.001, 0.25)
+        );
+    const bool smallPart =
+        options.enableSmallPartOptimization &&
+        partArea <= smallPartThreshold;
+    const std::size_t candidateLimit = smallPart
+        ? std::max<std::size_t>(
+            512,
+            std::min<std::size_t>(options.smallPartCandidateBudget, 2048)
+        )
+        : 512;
 
     auto addRingCandidates = [&](const Polygon& ring,
                                   const Bounds* knownBounds = nullptr) {
@@ -524,11 +544,6 @@ std::vector<Candidate> candidatesFor(
         // Continuous NFP feasibility boundary: candidate positions are
         // generated along the entire admissible boundary, not only at NFP
         // vertices. Final collision/clearance checks remain authoritative.
-        const double placementMinX = margin - pb.minX;
-        const double placementMinY = margin - pb.minY;
-        const double placementMaxX = sheetSize.width - margin - pb.maxX;
-        const double placementMaxY = sheetSize.height - margin - pb.maxY;
-
         if (placementMaxX >= placementMinX &&
             placementMaxY >= placementMinY) {
             if (control && control->shouldStop()) break;
@@ -547,7 +562,7 @@ std::vector<Candidate> candidatesFor(
             );
 
             const double characteristicSize = std::sqrt(
-                std::max(1.0, std::abs(polygonArea(part)))
+                std::max(1.0, partArea)
             );
 
             // Large details do not benefit from dense uniform sampling of
@@ -556,19 +571,6 @@ std::vector<Candidate> candidatesFor(
             // objective-best points remain available even when the budget is
             // tight, while interior samples preserve concave/interlocking
             // opportunities.
-            const bool smallPart =
-                options.enableSmallPartOptimization &&
-                materialArea(Part{"", part, {}}) <=
-                    std::max(
-                        1.0,
-                        sheetSize.width * sheetSize.height *
-                        std::clamp(
-                            options.smallPartAreaRatio,
-                            0.001,
-                            0.25
-                        )
-                    );
-
             const double boundarySpacing = smallPart
                 ? std::clamp(
                     options.smallPartBoundarySpacingMm,
@@ -626,27 +628,6 @@ std::vector<Candidate> candidatesFor(
         }),
         result.end()
     );
-
-    const std::size_t candidateLimit =
-        (options.enableSmallPartOptimization &&
-         materialArea(Part{"", part, {}}) <=
-             std::max(
-                 1.0,
-                 sheetSize.width * sheetSize.height *
-                 std::clamp(
-                     options.smallPartAreaRatio,
-                     0.001,
-                     0.25
-                 )
-             ))
-            ? std::max<std::size_t>(
-                512,
-                std::min<std::size_t>(
-                    options.smallPartCandidateBudget,
-                    2048
-                )
-            )
-            : 512;
 
     if (result.size() > candidateLimit) {
         if (options.enableSmallPartOptimization &&
@@ -715,7 +696,6 @@ std::vector<Candidate> candidatesFor(
             result.resize(candidateLimit);
         }
     }
-    (void)sheetSize;
     return result;
 }
 
