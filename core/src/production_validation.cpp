@@ -825,6 +825,44 @@ bool repairProductionResult(
         return true;
     };
 
+    // Canonical, tolerance-quantized placement signature used to prevent
+    // adaptive repair from cycling A -> B -> A across different conflict
+    // groups. Placement order inside a sheet is intentionally ignored:
+    // physical state is defined by (sheet, instanceId, rotation, x, y).
+    auto placementStateSignature = [](const Result& state) {
+        constexpr double kQuantum = 1e-6;
+        std::vector<std::string> tokens;
+        for (std::size_t sheetIndex = 0;
+             sheetIndex < state.sheets.size();
+             ++sheetIndex) {
+            for (const auto& placement : state.sheets[sheetIndex]) {
+                const auto qx = static_cast<long long>(
+                    std::llround(placement.x / kQuantum)
+                );
+                const auto qy = static_cast<long long>(
+                    std::llround(placement.y / kQuantum)
+                );
+
+                tokens.push_back(
+                    std::to_string(sheetIndex) + ":" +
+                    placement.id + ":" +
+                    std::to_string(placement.rotation) + ":" +
+                    std::to_string(qx) + ":" +
+                    std::to_string(qy)
+                );
+            }
+        }
+
+        std::sort(tokens.begin(), tokens.end());
+
+        std::string signature;
+        for (const auto& token : tokens) {
+            signature += token;
+            signature.push_back('\\n');
+        }
+        return signature;
+    };
+
     Result bestValid;
     bool foundValid = false;
     std::size_t actualAttempts = 0;
@@ -1158,6 +1196,10 @@ bool repairProductionResult(
         std::size_t previousIssueSeverity =
             issueSeverityScore(adaptiveReport);
         std::unordered_set<std::string> attemptedRepairGroups;
+        std::unordered_set<std::string> attemptedRepairStates;
+        attemptedRepairStates.insert(
+            placementStateSignature(adaptiveCandidate)
+        );
 
         for (std::size_t round = 0;
              round < std::max<std::size_t>(
@@ -1278,6 +1320,15 @@ bool repairProductionResult(
                 if (samePlacementState(levelBefore, levelCandidate)) {
                     // No physical change: do not count or record a fake repair
                     // round and do not advance the repair hierarchy.
+                    continue;
+                }
+
+                // A previously visited physical state cannot produce a new
+                // validator outcome with the same geometry/options. Reject it
+                // transactionally to prevent oscillation between repair groups.
+                if (!attemptedRepairStates.insert(
+                        placementStateSignature(levelCandidate)
+                    ).second) {
                     continue;
                 }
 
