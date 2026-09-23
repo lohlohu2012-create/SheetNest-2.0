@@ -1151,9 +1151,28 @@ bool tryPlaceOnExistingSheets(
 
     sheetLimit = std::min(sheetLimit, states.size());
 
+    const double usableWidth = std::max(
+        0.0,
+        sheet.width - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+    );
+    const double usableHeight = std::max(
+        0.0,
+        sheet.height - 2.0 * std::max(0.0, sheet.edgeMarginMm)
+    );
+    const double usableSheetArea = usableWidth * usableHeight;
+    const double instanceArea = materialArea(instance.part);
+
     for (std::size_t targetIndex = 0;
          targetIndex < sheetLimit;
          ++targetIndex) {
+
+        // Safe area lower bound shared by refill/exchange paths. It cannot
+        // reject a geometrically feasible arrangement because material area
+        // is additive and cannot exceed the usable sheet area.
+        if (states[targetIndex].placedArea + instanceArea >
+            usableSheetArea + kEps) {
+            continue;
+        }
 
         SheetState trial = states[targetIndex];
 
