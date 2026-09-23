@@ -1832,6 +1832,9 @@ CalculationOutput MainWindow::performCalculation(
             controllerProvidedValidation = true;
         };
 
+    output.validation.pipelineStage = ProductionPipelineStage::Nesting;
+    output.validation.pipelineMessage = "Nesting завершён.";
+
     output.result = controller
         ? controller->run(
             instances,
@@ -1845,6 +1848,7 @@ CalculationOutput MainWindow::performCalculation(
             options
         );
 
+    output.validation.pipelineStage = ProductionPipelineStage::ProductionValidation;
     if (!controllerProvidedValidation) {
         output.validation = validateProductionResult(
             instances,
@@ -1853,12 +1857,76 @@ CalculationOutput MainWindow::performCalculation(
             output.result
         );
     }
+    output.validation.pipelineStage = ProductionPipelineStage::ProductionValidation;
+    output.validation.pipelineMessage =
+        output.validation.valid
+            ? "Production Validator: OK."
+            : "Production Validator обнаружил ошибки раскладки.";
 
     output.cuttingRoute = planWholeResultRoute(output.result, instances, technology);
+    output.validation.pipelineStage = ProductionPipelineStage::CamRoute;
+    if (output.cuttingRoute.operations.empty()) {
+        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+        output.validation.pipelineMessage = "CAM-маршрут пуст.";
+    } else {
+        output.validation.pipelineMessage = "CAM-маршрут построен.";
+    }
+
     PathOptions routeOptions;
     routeOptions.rapidSpeedMMin = 120.0;
     routeOptions.pierceSeconds = 0.25;
     output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
+
+    const camValidation = validateCuttingPath(output.cuttingRoute);
+    if (!camValidation.valid) {
+        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+        output.validation.pipelineMessage =
+            "CAM Validation: " + camValidation.message;
+    } else {
+        output.validation.pipelineStage = ProductionPipelineStage::CamValidation;
+        output.validation.pipelineMessage = "CAM Validation: OK.";
+    }
+
+    const exportedDxf =
+        exportNestDxf(output.result, instances, sheet);
+    if (exportedDxf.empty()) {
+        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+        output.validation.pipelineMessage = "DXF Export: пустой результат.";
+    } else {
+        output.validation.pipelineStage = ProductionPipelineStage::DxfExport;
+        output.validation.pipelineMessage = "DXF Export: OK.";
+    }
+
+    if (!exportedDxf.empty()) {
+        const auto roundTripDocument = importDxf(exportedDxf);
+        const auto roundTripPreflight = preflightDxf(roundTripDocument);
+        if (!roundTripPreflight.valid) {
+            output.validation.pipelineStage = ProductionPipelineStage::Failed;
+            output.validation.pipelineMessage =
+                "DXF RoundTrip: " +
+                (roundTripPreflight.issues.empty()
+                    ? std::string("preflight не пройден.")
+                    : roundTripPreflight.issues.front());
+        } else {
+            output.validation.pipelineStage = ProductionPipelineStage::DxfRoundTrip;
+            output.validation.pipelineMessage = "DXF RoundTrip: OK.";
+        }
+    }
+
+    const bool geometryOk = output.validation.valid;
+    const bool camOk = camValidation.valid && !output.cuttingRoute.operations.empty();
+    const bool dxfOk = !exportedDxf.empty();
+    const bool roundTripOk = dxfOk && output.validation.pipelineStage == ProductionPipelineStage::DxfRoundTrip;
+    output.validation.pipelineValid =
+        geometryOk && camOk && dxfOk && roundTripOk;
+    if (output.validation.pipelineValid) {
+        output.validation.pipelineStage = ProductionPipelineStage::Complete;
+        output.validation.pipelineMessage =
+            "Production Pipeline: COMPLETE.";
+    } else if (output.validation.pipelineStage != ProductionPipelineStage::Failed) {
+        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+    }
+
     output.diagnostics = diagnoseNest(instances, output.result);
     enrichDiagnostics(
         output.diagnostics,
