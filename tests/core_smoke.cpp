@@ -1155,6 +1155,85 @@ void testNfpRotationAwareCache() {
     assert(s90.entries >= s405.entries);
 }
 
+
+void testNfpRotationNormalizationExhaustive() {
+    nfp::clearCache();
+
+    const Polygon fixed{{0,0},{64,0},{64,18},{46,18},{46,30},{18,30},{18,18},{0,18}};
+    const Polygon moving{{0,0},{13,0},{13,7},{8,7},{8,12},{0,12}};
+
+    struct EquivalentAngles { int a; int b; };
+    const std::vector<EquivalentAngles> equivalent{
+        {0,360}, {0,720}, {45,405}, {45,-315},
+        {90,450}, {180,-180}, {270,-90}, {359,-1}
+    };
+
+    for (const auto [a,b] : equivalent) {
+        nfp::clearCache();
+        const auto first = nfp::noFitPolygons(fixed, moving, a, 0.35);
+        const auto s1 = nfp::cacheStats();
+        const auto second = nfp::noFitPolygons(fixed, moving, b, 0.35);
+        const auto s2 = nfp::cacheStats();
+
+        assert(!first.empty());
+        assert(!second.empty());
+        assert(s2.entries == s1.entries);
+        assert(s2.hits == s1.hits + 1);
+        assert(first.size() == second.size());
+
+        for (std::size_t i = 0; i < first.size(); ++i) {
+            assert(first[i].size() == second[i].size());
+            for (std::size_t j = 0; j < first[i].size(); ++j) {
+                assert(std::hypot(
+                    first[i][j].x - second[i][j].x,
+                    first[i][j].y - second[i][j].y
+                ) < 1e-8);
+            }
+        }
+    }
+}
+
+void testNfpRotationDistinctCacheIdentity() {
+    nfp::clearCache();
+
+    const Polygon fixed{{0,0},{70,0},{70,20},{45,20},{45,32},{25,32},{25,20},{0,20}};
+    const Polygon moving{{0,0},{17,0},{17,6},{9,6},{9,15},{0,15}};
+
+    const auto r44 = nfp::noFitPolygons(fixed, moving, 44, 0.2);
+    const auto s44 = nfp::cacheStats();
+    const auto r45 = nfp::noFitPolygons(fixed, moving, 45, 0.2);
+    const auto s45 = nfp::cacheStats();
+    const auto r46 = nfp::noFitPolygons(fixed, moving, 46, 0.2);
+    const auto s46 = nfp::cacheStats();
+
+    assert(!r44.empty() && !r45.empty() && !r46.empty());
+    assert(s45.entries == s44.entries + 1);
+    assert(s46.entries == s45.entries + 1);
+    assert(s45.hits == s44.hits);
+    assert(s46.hits == s45.hits);
+}
+
+void testNfpRotationFractionalAndLargeAngles() {
+    nfp::clearCache();
+
+    const Polygon fixed = rectangle(80, 30);
+    const Polygon moving{{0,0},{11.5,0},{11.5,4.25},{6.0,4.25},{6.0,13.75},{0,13.75}};
+
+    const auto r45 = nfp::noFitPolygons(fixed, moving, 45, 0.1);
+    const auto r405 = nfp::noFitPolygons(fixed, moving, 405, 0.1);
+    const auto s = nfp::cacheStats();
+    assert(!r45.empty() && !r405.empty());
+    assert(s.entries == 1);
+    assert(s.hits == 1);
+
+    nfp::clearCache();
+    const auto r455 = nfp::noFitPolygons(fixed, moving, 45, 0.1);
+    const auto r455again = nfp::noFitPolygons(fixed, moving, 405, 0.1);
+    const auto s2 = nfp::cacheStats();
+    assert(!r455.empty() && !r455again.empty());
+    assert(s2.entries == 1 && s2.hits == 1);
+}
+
 void testNfpBoundaryTouchAndMinimumGap() {
     const Polygon fixed = rectangle(50.0, 50.0);
     const Polygon moving = rectangle(10.0, 10.0);
@@ -4052,6 +4131,9 @@ int main(int argc, char** argv) {
     testNfpCacheCyclicCanonicalization();
     testNfpValidationAndHoleTopology();
     testNfpRotationAwareCache();
+    testNfpRotationNormalizationExhaustive();
+    testNfpRotationDistinctCacheIdentity();
+    testNfpRotationFractionalAndLargeAngles();
     testNfpBoundaryTouchAndMinimumGap();
     testNfpLargeConcaveStress();
     testNfpAdaptiveNarrowCorridor();
