@@ -3,6 +3,7 @@
 #include "sheetnest/cutting_path.hpp"
 #include "sheetnest/cam_export.hpp"
 #include "sheetnest/dxf_export.hpp"
+#include "sheetnest/svg.hpp"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -1164,7 +1165,7 @@ void MainWindow::importDxf() {
         this,
         "Открыть DXF",
         QString(),
-        "DXF files (*.dxf);;All files (*)"
+        "CAD files (*.dxf *.svg);;DXF files (*.dxf);;SVG files (*.svg);;All files (*)"
     );
 
     if (fileName.isEmpty()) return;
@@ -1183,7 +1184,10 @@ void MainWindow::importDxf() {
     const std::string text(data.constData(),
                            static_cast<std::size_t>(data.size()));
 
-    document_ = sheetnest::importDxf(text, 0.25);
+    const QString suffix = QFileInfo(fileName).suffix().toLower();
+    document_ = suffix == "svg"
+        ? sheetnest::importSvg(text, 0.25)
+        : sheetnest::importDxf(text, 0.25);
     parts_ = partsFromDxf(document_);
     const auto preflight = preflightDxf(document_);
     currentFile_ = fileName;
@@ -1196,7 +1200,8 @@ void MainWindow::importDxf() {
     );
 
     appendLog(
-        QString("DXF: %1, entities=%2, supported=%3, loops=%4.")
+        QString("%1: %2, entities=%3, supported=%4, loops=%5.")
+            .arg(suffix.toUpper())
             .arg(fileName)
             .arg(static_cast<int>(document_.entitiesRead))
             .arg(static_cast<int>(document_.supportedEntities))
