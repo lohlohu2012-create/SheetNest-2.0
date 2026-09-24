@@ -1702,4 +1702,266 @@ bool repairProductionResult(
     return true;
 }
 
+
+ProductionPipelineReport validateProductionPipeline(
+    const DxfDocument& document,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const Result& result,
+    const CuttingParameters& cuttingParameters,
+    const PathOptions& pathOptions,
+    const CamExportOptions& camOptions,
+    const DxfExportOptions& dxfOptions
+) {
+    ProductionPipelineReport pipeline;
+
+    const auto fail = [&pipeline](
+        ProductionPipelineStage stage,
+        const std::string& reason
+    ) {
+        pipeline.valid = false;
+        pipeline.failedStage = stage;
+        pipeline.failureReason = reason;
+        return pipeline;
+    };
+
+    if (!document.valid()) {
+        return fail(
+            ProductionPipelineStage::DxfParse,
+            "DXF parser reported an invalid document."
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::DxfParse
+    );
+
+    pipeline.dxfPreflight = preflightDxf(document);
+    if (!pipeline.dxfPreflight.valid) {
+        return fail(
+            ProductionPipelineStage::DxfPreflight,
+            pipeline.dxfPreflight.issues.empty()
+                ? "DXF preflight failed."
+                : pipeline.dxfPreflight.issues.front()
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::DxfPreflight
+    );
+
+    if (instances.empty()) {
+        return fail(
+            ProductionPipelineStage::Nesting,
+            "No nesting instances were supplied."
+        );
+    }
+
+    if (result.sheets.empty()) {
+        return fail(
+            ProductionPipelineStage::Nesting,
+            "Nesting produced no sheets."
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::Nesting
+    );
+
+    pipeline.nestingValidation =
+        validateProductionResult(
+            instances,
+            sheet,
+            options,
+            result
+        );
+
+    if (options.enableAdaptiveDestroyRepair ||
+        options.enableAutoRepair) {
+        if (!pipeline.nestingValidation.valid) {
+            return fail(
+                ProductionPipelineStage::AdaptiveRepair,
+                pipeline.nestingValidation.issues.empty()
+                    ? "Adaptive Repair did not produce a valid final result."
+                    : pipeline.nestingValidation.issues.front().message
+            );
+        }
+        pipeline.completedStages.push_back(
+            ProductionPipelineStage::AdaptiveRepair
+        );
+    } else {
+        pipeline.completedStages.push_back(
+            ProductionPipelineStage::AdaptiveRepair
+        );
+    }
+
+    if (!pipeline.nestingValidation.coverageComplete) {
+        return fail(
+            ProductionPipelineStage::Coverage,
+            "Instance coverage is incomplete: expected " +
+                std::to_string(
+                    pipeline.nestingValidation.expectedInstanceCount
+                ) +
+                ", placed " +
+                std::to_string(
+                    pipeline.nestingValidation.placedInstanceCount
+                ) +
+                ", unplaced " +
+                std::to_string(
+                    pipeline.nestingValidation.unplacedInstanceCount
+                ) +
+                "."
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::Coverage
+    );
+
+    std::unordered_map<std::string, const Instance*> instanceById;
+    for (const auto& instance : instances) {
+        instanceById.emplace(instance.id, &instance);
+    }
+
+    std::vector<CuttingContour> contours;
+    for (std::size_t sheetIndex = 0;
+         sheetIndex < result.sheets.size();
+         ++sheetIndex) {
+        for (const auto& placement : result.sheets[sheetIndex]) {
+            const auto it = instanceById.find(placement.id);
+            if (it == instanceById.end()) {
+                return fail(
+                    ProductionPipelineStage::CamRoute,
+                    "CAM route references unknown instanceId: " +
+                        placement.id
+                );
+            }
+
+            const auto& instance = *it->second;
+            contours.push_back({
+                sheetIndex,
+                placement.id,
+                0,
+                false,
+                translate(
+                    rotate(instance.part.outer, placement.rotation),
+                    placement.x,
+                    placement.y
+                )
+            });
+
+            for (std::size_t holeIndex = 0;
+                 holeIndex < instance.part.holes.size();
+                 ++holeIndex) {
+                contours.push_back({
+                    sheetIndex,
+                    placement.id,
+                    holeIndex + 1,
+                    true,
+                    translate(
+                        rotate(
+                            instance.part.holes[holeIndex],
+                            placement.rotation
+                        ),
+                        placement.x,
+                        placement.y
+                    )
+                });
+            }
+        }
+    }
+
+    if (contours.empty()) {
+        return fail(
+            ProductionPipelineStage::CamRoute,
+            "No cutting contours were generated."
+        );
+    }
+
+    const auto camPath =
+        planCuttingRoute(
+            contours,
+            cuttingParameters,
+            pathOptions
+        );
+
+    pipeline.camOperationCount =
+        camPath.operations.size();
+    if (camPath.operations.empty()) {
+        return fail(
+            ProductionPipelineStage::CamRoute,
+            "CAM planner produced no cutting operations."
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::CamRoute
+    );
+
+    pipeline.camValidation =
+        validateCuttingPath(camPath);
+    if (!pipeline.camValidation.valid) {
+        return fail(
+            ProductionPipelineStage::CamValidation,
+            pipeline.camValidation.message.empty()
+                ? "CAM validation failed."
+                : pipeline.camValidation.message
+        );
+    }
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::CamValidation
+    );
+
+    pipeline.exportedDxf =
+        exportNestDxf(
+            result,
+            instances,
+            sheet,
+            dxfOptions
+        );
+
+    if (pipeline.exportedDxf.empty()) {
+        return fail(
+            ProductionPipelineStage::DxfExport,
+            "DXF exporter returned an empty document."
+        );
+    }
+    pipeline.exportedBytes = pipeline.exportedDxf.size();
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::DxfExport
+    );
+
+    const auto roundTrip =
+        importDxf(pipeline.exportedDxf, 0.05);
+    if (!roundTrip.valid()) {
+        return fail(
+            ProductionPipelineStage::DxfRoundTrip,
+            "Exported DXF failed to import during round-trip."
+        );
+    }
+
+    pipeline.roundTripPreflight =
+        preflightDxf(roundTrip);
+    pipeline.roundTripValid =
+        pipeline.roundTripPreflight.valid &&
+        !roundTrip.contours.empty();
+
+    if (!pipeline.roundTripValid) {
+        return fail(
+            ProductionPipelineStage::DxfRoundTrip,
+            pipeline.roundTripPreflight.issues.empty()
+                ? "Exported DXF failed round-trip preflight."
+                : pipeline.roundTripPreflight.issues.front()
+        );
+    }
+
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::DxfRoundTrip
+    );
+    pipeline.valid = true;
+    pipeline.failedStage = ProductionPipelineStage::Complete;
+    pipeline.completedStages.push_back(
+        ProductionPipelineStage::Complete
+    );
+    pipeline.failureReason.clear();
+
+    return pipeline;
+}
+
 } // namespace sheetnest
