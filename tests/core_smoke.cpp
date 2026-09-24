@@ -1094,6 +1094,184 @@ void testNfpContinuousSearchApi() {
     assert(stoppedCount > 0);
 }
 
+
+void testNfpValidationAndHoleTopology() {
+    // A donut-like boundary set must remain a valid outer+hole topology.
+    const Polygon outer = rectangle(100.0, 80.0);
+    const Polygon hole = rectangle(20.0, 20.0);
+    const auto report = nfp::validateNfp({outer, hole});
+    assert(report.valid);
+    assert(report.loops == 2);
+    assert(report.holes == 1);
+
+    // Self-crossing NFP data must never be accepted as a valid boundary.
+    const Polygon bowTie{{0,0},{20,20},{0,20},{20,0}};
+    const auto invalid = nfp::validateNfp({bowTie});
+    assert(!invalid.valid);
+    assert(invalid.selfIntersectingLoops == 1);
+
+    const Polygon degenerate{{0,0},{10,0},{20,0}};
+    const auto degenerateReport = nfp::validateNfp({degenerate});
+    assert(!degenerateReport.valid);
+    assert(degenerateReport.degenerateLoops == 1);
+}
+
+void testNfpRotationAwareCache() {
+    nfp::clearCache();
+
+    const Polygon fixed = {
+        {0,0},{60,0},{60,20},{42,20},{42,32},
+        {18,32},{18,20},{0,20}
+    };
+    const Polygon moving = {
+        {0,0},{14,0},{14,8},{8,8},{8,14},{0,14}
+    };
+
+    const auto r0 = nfp::noFitPolygons(fixed, moving, 0, 0.5);
+    const auto s0 = nfp::cacheStats();
+    const auto r360 = nfp::noFitPolygons(fixed, moving, 360, 0.5);
+    const auto s360 = nfp::cacheStats();
+
+    assert(!r0.empty());
+    assert(!r360.empty());
+    assert(s360.entries == s0.entries);
+    assert(s360.hits == s0.hits + 1);
+
+    const auto r45 = nfp::noFitPolygons(fixed, moving, 45, 0.5);
+    const auto s45 = nfp::cacheStats();
+    const auto r405 = nfp::noFitPolygons(fixed, moving, 405, 0.5);
+    const auto s405 = nfp::cacheStats();
+
+    assert(!r45.empty());
+    assert(!r405.empty());
+    assert(s405.entries == s45.entries);
+    assert(s405.hits == s45.hits + 1);
+
+    // A genuinely different rotation must have its own cache identity.
+    const auto r90 = nfp::noFitPolygons(fixed, moving, 90, 0.5);
+    const auto s90 = nfp::cacheStats();
+    assert(!r90.empty());
+    assert(s90.entries >= s405.entries);
+}
+
+void testNfpBoundaryTouchAndMinimumGap() {
+    const Polygon fixed = rectangle(50.0, 50.0);
+    const Polygon moving = rectangle(10.0, 10.0);
+
+    const auto touching = nfp::noFitPolygons(
+        fixed, moving, 0, 0.0
+    );
+    const auto gapped = nfp::noFitPolygons(
+        fixed, moving, 0, 0.25
+    );
+    assert(!touching.empty());
+    assert(!gapped.empty());
+
+    nfp::SearchOptions options;
+    options.boundarySpacingMm = 0.1;
+    options.maxCandidates = 512;
+    options.includeSheetBoundary = true;
+    options.includeNfpVertices = true;
+
+    const auto touchCandidates = nfp::searchFeasibleBoundary(
+        fixed, moving, 0,
+        0, 0, 100, 100,
+        0.0, options
+    );
+    const auto gapCandidates = nfp::searchFeasibleBoundary(
+        fixed, moving, 0,
+        0, 0, 100, 100,
+        0.25, options
+    );
+
+    assert(!touchCandidates.points.empty());
+    assert(!gapCandidates.points.empty());
+    assert(gapCandidates.telemetry.boundarySamples > 0);
+}
+
+void testNfpLargeConcaveStress() {
+    Polygon star;
+    constexpr int kRings = 96;
+    star.reserve(kRings * 2);
+
+    for (int i = 0; i < kRings * 2; ++i) {
+        const double angle =
+            2.0 * 3.14159265358979323846 *
+            static_cast<double>(i) /
+            static_cast<double>(kRings * 2);
+        const double radius = (i % 2 == 0) ? 120.0 : 58.0;
+        star.push_back({
+            std::cos(angle) * radius,
+            std::sin(angle) * radius
+        });
+    }
+
+    const Polygon moving{
+        {-12,-6},{4,-10},{15,-2},{10,8},{0,12},{-10,8}
+    };
+
+    nfp::NfpRunControl control;
+    control.maxInputVertices = 512;
+    control.maxConvexPieces = 256;
+    control.maxPairwisePolygons = 4096;
+    control.maxUnionSegments = 50000;
+
+    const auto result = nfp::noFitPolygons(
+        star, moving, 37, 0.5, &control
+    );
+    assert(!result.empty());
+
+    const auto validation = nfp::validateNfp(result);
+    assert(validation.valid);
+    assert(validation.nonFiniteVertices == 0);
+    assert(validation.degenerateLoops == 0);
+}
+
+void testNfpAdaptiveNarrowCorridor() {
+    const Polygon corridor{
+        {0,0},{100,0},{100,8},{62,8},{62,30},
+        {38,30},{38,8},{0,8}
+    };
+    const Polygon tool{
+        {0,0},{7,0},{7,4},{4,4},{4,7},{0,7}
+    };
+
+    const auto region = nfp::feasibilityRegion(
+        corridor, tool, 0,
+        -20,-20,120,60,
+        0.25
+    );
+    assert(!region.boundary.empty());
+
+    const auto sparse = nfp::pointsOnFeasibilityBoundary(
+        region, 4.0, 128, true
+    );
+    const auto dense = nfp::pointsOnFeasibilityBoundary(
+        region, 0.25, 512, true
+    );
+    assert(!sparse.empty());
+    assert(!dense.empty());
+    assert(dense.size() >= sparse.size());
+
+    bool sawInterior = false;
+    for (const auto& segment : region.boundary) {
+        const Point midpoint{
+            (segment.a.x + segment.b.x) * 0.5,
+            (segment.a.y + segment.b.y) * 0.5
+        };
+        for (const auto& candidate : dense) {
+            if (std::hypot(
+                    candidate.x - midpoint.x,
+                    candidate.y - midpoint.y) < 0.5) {
+                sawInterior = true;
+                break;
+            }
+        }
+        if (sawInterior) break;
+    }
+    assert(sawInterior);
+}
+
 void testNfpTimeoutRecovery() {
     auto control = std::make_shared<NestingRunControl>();
     control->deadline = std::chrono::steady_clock::now() +
@@ -3414,6 +3592,12 @@ int main(int argc, char** argv) {
     testNfpContinuousSearchApi();
     testNfpUnionAndCache();
     testNfpCacheCyclicCanonicalization();
+    testNfpValidationAndHoleTopology();
+    testNfpRotationAwareCache();
+    testNfpBoundaryTouchAndMinimumGap();
+    testNfpLargeConcaveStress();
+    testNfpAdaptiveNarrowCorridor();
+
     testNfpComplexContourMatrix();
     testNfpHolePipeline();
     testNfpTimeoutRecovery();
