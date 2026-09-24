@@ -3738,6 +3738,48 @@ void testSvgRoundTripIntoDxfModel() {
     assert(instances[2].unitId == "SVG#1:unit-3");
 }
 
+
+void testNfpPolygonWithHolesModel() {
+    Polygon outer{{0,0},{100,0},{100,100},{0,100}};
+    Polygon hole{{20,20},{20,40},{40,40},{40,20}};
+    auto region = nfp::normalizePolygonWithHoles(outer,{hole});
+    assert(nfp::validatePolygonWithHoles(region));
+    assert(region.outer.size()==4);
+    assert(region.holes.size()==1);
+    assert(nfp::pointInPolygonWithHoles({10,10},region));
+    assert(!nfp::pointInPolygonWithHoles({30,30},region));
+    assert(nfp::pointInPolygonWithHoles({90,90},region));
+    assert(nfp::pointInPolygonWithHoles({20,30},region) == false);
+}
+
+void testNfpTopologyComponentsAndIslands() {
+    Polygon a{{0,0},{100,0},{100,100},{0,100}};
+    Polygon h{{20,20},{20,80},{80,80},{80,20}};
+    Polygon island{{40,40},{60,40},{60,60},{40,60}};
+    Polygon b{{150,0},{200,0},{200,50},{150,50}};
+    const auto regions=nfp::classifyPolygonLoops({a,h,island,b});
+    assert(regions.size()==2);
+    std::size_t holes=0;
+    for(const auto& r:regions){
+        assert(nfp::validatePolygonWithHoles(r));
+        holes+=r.holes.size();
+    }
+    assert(holes==1);
+    const auto& first=regions.front();
+    assert(nfp::pointInPolygonWithHoles({10,10},first));
+    assert(!nfp::pointInPolygonWithHoles({30,30},first));
+}
+
+void testNfpTopologyRejectsInvalidHole() {
+    Polygon outer{{0,0},{100,0},{100,100},{0,100}};
+    Polygon outside{{150,150},{160,150},{160,160},{150,160}};
+    auto region=nfp::normalizePolygonWithHoles(outer,{outside});
+    assert(!nfp::validatePolygonWithHoles(region));
+    Polygon bad{{0,0},{10,10},{0,10},{10,0}};
+    auto badRegion=nfp::normalizePolygonWithHoles(outer,{bad});
+    assert(!nfp::validatePolygonWithHoles(badRegion));
+}
+
 int main(int argc, char** argv) {
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Nesting)) == "Nesting");
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Complete)) == "Complete");
@@ -3760,6 +3802,9 @@ int main(int argc, char** argv) {
     testSvgHolesAndOpenGeometry();
     testSvgDegenerateAndInvalidPath();
     testSvgRoundTripIntoDxfModel();
+    testNfpPolygonWithHolesModel();
+    testNfpTopologyComponentsAndIslands();
+    testNfpTopologyRejectsInvalidHole();
     testGeometry();
     testDxfHoleRecovery();
     testLayerSeparation();
