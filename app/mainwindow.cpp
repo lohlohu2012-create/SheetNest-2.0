@@ -1852,7 +1852,7 @@ CalculationOutput MainWindow::performCalculation(
             options
         );
 
-    output.validation.pipelineStage = ProductionPipelineStage::ProductionValidation;
+    output.validation.pipelineStage = ProductionPipelineStage::Coverage;
     if (!controllerProvidedValidation) {
         output.validation = validateProductionResult(
             instances,
@@ -1861,7 +1861,7 @@ CalculationOutput MainWindow::performCalculation(
             output.result
         );
     }
-    output.validation.pipelineStage = ProductionPipelineStage::ProductionValidation;
+    output.validation.pipelineStage = ProductionPipelineStage::Coverage;
     output.validation.pipelineMessage =
         output.validation.valid
             ? "Production Validator: OK."
