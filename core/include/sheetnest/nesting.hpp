@@ -3,10 +3,37 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
-#include <vector>\n#include <functional>\n#include <memory>\n\nnamespace sheetnest {\nclass Watchdog;\nstruct NestingProgress {\n    std::size_t completedItems{};\n    std::size_t totalItems{};\n    std::size_t attempt{};\n    std::size_t iterations{};\n    std::string stage;\n    double elapsedMs{};\n    double remainingMs{};\n    bool timedOut{};\n    bool stopped{};\n};\n\nstruct NestingTelemetry {\n    std::size_t candidateChecks{};\n    std::size_t boundsRejects{};\n    std::size_t collisionRejects{};\n    std::size_t feasibleCandidates{};\n    std::size_t nfpSegmentsSampled{};\n    std::size_t nfpBoundaryCandidates{};\n    std::size_t nfpBudgetExceeded{};\n    double nfpElapsedMs{};\n};\n\nnamespace detail {}
+#include <vector>
 
 namespace sheetnest {
+
+class Watchdog;
+
+struct NestingProgress {
+    std::size_t completedItems{};
+    std::size_t totalItems{};
+    std::size_t attempt{};
+    std::size_t iterations{};
+    std::string stage;
+    double elapsedMs{};
+    double remainingMs{};
+    bool timedOut{};
+    bool stopped{};
+};
+
+struct NestingTelemetry {
+    std::size_t candidateChecks{};
+    std::size_t boundsRejects{};
+    std::size_t collisionRejects{};
+    std::size_t feasibleCandidates{};
+    std::size_t nfpSegmentsSampled{};
+    std::size_t nfpBoundaryCandidates{};
+    std::size_t nfpBudgetExceeded{};
+    double nfpElapsedMs{};
+};
 
 struct Part {
     std::string id;
@@ -39,6 +66,9 @@ struct Result {
     std::vector<std::vector<Placement>> sheets;
     std::vector<std::string> unplaced;
     double utilization{};
+    NestingTelemetry telemetry;
+    bool timedOut{};
+    bool stopped{};
 };
 
 struct Options {
@@ -46,6 +76,12 @@ struct Options {
     std::size_t iterations{24};
     double gapMm{2.0};
     std::uint32_t seed{0x534E4553u};
+    double overallBudgetMs{120000.0};
+    double nfpSearchBudgetMs{250.0};
+    std::size_t candidateBudget{512};
+    std::size_t segmentSamples{128};
+    std::shared_ptr<Watchdog> watchdog;
+    std::function<void(const NestingProgress&)> progress;
 };
 
 Result nest(
