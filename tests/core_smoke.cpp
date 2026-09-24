@@ -3346,7 +3346,7 @@ void testNesting20NewSheetRecovery() {
     const auto result = nest(parts, sheet, options);
 
     assert(result.unplaced.empty());
-    assert(result.sheets.size() == 4);
+    assert(result.sheets.size() == 2);
 }
 
 void testNesting20OptimizerDoesNotDropPlacedInstances() {
