@@ -24,7 +24,7 @@ void Watchdog::stage(
     WatchdogStage stage,
     const std::string& message
 ) {
-    stage_ = stage;
+    std::lock_guard<std::mutex> lock(mutex_);\n    stage_ = stage;
     message_ = message;
     heartbeat_();
     lastHeartbeatNs_ = nowNs();
@@ -35,7 +35,7 @@ void Watchdog::heartbeat(
     std::size_t totalItems,
     const std::string& message
 ) {
-    completedItems_.store(completedItems);
+    std::lock_guard<std::mutex> lock(mutex_);\n    completedItems_.store(completedItems);
     totalItems_.store(totalItems);
     if (!message.empty()) message_ = message;
     heartbeat_++;
