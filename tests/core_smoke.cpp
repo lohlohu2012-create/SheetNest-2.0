@@ -840,6 +840,43 @@ void testNfpUnionAndCache() {
     assert(runMisses == 1);
 }
 
+
+void testNfpCacheCyclicCanonicalization() {
+    nfp::clearCache();
+
+    const Polygon fixed = {
+        {0,0},{40,0},{40,20},{0,20}
+    };
+    const Polygon fixedRotatedStart = {
+        {40,20},{0,20},{0,0},{40,0}
+    };
+    const Polygon moving = {
+        {0,0},{8,0},{8,5},{0,5}
+    };
+
+    const auto first = nfp::noFitPolygons(fixed, moving, 0, 0.5);
+    const auto before = nfp::cacheStats();
+    const auto second = nfp::noFitPolygons(
+        fixedRotatedStart,
+        moving,
+        0,
+        0.5
+    );
+    const auto after = nfp::cacheStats();
+
+    assert(!first.empty());
+    assert(!second.empty());
+    assert(before.entries == 1);
+    assert(after.entries == 1);
+    assert(after.hits == before.hits + 1);
+    assert(after.misses == before.misses);
+
+    assert(first.size() == second.size());
+    for (std::size_t i = 0; i < first.size(); ++i) {
+        assert(first[i].size() == second[i].size());
+    }
+}
+
 void testNfpComplexContourMatrix() {
     const auto dxf = importDxf(kComplexContoursDxf, 0.001);
     assert(dxf.valid());
@@ -3288,6 +3325,7 @@ int main(int argc, char** argv) {
     testFeasibilityGap();
     testNfpContinuousSearchApi();
     testNfpUnionAndCache();
+    testNfpCacheCyclicCanonicalization();
     testNfpComplexContourMatrix();
     testNfpHolePipeline();
     testNfpTimeoutRecovery();
