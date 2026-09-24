@@ -24,6 +24,9 @@
 #include <QHeaderView>
 #include <QTabWidget>
 #include <QSignalBlocker>
+#include <QTimer>
+#include <QMetaObject>
+#include <QPointer>
 #include <QAbstractItemView>
 #include <QtConcurrent>
 
@@ -152,6 +155,27 @@ MainWindow::MainWindow(QWidget* parent)
 {
     buildUi();
     connectUi();
+
+    watchdogTimer_ = new QTimer(this);
+    watchdogTimer_->setInterval(250);
+    connect(watchdogTimer_, &QTimer::timeout, this, [this] {
+        if (!activeWatchdog_) return;
+        const auto snapshot = activeWatchdog_->poll();
+        const int percent = snapshot.totalItems > 0
+            ? std::clamp(static_cast<int>(
+                100.0 * static_cast<double>(snapshot.completedItems) /
+                static_cast<double>(snapshot.totalItems)), 0, 100)
+            : 0;
+        progress_->setRange(0, 100);
+        progress_->setValue(percent);
+        statusBar()->showMessage(
+            QString("%1 • %2 • %3% • осталось %4 с")
+                .arg(QString::fromUtf8(toString(snapshot.stage)))
+                .arg(QString::fromUtf8(toString(snapshot.state)))
+                .arg(percent)
+                .arg(snapshot.remainingMs / 1000.0, 0, 'f', 1)
+        );
+    });
 
     setWindowTitle("SheetNest 2.0 — раскрой металла");
     resize(1500, 900);
@@ -831,6 +855,10 @@ void MainWindow::calculate() {
     options_.iterations =
         static_cast<std::size_t>(iterationsSpin_->value());
     options_.gapMm = gapSpin_->value();
+    options_.overallBudgetMs = 120000.0;
+    options_.nfpSearchBudgetMs = 250.0;
+    options_.candidateBudget = 512;
+    options_.segmentSamples = 128;
 
     Material material = Material::CarbonSteel;
     switch (materialCombo_->currentIndex()) {
@@ -847,11 +875,43 @@ void MainWindow::calculate() {
 
     const auto instancesCopy = instances_;
     const auto sheetCopy = sheet_;
-    const auto optionsCopy = options_;
-    const auto technologyCopy = technology_;
+    auto optionsCopy = options_;
+    const auto technologyCopy = technologyCopy;
+
+    activeWatchdog_ = std::make_shared<Watchdog>(
+        optionsCopy.overallBudgetMs,
+        5000.0
+    );
+    optionsCopy.watchdog = activeWatchdog_;
+
+    QPointer<MainWindow> self(this);
+    optionsCopy.progress = [self](const NestingProgress& p) {
+        if (!self) return;
+        QMetaObject::invokeMethod(
+            self,
+            [self, p] {
+                if (!self) return;
+                const int percent = p.totalItems > 0
+                    ? std::clamp(static_cast<int>(
+                        100.0 * static_cast<double>(p.completedItems) /
+                        static_cast<double>(p.totalItems)), 0, 100)
+                    : 0;
+                self->progress_->setRange(0, 100);
+                self->progress_->setValue(percent);
+                self->resultLabel_->setText(
+                    QString("Этап: %1 • %2% • осталось %3 с")
+                        .arg(QString::fromStdString(p.stage))
+                        .arg(percent)
+                        .arg(p.remainingMs / 1000.0, 0, 'f', 1)
+                );
+            },
+            Qt::QueuedConnection
+        );
+    };
 
     setBusy(true);
-    appendLog("Запущен расчёт nesting в фоновом потоке...");
+    watchdogTimer_->start();
+    appendLog("Запущен расчёт nesting в фоновом потоке с Watchdog...");
 
     watcher_->setFuture(
         QtConcurrent::run(
