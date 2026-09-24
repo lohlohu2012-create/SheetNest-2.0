@@ -4080,6 +4080,71 @@ void testNfpTopologyRejectsInvalidHole() {
     assert(!nfp::validatePolygonWithHoles(badRegion));
 }
 
+void testNfpValidationAdversarialTopology() {
+    using Limits = std::numeric_limits<double>;
+
+    const Polygon valid{{0,0},{40,0},{40,30},{0,30}};
+    auto ok = nfp::validateNfp({valid});
+    assert(ok.valid);
+    assert(ok.loops == 1);
+    assert(ok.holes == 0);
+    assert(ok.intersectingLoops == 0);
+    assert(ok.invalidTopologyLoops == 0);
+    assert(ok.invalidOrientationLoops == 0);
+    assert(ok.duplicateLoops == 0);
+    assert(ok.openBoundarySegments == 0);
+
+    Polygon nanLoop = valid;
+    nanLoop[2].x = Limits::quiet_NaN();
+    auto nanReport = nfp::validateNfp({nanLoop});
+    assert(!nanReport.valid);
+    assert(nanReport.nonFiniteVertices > 0);
+
+    Polygon infLoop = valid;
+    infLoop[1].y = Limits::infinity();
+    auto infReport = nfp::validateNfp({infLoop});
+    assert(!infReport.valid);
+    assert(infReport.nonFiniteVertices > 0);
+
+    const Polygon bowTie{{0,0},{40,30},{0,30},{40,0}};
+    auto selfReport = nfp::validateNfp({bowTie});
+    assert(!selfReport.valid);
+    assert(selfReport.selfIntersectingLoops > 0);
+
+    const Polygon duplicate = valid;
+    auto duplicateReport = nfp::validateNfp({valid, duplicate});
+    assert(!duplicateReport.valid);
+    assert(duplicateReport.duplicateLoops > 0);
+
+    const Polygon crossingA{{0,0},{40,0},{40,40},{0,40}};
+    const Polygon crossingB{{20,-10},{50,-10},{50,20},{20,20}};
+    auto crossingReport = nfp::validateNfp({crossingA, crossingB});
+    assert(!crossingReport.valid);
+    assert(crossingReport.intersectingLoops > 0);
+
+    const Polygon outer{{0,0},{100,0},{100,100},{0,100}};
+    const Polygon wrongWayHole{{20,20},{20,80},{80,80},{80,20}};
+    auto orientationReport = nfp::validateNfp({outer, wrongWayHole});
+    assert(!orientationReport.valid);
+    assert(orientationReport.holes == 1);
+    assert(orientationReport.invalidOrientationLoops > 0);
+
+    const Polygon touchingHole{{0,20},{0,80},{20,80},{20,20}};
+    auto touchingReport = nfp::validateNfp({outer, touchingHole});
+    assert(!touchingReport.valid);
+    assert(touchingReport.intersectingLoops > 0);
+
+    const Polygon orphanHole{{150,150},{150,160},{160,160},{160,150}};
+    auto orphanReport = nfp::validateNfp({outer, orphanHole});
+    assert(!orphanReport.valid);
+    assert(orphanReport.invalidOrientationLoops > 0 ||
+           orphanReport.invalidTopologyLoops > 0);
+
+    auto emptyReport = nfp::validateNfp({});
+    assert(emptyReport.valid);
+    assert(emptyReport.loops == 0);
+}
+
 int main(int argc, char** argv) {
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Nesting)) == "Nesting");
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Complete)) == "Complete");
@@ -4105,6 +4170,7 @@ int main(int argc, char** argv) {
     testNfpPolygonWithHolesModel();
     testNfpTopologyComponentsAndIslands();
     testNfpTopologyRejectsInvalidHole();
+    testNfpValidationAdversarialTopology();
     testGeometry();
     testDxfHoleRecovery();
     testLayerSeparation();
