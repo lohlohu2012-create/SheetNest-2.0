@@ -1922,41 +1922,6 @@ CalculationOutput MainWindow::performCalculation(
                     pipeline.failureReason;
     }
 
-    if (!pipeline.exportedDxf.empty()) {
-        appendLog(
-            QString("Production Pipeline: %1 • DXF=%2 bytes • CAM=%3 ops")
-                .arg(
-                    pipeline.valid ? "COMPLETE" : "FAIL"
-                )
-                .arg(
-                    static_cast<qulonglong>(
-                        pipeline.exportedBytes
-                    )
-                )
-                .arg(
-                    static_cast<qulonglong>(
-                        pipeline.camOperationCount
-                    )
-                )
-        );
-    } else {
-        appendLog(
-            QString("Production Pipeline: FAIL • stage=%1 • %2")
-                .arg(
-                    QString::fromUtf8(
-                        productionPipelineStageName(
-                            pipeline.failedStage
-                        )
-                    )
-                )
-                .arg(
-                    QString::fromStdString(
-                        pipeline.failureReason
-                    )
-                )
-        );
-    }
-
     output.diagnostics = diagnoseNest(instances, output.result);
     enrichDiagnostics(
         output.diagnostics,
