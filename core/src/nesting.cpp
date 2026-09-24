@@ -465,13 +465,26 @@ bool placeOnSheet(
             continue;
         }
 
+        if (options.watchdog) {
+            options.watchdog->stage(WatchdogStage::NfpSearch, "NFP candidate search");
+        }
+
         for (const auto& candidate : candidatesFor(
                  instance.part.outer,
                  rotation,
                  state,
                  sheet,
                  options.gapMm,
-                 sheet.edgeMarginMm)) {
+                 sheet.edgeMarginMm,
+                 options)) {
+            if (options.watchdog) {
+                const auto snapshot = options.watchdog->poll();
+                if (snapshot.state == WatchdogState::Timeout ||
+                    snapshot.state == WatchdogState::Stopped) {
+                    return false;
+                }
+            }
+
             const auto shape =
                 transformed(instance, rotation, candidate.x, candidate.y);
 
@@ -763,6 +776,26 @@ Result nest(
             // comparison still decides whether another restart is better.
         }
     }
+
+    if (options.watchdog && !best.timedOut && !best.stopped) {
+        options.watchdog->stage(
+            WatchdogStage::Finalizing,
+            "Nesting finalized"
+        );
+        options.watchdog->stage(
+            WatchdogStage::Completed,
+            "Nesting completed"
+        );
+    }
+
+    emitProgress(
+        instances.size() - best.unplaced.size(),
+        instances.size(),
+        iterations,
+        "Completed",
+        best.timedOut,
+        best.stopped
+    );
 
     return best;
 }
