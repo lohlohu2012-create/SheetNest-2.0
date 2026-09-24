@@ -558,10 +558,9 @@ void MainWindow::buildUi() {
         QAbstractItemView::SelectRows
     );
 
-    validatorTable_ = new QTableWidget(0, 7);
+    validatorTable_ = new QTableWidget(0, 4);
     validatorTable_->setHorizontalHeaderLabels({
-        "Тип", "Лист", "instanceId", "Связанный ID",
-        "Измерено, мм", "Требуется, мм", "Сообщение"
+        "Этап", "Статус", "Ключевые метрики", "Результат / причина"
     });
     validatorTable_->horizontalHeader()->setStretchLastSection(true);
     validatorTable_->setSelectionBehavior(
@@ -1450,54 +1449,149 @@ void MainWindow::populateDiagnostics() {
 void MainWindow::populateProductionValidation() {
     if (!validatorTable_) return;
 
-    validatorTable_->setRowCount(
-        static_cast<int>(validation_.issues.size())
-    );
+    const auto& pipeline = pipeline_;
+    const auto statusFor = [&pipeline](ProductionPipelineStage stage) {
+        if (std::find(
+                pipeline.completedStages.begin(),
+                pipeline.completedStages.end(),
+                stage
+            ) != pipeline.completedStages.end()) {
+            return QString("OK");
+        }
+        if (!pipeline.valid && pipeline.failedStage == stage) {
+            return QString("FAIL");
+        }
+        return QString("—");
+    };
 
-    for (std::size_t i = 0; i < validation_.issues.size(); ++i) {
-        const auto& issue = validation_.issues[i];
+    const auto stageText = [](ProductionPipelineStage stage) {
+        return QString::fromUtf8(productionPipelineStageName(stage));
+    };
+
+    const auto metricText = [&pipeline](ProductionPipelineStage stage) {
+        switch (stage) {
+        case ProductionPipelineStage::DxfParse:
+            return QString("parts=%1")
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.validParts));
+        case ProductionPipelineStage::DxfPreflight:
+            return QString("valid=%1 • empty=%2 • invalid=%3 • area=%4…%5 mm²")
+                .arg(pipeline.dxfPreflight.valid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.emptyParts))
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.invalidParts))
+                .arg(pipeline.dxfPreflight.minArea, 0, 'f', 1)
+                .arg(pipeline.dxfPreflight.maxArea, 0, 'f', 1);
+        case ProductionPipelineStage::Nesting:
+            return QString("placed=%1/%2 • unplaced=%3 • sheets=%4 • checks=%5")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.placedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.expectedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.unplacedInstanceCount))
+                .arg(static_cast<qulonglong>(result_.sheets.size()))
+                .arg(static_cast<qulonglong>(result_.stats.candidateChecks));
+        case ProductionPipelineStage::AdaptiveRepair:
+            return QString("rounds=%1 • attempts=%2 • group=%3 • elapsed=%4 ms")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.adaptiveRepairRounds))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.repairAttempts))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.adaptiveRepairGroupSize))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.repairElapsedMs));
+        case ProductionPipelineStage::Coverage:
+            return QString("expected=%1 • placed=%2 • missing=%3")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.expectedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.placedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.unplacedInstanceCount));
+        case ProductionPipelineStage::CamRoute:
+            return QString("operations=%1 • time=%2 s")
+                .arg(static_cast<qulonglong>(pipeline.camOperationCount))
+                .arg(cuttingRoute_.totalSeconds, 0, 'f', 2);
+        case ProductionPipelineStage::CamValidation:
+            return QString("valid=%1 • invalid geometry=%2 • nonfinite XY=%3 • zero cuts=%4")
+                .arg(pipeline.camValidation.valid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.camValidation.invalidGeometryCount))
+                .arg(static_cast<qulonglong>(pipeline.camValidation.nonFiniteCoordinateCount))
+                .arg(static_cast<qulonglong>(pipeline.camValidation.zeroLengthCutCount));
+        case ProductionPipelineStage::DxfExport:
+            return QString("bytes=%1")
+                .arg(static_cast<qulonglong>(pipeline.exportedBytes));
+        case ProductionPipelineStage::DxfRoundTrip:
+            return QString("valid=%1 • parts=%2 • invalid=%3")
+                .arg(pipeline.roundTripValid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.roundTripPreflight.validParts))
+                .arg(static_cast<qulonglong>(pipeline.roundTripPreflight.invalidParts));
+        case ProductionPipelineStage::Complete:
+            return QString("all stages passed");
+        case ProductionPipelineStage::Failed:
+            return QString();
+        }
+        return QString();
+    };
+
+    const std::array<ProductionPipelineStage, 10> stages = {
+        ProductionPipelineStage::DxfParse,
+        ProductionPipelineStage::DxfPreflight,
+        ProductionPipelineStage::Nesting,
+        ProductionPipelineStage::AdaptiveRepair,
+        ProductionPipelineStage::Coverage,
+        ProductionPipelineStage::CamRoute,
+        ProductionPipelineStage::CamValidation,
+        ProductionPipelineStage::DxfExport,
+        ProductionPipelineStage::DxfRoundTrip,
+        ProductionPipelineStage::Complete
+    };
+
+    validatorTable_->setRowCount(static_cast<int>(stages.size()) + 1);
+
+    for (std::size_t i = 0; i < stages.size(); ++i) {
+        const auto stage = stages[i];
+        const QString status = statusFor(stage);
+        QString detail;
+        if (!pipeline.valid && pipeline.failedStage == stage) {
+            detail = QString::fromStdString(pipeline.failureReason);
+        } else if (stage == ProductionPipelineStage::Complete && pipeline.valid) {
+            detail = "Production Pipeline: COMPLETE.";
+        } else {
+            detail = "Пройден";
+        }
 
         const QString values[] = {
-            QString::fromUtf8(
-                productionValidationIssueTypeName(issue.type)
-            ),
-            QString::number(
-                static_cast<qulonglong>(issue.sheetIndex + 1)
-            ),
-            QString::fromStdString(issue.instanceId),
-            QString::fromStdString(issue.relatedInstanceId),
-            QString::number(issue.measuredMm, 'f', 3),
-            QString::number(issue.requiredMm, 'f', 3),
-            QString::fromStdString(issue.message)
+            stageText(stage),
+            status,
+            metricText(stage),
+            detail
         };
-
-        for (int column = 0; column < 7; ++column) {
-            validatorTable_->setItem(
-                static_cast<int>(i),
-                column,
-                new QTableWidgetItem(values[column])
-            );
+        for (int column = 0; column < 4; ++column) {
+            auto* item = new QTableWidgetItem(values[column]);
+            if (status == "FAIL") {
+                item->setToolTip(detail);
+            }
+            validatorTable_->setItem(static_cast<int>(i), column, item);
         }
     }
 
-    if (validation_.valid && validatorTable_->rowCount() == 0) {
-        validatorTable_->setRowCount(1);
-
-        const QString values[] = {
-            "OK", "-", "-", "-", "-", "-",
-            "Production Validator: ошибок не обнаружено."
-        };
-
-        for (int column = 0; column < 7; ++column) {
-            validatorTable_->setItem(
-                0,
-                column,
-                new QTableWidgetItem(values[column])
-            );
-        }
+    const int summaryRow = static_cast<int>(stages.size());
+    const QString summaryStatus = pipeline.valid ? "COMPLETE" : "FAIL";
+    const QString summaryDetail = pipeline.valid
+        ? "Production Pipeline 2.0 завершён без ошибок."
+        : QString("Отказ: %1 • %2")
+            .arg(stageText(pipeline.failedStage))
+            .arg(QString::fromStdString(pipeline.failureReason));
+    const QString summaryValues[] = {
+        "Итог",
+        summaryStatus,
+        QString("sheets=%1 • CAM ops=%2 • DXF=%3 B • round-trip=%4")
+            .arg(static_cast<qulonglong>(result_.sheets.size()))
+            .arg(static_cast<qulonglong>(pipeline.camOperationCount))
+            .arg(static_cast<qulonglong>(pipeline.exportedBytes))
+            .arg(pipeline.roundTripValid ? "OK" : "FAIL"),
+        summaryDetail
+    };
+    for (int column = 0; column < 4; ++column) {
+        validatorTable_->setItem(summaryRow, column, new QTableWidgetItem(summaryValues[column]));
     }
 
-    validatorTable_->resizeColumnsToContents();
+    validatorTable_->setColumnWidth(0, 150);
+    validatorTable_->setColumnWidth(1, 80);
+    validatorTable_->setColumnWidth(2, 430);
+    validatorTable_->horizontalHeader()->setStretchLastSection(true);
+    validatorTable_->resizeRowsToContents();
 }
 
 void MainWindow::populateBenchmark(
