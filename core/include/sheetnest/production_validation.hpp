@@ -91,6 +91,10 @@ struct ProductionValidationReport {
     std::size_t adaptiveRepairGroupSize{};
     std::uint64_t repairElapsedMs{};
     bool repaired{};
+    bool coverageComplete{false};
+    std::size_t expectedInstanceCount{};
+    std::size_t placedInstanceCount{};
+    std::size_t unplacedInstanceCount{};
     std::vector<AdaptiveRepairChange> adaptiveChanges;
     std::vector<AdaptiveRepairRound> adaptiveHistory;
     std::vector<std::string> adaptiveConflictIds;
