@@ -50,6 +50,20 @@ struct FeasibilityRegion {
     std::vector<FeasibilitySegment> sheetBoundary;
 };
 
+struct NfpValidationReport {
+    bool valid{true};
+    std::size_t loops{};
+    std::size_t holes{};
+    std::size_t degenerateLoops{};
+    std::size_t selfIntersectingLoops{};
+    std::size_t nonFiniteVertices{};
+    std::size_t openBoundarySegments{};
+};
+
+NfpValidationReport validateNfp(
+    const std::vector<Polygon>& polygons
+);
+
 std::vector<Polygon> convexDecompose(const Polygon& polygon, const NfpRunControl* control = nullptr);
 
 Polygon minkowskiConvexSum(
