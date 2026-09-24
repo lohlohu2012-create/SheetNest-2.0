@@ -1,6 +1,6 @@
 #include "sheetnest/pipeline_validator.hpp"
 
-#include "cutting_path.hpp"
+#include "sheetnest/cutting_path.hpp"
 #include "dxf_model.hpp"
 
 #include <algorithm>
