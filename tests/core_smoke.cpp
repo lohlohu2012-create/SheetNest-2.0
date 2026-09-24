@@ -933,6 +933,15 @@ void testNfpHolePipeline() {
     const auto result = nest(instances, sheet, options);
     assert(result.unplaced.empty());
     assert(!result.sheets.empty());
+
+    const auto validation = validateProductionResult(
+        instances, sheet, options, result
+    );
+    assert(validation.valid);
+    assert(validation.coverageComplete);
+    assert(validation.expectedInstanceCount == 1);
+    assert(validation.placedInstanceCount == 1);
+    assert(validation.unplacedInstanceCount == 0);
 }
 
 void testNfpTimeoutRecovery() {
