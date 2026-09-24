@@ -183,6 +183,7 @@ private:
     sheetnest::BenchmarkResult lastBenchmarkResult_{};
     bool hasBenchmarkResult_{false};
     bool repairRequested_{false};
+    sheetnest::ProductionPipelineReport pipeline_{};
     bool repairAnimationPlaying_{false};
     bool repairAnimationSession_{false};
     int repairAnimationFrame_{-1};
