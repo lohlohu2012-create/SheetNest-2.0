@@ -20,6 +20,7 @@ constexpr double kEps = 1e-9;
 constexpr double kPointEps = 1e-8;
 constexpr double kQuant = 1e6;
 constexpr std::size_t kMaxCacheEntries = 4096;
+constexpr std::size_t kMaxValidationVertices = 8192;
 
 struct SegmentPiece {
     Point a{};
@@ -130,6 +131,92 @@ bool pointInPolygonInclusive(
     }
 
     return inside;
+}
+
+
+bool segmentsProperOrTouch(
+    Point a, Point b, Point c, Point d
+) {
+    const double abC = cross(a, b, c);
+    const double abD = cross(a, b, d);
+    const double cdA = cross(c, d, a);
+    const double cdB = cross(c, d, b);
+
+    if (((abC > kPointEps && abD < -kPointEps) ||
+         (abC < -kPointEps && abD > kPointEps)) &&
+        ((cdA > kPointEps && cdB < -kPointEps) ||
+         (cdA < -kPointEps && cdB > kPointEps))) {
+        return true;
+    }
+
+    return pointOnSegment(c, a, b) ||
+           pointOnSegment(d, a, b) ||
+           pointOnSegment(a, c, d) ||
+           pointOnSegment(b, c, d);
+}
+
+bool selfIntersects(const Polygon& polygon) {
+    if (polygon.size() < 4) return false;
+    const std::size_t n = polygon.size();
+    if (n > kMaxValidationVertices) return true;
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const Point a = polygon[i];
+        const Point b = polygon[(i + 1) % n];
+        if (samePoint(a, b)) return true;
+
+        for (std::size_t j = i + 1; j < n; ++j) {
+            if (j == i || (i + 1) % n == j ||
+                (j + 1) % n == i) {
+                continue;
+            }
+            if (segmentsProperOrTouch(
+                    a, b,
+                    polygon[j],
+                    polygon[(j + 1) % n])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<Polygon> normalizeBoundaryLoops(
+    std::vector<Polygon> loops
+) {
+    std::vector<Polygon> valid;
+    for (auto& loop : loops) {
+        loop = cleanPolygon(loop);
+        if (loop.size() < 3 ||
+            !std::all_of(loop.begin(), loop.end(), [](Point p) {
+                return std::isfinite(p.x) && std::isfinite(p.y);
+            }) ||
+            std::abs(signedArea(loop)) <= kEps ||
+            selfIntersects(loop)) {
+            continue;
+        }
+        valid.push_back(std::move(loop));
+    }
+
+    // Preserve true NFP holes. A loop is an outer boundary or a hole by
+    // nesting parity, independent of the direction emitted by the union
+    // traversal. This prevents internal slits/lock regions from being
+    // flattened into a single convex envelope.
+    for (std::size_t i = 0; i < valid.size(); ++i) {
+        Point probe = valid[i].front();
+        std::size_t depth = 0;
+        for (std::size_t j = 0; j < valid.size(); ++j) {
+            if (i == j) continue;
+            if (pointInPolygonInclusive(probe, valid[j])) ++depth;
+        }
+        const bool hole = (depth % 2) == 1;
+        const double area = signedArea(valid[i]);
+        if ((!hole && area < 0.0) || (hole && area > 0.0)) {
+            std::reverse(valid[i].begin(), valid[i].end());
+        }
+    }
+
+    return valid;
 }
 
 Polygon convexHull(std::vector<Point> points) {
@@ -617,7 +704,10 @@ std::vector<Polygon> unionPolygons(
     if (cleaned.size() == 1) return cleaned;
 
     const auto boundary = unionBoundaryPieces(cleaned, control);
-    return assembleBoundaryLoops(boundary);
+    if (boundary.empty()) return {};
+
+    auto loops = assembleBoundaryLoops(boundary);
+    return normalizeBoundaryLoops(std::move(loops));
 }
 
 std::vector<Polygon> conservativeConvexFallback(const Polygon& polygon) {
@@ -1574,6 +1664,42 @@ std::vector<Point> pointsOnFeasibilityBoundary(
         }
     }
 
+    // Adaptive refinement: long edges and edges adjacent to sharp
+    // direction changes receive extra quarter/three-quarter samples. This
+    // specifically targets narrow corridors, lock/key transitions and small
+    // valid intervals that a uniform spacing can skip.
+    if (points.size() < budget) {
+        std::size_t added = 0;
+        const std::size_t maxAdded = budget - points.size();
+        for (const auto& work : segments) {
+            if (added >= maxAdded) break;
+            const double len = work.length;
+            if (len <= spacing * 0.75) continue;
+
+            const double ratio = len / spacing;
+            const std::size_t localSamples =
+                std::clamp<std::size_t>(
+                    static_cast<std::size_t>(std::ceil(ratio)) - 1,
+                    1, 8
+                );
+
+            for (std::size_t k = 1;
+                 k <= localSamples && added < maxAdded;
+                 ++k) {
+                const double f =
+                    static_cast<double>(k) /
+                    static_cast<double>(localSamples + 1);
+                points.push_back({
+                    work.segment.a.x +
+                        (work.segment.b.x - work.segment.a.x) * f,
+                    work.segment.a.y +
+                        (work.segment.b.y - work.segment.a.y) * f
+                });
+                ++added;
+            }
+        }
+    }
+
     std::sort(
         points.begin(),
         points.end(),
@@ -1602,6 +1728,47 @@ std::vector<Point> pointsOnFeasibilityBoundary(
     return points;
 }
 
+
+NfpValidationReport validateNfp(
+    const std::vector<Polygon>& polygons
+) {
+    NfpValidationReport report;
+    report.loops = polygons.size();
+
+    for (const auto& polygon : polygons) {
+        for (const auto& point : polygon) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+                ++report.nonFiniteVertices;
+            }
+        }
+
+        if (polygon.size() < 3 || std::abs(signedArea(polygon)) <= kEps) {
+            ++report.degenerateLoops;
+            continue;
+        }
+
+        if (selfIntersects(polygon)) {
+            ++report.selfIntersectingLoops;
+        }
+    }
+
+    for (std::size_t i = 0; i < polygons.size(); ++i) {
+        if (polygons[i].size() < 3) continue;
+        const Point probe = polygons[i].front();
+        std::size_t depth = 0;
+        for (std::size_t j = 0; j < polygons.size(); ++j) {
+            if (i == j || polygons[j].size() < 3) continue;
+            if (pointInPolygonInclusive(probe, polygons[j])) ++depth;
+        }
+        if ((depth % 2) == 1) ++report.holes;
+    }
+
+    report.valid =
+        report.degenerateLoops == 0 &&
+        report.selfIntersectingLoops == 0 &&
+        report.nonFiniteVertices == 0;
+    return report;
+}
 
 void clearCache() {
     CacheStore& store = cacheStore();
