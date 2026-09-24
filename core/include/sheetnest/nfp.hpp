@@ -95,6 +95,51 @@ std::vector<Point> pointsOnFeasibilityBoundary(
     bool includeSheetBoundary = true
 );
 
+
+// Bounded candidate search over the continuous NFP feasibility boundary.
+// The search never assumes that NFP vertices are sufficient: boundary
+// segments are sampled continuously and the optional exact validator remains
+// authoritative for technological clearance and true-shape collision rules.
+struct SearchOptions {
+    double boundarySpacingMm{5.0};
+    std::size_t maxCandidates{256};
+    bool includeSheetBoundary{true};
+    bool includeNfpVertices{true};
+    bool includeBoundaryMidpoints{true};
+    std::function<bool(const Point&)> isFeasible;
+};
+
+struct SearchTelemetry {
+    std::size_t generated{};
+    std::size_t deduplicated{};
+    std::size_t exactChecks{};
+    std::size_t feasible{};
+    std::size_t rejected{};
+    std::size_t boundarySegments{};
+    std::size_t boundarySamples{};
+    std::size_t nfpVertices{};
+    bool budgetExceeded{};
+    bool stopped{};
+};
+
+struct SearchResult {
+    std::vector<Point> points;
+    SearchTelemetry telemetry;
+};
+
+SearchResult searchFeasibleBoundary(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY,
+    double clearanceMm,
+    const SearchOptions& options = {},
+    const NfpRunControl* control = nullptr
+);
+
 void clearCache();
 CacheStats cacheStats();
 
