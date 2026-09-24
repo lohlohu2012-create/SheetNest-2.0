@@ -942,6 +942,28 @@ void testNfpHolePipeline() {
     assert(validation.expectedInstanceCount == 1);
     assert(validation.placedInstanceCount == 1);
     assert(validation.unplacedInstanceCount == 0);
+
+    CuttingParameters cuttingParameters;
+    cuttingParameters.material = Material::CarbonSteel;
+    cuttingParameters.thicknessMm = 2.0;
+    cuttingParameters.speedMMin = 20.0;
+    cuttingParameters.assistGas = "O2";
+
+    const auto pipeline = validateProductionPipeline(
+        doc,
+        instances,
+        sheet,
+        options,
+        result,
+        cuttingParameters
+    );
+    assert(pipeline.valid);
+    assert(pipeline.failedStage == ProductionPipelineStage::Complete);
+    assert(pipeline.camOperationCount > 0);
+    assert(pipeline.exportedBytes > 0);
+    assert(pipeline.roundTripValid);
+    assert(!pipeline.failureReason.size());
+    assert(pipeline.completedStages.size() == 10);
 }
 
 void testNfpTimeoutRecovery() {
