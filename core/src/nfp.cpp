@@ -1,5 +1,50 @@
 #include "sheetnest/nfp.hpp"
 
+#include <unordered_map>
+
+namespace {
+using sheetnest::Point;
+using sheetnest::Polygon;
+
+double signedAreaLocal(const Polygon& p) {
+    double a = 0.0;
+    if (p.size() < 3) return 0.0;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        const auto& a0 = p[i];
+        const auto& b0 = p[(i + 1) % p.size()];
+        a += a0.x * b0.y - b0.x * a0.y;
+    }
+    return a * 0.5;
+}
+bool finiteLocal(const Point& p) { return std::isfinite(p.x) && std::isfinite(p.y); }
+bool pointInInclusiveLocal(const Point& p, const Polygon& poly) {
+    if (poly.size() < 3) return false;
+    bool inside = false;
+    for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+        const auto& a = poly[i]; const auto& b = poly[j];
+        const double cross = (b.x-a.x)*(p.y-a.y) - (b.y-a.y)*(p.x-a.x);
+        const double dot = (p.x-a.x)*(p.x-b.x) + (p.y-a.y)*(p.y-b.y);
+        if (std::abs(cross) < 1e-8 && dot <= 1e-8) return true;
+        if ((a.y > p.y) != (b.y > p.y)) {
+            const double x = (b.x-a.x)*(p.y-a.y)/(b.y-a.y) + a.x;
+            if (p.x < x) inside = !inside;
+        }
+    }
+    return inside;
+}
+Point interiorProbeLocal(const Polygon& p) {
+    if (p.empty()) return {};
+    Point c{};
+    for (const auto& q : p) { c.x += q.x; c.y += q.y; }
+    c.x /= static_cast<double>(p.size()); c.y /= static_cast<double>(p.size());
+    if (pointInInclusiveLocal(c,p)) return c;
+    const auto& a=p.front(); const auto& b=p[1%p.size()];
+    Point m{(a.x+b.x)*.5,(a.y+b.y)*.5};
+    Point q{m.x + (c.x-m.x)*0.01, m.y + (c.y-m.y)*0.01};
+    return q;
+}
+}
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,6 +59,23 @@
 #include <vector>
 
 namespace sheetnest::nfp {
+
+struct PolygonWithHoles {
+    Polygon outer;
+    std::vector<Polygon> holes;
+};
+
+struct PolygonRegion {
+    std::vector<PolygonWithHoles> components;
+};
+
+PolygonWithHoles normalizePolygonWithHoles(const Polygon& outer,
+                                           const std::vector<Polygon>& holes);
+bool validatePolygonWithHoles(const PolygonWithHoles& region);
+bool pointInPolygonWithHoles(const Point& p, const PolygonWithHoles& region);
+std::vector<PolygonWithHoles> classifyPolygonLoops(
+    const std::vector<Polygon>& loops);
+
 namespace {
 
 constexpr double kEps = 1e-9;
