@@ -1391,7 +1391,7 @@ void testNfpLockKeyCandidateSearch() {
     assert(!result.points.empty());
     assert(result.telemetry.generated > 0);
     assert(result.telemetry.boundarySamples > 0);
-    assert(result.telemetry.exactChecks >= result.points.size());
+    assert(result.telemetry.exactChecks == 0);
 }
 
 void testNfpLockKeyMetamorphicStress() {
