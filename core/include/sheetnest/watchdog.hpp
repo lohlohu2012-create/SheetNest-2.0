@@ -58,12 +58,14 @@ public:
     WatchdogSnapshot snapshot() const;
 
 private:
+    mutable std::mutex mutex_;
     mutable std::atomic<std::uint64_t> heartbeat_{0};
     std::atomic<bool> stopRequested_{false};
     std::atomic<std::size_t> completedItems_{0};
     std::atomic<std::size_t> totalItems_{0};
     WatchdogStage stage_{WatchdogStage::Starting};
     WatchdogState state_{WatchdogState::Running};
+    
     double timeoutMs_{};
     double stallMs_{};
     std::uint64_t lastHeartbeat_{};
