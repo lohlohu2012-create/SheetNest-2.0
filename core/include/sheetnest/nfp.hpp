@@ -8,6 +8,22 @@
 
 namespace sheetnest::nfp {
 
+struct PolygonWithHoles {
+    Polygon outer;
+    std::vector<Polygon> holes;
+};
+
+struct PolygonRegion {
+    std::vector<PolygonWithHoles> components;
+};
+
+PolygonWithHoles normalizePolygonWithHoles(const Polygon& outer,
+                                           const std::vector<Polygon>& holes);
+bool validatePolygonWithHoles(const PolygonWithHoles& region);
+bool pointInPolygonWithHoles(const Point& p, const PolygonWithHoles& region);
+std::vector<PolygonWithHoles> classifyPolygonLoops(
+    const std::vector<Polygon>& loops);
+
 struct NfpRunControl {
     std::function<bool()> shouldStop;
     std::size_t maxInputVertices{512};
