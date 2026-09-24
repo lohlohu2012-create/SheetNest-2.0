@@ -1,7 +1,10 @@
 #include "sheetnest/nesting.hpp"
-#include "sheetnest/nfp.hpp"\n#include "sheetnest/nfp_search.hpp"\n#include "sheetnest/watchdog.hpp"
+#include "sheetnest/nfp.hpp"
+#include "sheetnest/nfp_search.hpp"
+#include "sheetnest/watchdog.hpp"
 
-#include <algorithm>\n#include <chrono>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
