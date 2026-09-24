@@ -645,6 +645,36 @@ Result nest(
     const Sheet& sheet,
     const Options& options
 ) {
+    const auto started = std::chrono::steady_clock::now();
+    auto elapsedMs = [&]() {
+        return std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started
+        ).count();
+    };
+    auto stopRequested = [&]() {
+        return options.watchdog && options.watchdog->stopRequested();
+    };
+    auto emitProgress = [&](std::size_t completed,
+                            std::size_t total,
+                            std::size_t attempt,
+                            const char* stage,
+                            bool timedOut,
+                            bool stopped) {
+        if (!options.progress) return;
+        NestingProgress p;
+        p.completedItems = completed;
+        p.totalItems = total;
+        p.attempt = attempt;
+        p.iterations = std::max<std::size_t>(1, options.iterations);
+        p.stage = stage;
+        p.elapsedMs = elapsedMs();
+        p.remainingMs = options.overallBudgetMs > 0.0
+            ? std::max(0.0, options.overallBudgetMs - p.elapsedMs)
+            : 0.0;
+        p.timedOut = timedOut;
+        p.stopped = stopped;
+        options.progress(p);
+    };
     Result best;
     best.unplaced.reserve(instances.size());
     for (const auto& instance : instances) {
@@ -677,6 +707,19 @@ Result nest(
     std::mt19937 rng(options.seed);
 
     for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
+        if (stopRequested() ||
+            (options.overallBudgetMs > 0.0 && elapsedMs() >= options.overallBudgetMs)) {
+            best.timedOut = !stopRequested();
+            best.stopped = stopRequested();
+            emitProgress(0, instances.size(), attempt, "Watchdog", best.timedOut, best.stopped);
+            if (options.watchdog && best.timedOut) options.watchdog->requestStop();
+            break;
+        }
+        if (options.watchdog) {
+            options.watchdog->stage(WatchdogStage::GlobalOptimization);
+            options.watchdog->heartbeat(0, instances.size(), "Nesting iteration started");
+        }
+        emitProgress(0, instances.size(), attempt, "Global Optimization", false, false);
         auto attemptOrder = order;
 
         if (attempt > 0) {
@@ -694,6 +737,22 @@ Result nest(
         if (best.utilization < 0.0 || betterResult(candidate, best)) {
             best = std::move(candidate);
         }
+
+        if (options.watchdog) {
+            options.watchdog->heartbeat(
+                instances.size() - best.unplaced.size(),
+                instances.size(),
+                "Nesting iteration completed"
+            );
+        }
+        emitProgress(
+            instances.size() - best.unplaced.size(),
+            instances.size(),
+            attempt + 1,
+            "Global Optimization",
+            best.timedOut,
+            best.stopped
+        );
 
         // A feasible single-sheet result with every requested instance is a
         // hard lower bound on the primary objective, so further restarts can
