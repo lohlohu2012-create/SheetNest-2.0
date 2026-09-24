@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <string>
+#include <string>\n#include <mutex>
 
 namespace sheetnest {
 
