@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
+#include <vector>\n#include <functional>\n#include <memory>\n\nnamespace sheetnest {\nclass Watchdog;\nstruct NestingProgress {\n    std::size_t completedItems{};\n    std::size_t totalItems{};\n    std::size_t attempt{};\n    std::size_t iterations{};\n    std::string stage;\n    double elapsedMs{};\n    double remainingMs{};\n    bool timedOut{};\n    bool stopped{};\n};\n\nstruct NestingTelemetry {\n    std::size_t candidateChecks{};\n    std::size_t boundsRejects{};\n    std::size_t collisionRejects{};\n    std::size_t feasibleCandidates{};\n    std::size_t nfpSegmentsSampled{};\n    std::size_t nfpBoundaryCandidates{};\n    std::size_t nfpBudgetExceeded{};\n    double nfpElapsedMs{};\n};\n\nnamespace detail {}
 
 namespace sheetnest {
 
