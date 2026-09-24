@@ -13,8 +13,11 @@
 namespace sheetnest {
 const char* productionPipelineStageName(ProductionPipelineStage stage) {
     switch (stage) {
+    case ProductionPipelineStage::DxfParse: return "DxfParse";
+    case ProductionPipelineStage::DxfPreflight: return "DxfPreflight";
     case ProductionPipelineStage::Nesting: return "Nesting";
-    case ProductionPipelineStage::ProductionValidation: return "ProductionValidation";
+    case ProductionPipelineStage::AdaptiveRepair: return "AdaptiveRepair";
+    case ProductionPipelineStage::Coverage: return "Coverage";
     case ProductionPipelineStage::CamRoute: return "CamRoute";
     case ProductionPipelineStage::CamValidation: return "CamValidation";
     case ProductionPipelineStage::DxfExport: return "DxfExport";
