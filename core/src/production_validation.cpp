@@ -553,6 +553,10 @@ ProductionValidationReport validateProductionResult(
         }
     }
 
+    report.expectedInstanceCount = instances.size();
+    report.placedInstanceCount = placementCounts.size();
+    report.unplacedInstanceCount = result.unplaced.size();
+
     // Build one broad-phase index per sheet. The exact material-overlap
     // and boundary-distance predicates below remain authoritative.
     std::vector<SpatialIndex> sheetIndexes(result.sheets.size());
