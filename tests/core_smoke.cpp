@@ -4404,7 +4404,9 @@ int main(int argc, char** argv) {
     testNfpBoundaryTouchAndMinimumGap();
     testNfpLargeConcaveStress();
     testNfpStressDeterministicMatrix();
+    testNfpStressMetamorphicAndScaleMatrix();
     testNfpStressCancellationAndBudget();
+    testNfpValidationDeepTopologyAndNumericGuards();
     testNfpAdaptiveNarrowCorridor();
     testNfpBoundaryReconstructionStress();
     testNfpBoundaryReconstructionTouchingAndOverlap();
