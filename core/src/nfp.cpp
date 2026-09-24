@@ -1,4 +1,6 @@
+
 #include "sheetnest/nfp.hpp"
+#include <cmath>
 
 #include <unordered_map>
 
@@ -145,15 +147,6 @@ std::vector<PolygonWithHoles> classifyPolygonLoops(const std::vector<Polygon>& l
     return result;
 }
 
-
-struct PolygonWithHoles {
-    Polygon outer;
-    std::vector<Polygon> holes;
-};
-
-struct PolygonRegion {
-    std::vector<PolygonWithHoles> components;
-};
 
 PolygonWithHoles normalizePolygonWithHoles(const Polygon& outer,
                                            const std::vector<Polygon>& holes);
