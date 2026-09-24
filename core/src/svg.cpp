@@ -80,37 +80,24 @@ void appendArc(Polygon&o,Point s,double rx,double ry,double rot,bool large,bool 
 bool pair(const std::vector<std::string>&t,size_t&i,double&x,double&y){if(i+2>=t.size())return false;auto a=number(t[i+1]),b=number(t[i+2]);if(!a||!b)return false;x=*a;y=*b;i+=3;return true;}
 
 Polygon parsePath(const std::string&data,double tol,bool&closed,std::vector<DxfDiagnostic>&d){
-    auto t=pathTokens(data);if(t.empty())return{};size_t i=0;char cmd=0;Point cur{},start{},lastC{},lastQ{};bool hc=false,hq=false;
+    auto t=pathTokens(data);if(t.empty())return{};size_t i=0;char cmd=0;Point cur{},start{},lastC{},lastQ{};bool hc=false,hq=false;closed=false;Polygon out;
     auto iscmd=[](const std::string&s){return s.size()==1&&std::isalpha((unsigned char)s[0]);};
     auto next=[&](double&v){if(i>=t.size()||iscmd(t[i]))return false;auto n=number(t[i++]);if(!n)return false;v=*n;return true;};
     while(i<t.size()){
         if(iscmd(t[i]))cmd=t[i++][0];else if(!cmd){d.push_back({DxfSeverity::Error,"SVG/PATH","Path data начинается без команды."});return{};}
-        bool rel=std::islower((unsigned char)cmd),consumed=true;char op=(char)std::toupper((unsigned char)cmd);
+        const bool rel=std::islower((unsigned char)cmd),ok0=true;char op=(char)std::toupper((unsigned char)cmd);(void)ok0;
         if(op=='Z'){appendUnique(out,start);cur=start;closed=true;hc=hq=false;continue;}
-        Polygon dummy;
-        switch(op){
-        case'M':{double x,y;if(!pair(t,i,x,y))return{};if(rel){x+=cur.x;y+=cur.y;}cur=start={x,y};appendUnique(dummy,cur);/* handled below */}break;
-        default:break;
-        }
-        // Re-run with a compact state machine below; the M branch above only validates the pair.
-        break;
-    }
-    // Full state machine (kept separate so repeated parameter groups remain supported).
-    i=0;cmd=0;cur={};start={};lastC={};lastQ={};hc=hq=false;closed=false;Polygon out;
-    while(i<t.size()){
-        if(iscmd(t[i]))cmd=t[i++][0];else if(!cmd)return{};
-        bool rel=std::islower((unsigned char)cmd),ok=true;char op=(char)std::toupper((unsigned char)cmd);
-        if(op=='Z'){appendUnique(out,start);cur=start;closed=true;hc=hq=false;continue;}
+        bool ok=true;
         auto xy=[&](double&x,double&y){return pair(t,i,x,y);};
         switch(op){
         case'M':{double x,y;if(!xy(x,y))ok=false;else{if(rel){x+=cur.x;y+=cur.y;}cur=start={x,y};appendUnique(out,cur);cmd=rel?'l':'L';hc=hq=false;}break;}
         case'L':{double x,y;if(!xy(x,y))ok=false;else{if(rel){x+=cur.x;y+=cur.y;}cur={x,y};appendUnique(out,cur);hc=hq=false;}break;}
         case'H':{double x;if(!next(x))ok=false;else{if(rel)x+=cur.x;cur.x=x;appendUnique(out,cur);hc=hq=false;}break;}
         case'V':{double y;if(!next(y))ok=false;else{if(rel)y+=cur.y;cur.y=y;appendUnique(out,cur);hc=hq=false;}break;}
-        case'C':{if(i+6>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};if(!n(i)||!n(i+1)||!n(i+2)||!n(i+3)||!n(i+4)||!n(i+5))ok=false;else{double x1=*n(i),y1=*n(i+1),x2=*n(i+2),y2=*n(i+3),x=*n(i+4),y=*n(i+5);i+=6;if(rel){x1+=cur.x;y1+=cur.y;x2+=cur.x;y2+=cur.y;x+=cur.x;y+=cur.y;}appendCubic(out,cur,{x1,y1},{x2,y2},{x,y},tol);cur={x,y};lastC={x2,y2};hc=true;hq=false;}}break;}
-        case'S':{if(i+4>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};if(!n(i)||!n(i+1)||!n(i+2)||!n(i+3))ok=false;else{double x2=*n(i),y2=*n(i+1),x=*n(i+2),y=*n(i+3);i+=4;if(rel){x2+=cur.x;y2+=cur.y;x+=cur.x;y+=cur.y;}Point c=hc?Point{2*cur.x-lastC.x,2*cur.y-lastC.y}:cur;appendCubic(out,cur,c,{x2,y2},{x,y},tol);cur={x,y};lastC={x2,y2};hc=true;hq=false;}}break;}
-        case'Q':{if(i+4>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};if(!n(i)||!n(i+1)||!n(i+2)||!n(i+3))ok=false;else{double x1=*n(i),y1=*n(i+1),x=*n(i+2),y=*n(i+3);i+=4;if(rel){x1+=cur.x;y1+=cur.y;x+=cur.x;y+=cur.y;}appendQuadratic(out,cur,{x1,y1},{x,y},tol);cur={x,y};lastQ={x1,y1};hq=true;hc=false;}}break;}
-        case'T':{if(i+2>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};if(!n(i)||!n(i+1))ok=false;else{double x=*n(i),y=*n(i+1);i+=2;if(rel){x+=cur.x;y+=cur.y;}Point c=hq?Point{2*cur.x-lastQ.x,2*cur.y-lastQ.y}:cur;appendQuadratic(out,cur,c,{x,y},tol);cur={x,y};lastQ=c;hq=true;hc=false;}}break;}
+        case'C':{if(i+6>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};for(size_t k=i;k<i+6;++k)if(!n(k))ok=false;if(ok){double x1=*n(i),y1=*n(i+1),x2=*n(i+2),y2=*n(i+3),x=*n(i+4),y=*n(i+5);i+=6;if(rel){x1+=cur.x;y1+=cur.y;x2+=cur.x;y2+=cur.y;x+=cur.x;y+=cur.y;}appendCubic(out,cur,{x1,y1},{x2,y2},{x,y},tol);cur={x,y};lastC={x2,y2};hc=true;hq=false;}}break;}
+        case'S':{if(i+4>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};for(size_t k=i;k<i+4;++k)if(!n(k))ok=false;if(ok){double x2=*n(i),y2=*n(i+1),x=*n(i+2),y=*n(i+3);i+=4;if(rel){x2+=cur.x;y2+=cur.y;x+=cur.x;y+=cur.y;}Point cc=hc?Point{2*cur.x-lastC.x,2*cur.y-lastC.y}:cur;appendCubic(out,cur,cc,{x2,y2},{x,y},tol);cur={x,y};lastC={x2,y2};hc=true;hq=false;}}break;}
+        case'Q':{if(i+4>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};for(size_t k=i;k<i+4;++k)if(!n(k))ok=false;if(ok){double x1=*n(i),y1=*n(i+1),x=*n(i+2),y=*n(i+3);i+=4;if(rel){x1+=cur.x;y1+=cur.y;x+=cur.x;y+=cur.y;}appendQuadratic(out,cur,{x1,y1},{x,y},tol);cur={x,y};lastQ={x1,y1};hq=true;hc=false;}}break;}
+        case'T':{if(i+2>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};for(size_t k=i;k<i+2;++k)if(!n(k))ok=false;if(ok){double x=*n(i),y=*n(i+1);i+=2;if(rel){x+=cur.x;y+=cur.y;}Point cc=hq?Point{2*cur.x-lastQ.x,2*cur.y-lastQ.y}:cur;appendQuadratic(out,cur,cc,{x,y},tol);cur={x,y};lastQ=cc;hq=true;hc=false;}}break;}
         case'A':{if(i+7>t.size())ok=false;else{auto n=[&](size_t k){return number(t[k]);};for(size_t k=i;k<i+7;++k)if(!n(k))ok=false;if(ok){double rx=*n(i),ry=*n(i+1),rot=*n(i+2),la=*n(i+3),sw=*n(i+4),x=*n(i+5),y=*n(i+6);i+=7;if(rel){x+=cur.x;y+=cur.y;}appendArc(out,cur,rx,ry,rot,std::abs(la)>.5,std::abs(sw)>.5,{x,y},tol);cur={x,y};hc=hq=false;}}break;}
         default:d.push_back({DxfSeverity::Error,"SVG/PATH","Неподдерживаемая SVG path-команда: "+std::string(1,op)});return{};
         }
