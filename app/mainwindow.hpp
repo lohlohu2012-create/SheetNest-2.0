@@ -36,6 +36,7 @@ struct CalculationOutput {
     sheetnest::CuttingParameters technology;
     std::vector<sheetnest::InstanceDiagnostic> diagnostics;
     sheetnest::ProductionValidationReport validation;
+    sheetnest::ProductionPipelineReport pipeline;
 };
 
 Q_DECLARE_METATYPE(CalculationOutput)
