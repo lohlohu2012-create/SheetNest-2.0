@@ -196,13 +196,55 @@ Polygon reflected(const Polygon& polygon) {
 std::pair<Polygon, Point> canonicalize(const Polygon& polygon) {
     if (polygon.empty()) return {{}, {}};
 
-    const auto b = bounds(polygon);
-    Polygon normalized = translate(
-        polygon,
-        -b.minX,
-        -b.minY
-    );
+    Polygon cleaned = cleanPolygon(polygon);
+    if (cleaned.empty()) return {{}, {}};
+
+    const auto b = bounds(cleaned);
+    for (auto& point : cleaned) {
+        point.x -= b.minX;
+        point.y -= b.minY;
+    }
+
+    // Translation invariance alone is not enough for a cache key: DXF and
+    // boolean geometry code may expose the same ring with a different start
+    // vertex. Canonicalize the cyclic start without changing orientation.
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < cleaned.size(); ++i) {
+        const auto& a = cleaned[i];
+        const auto& z = cleaned[best];
+        if (a.x < z.x - kPointEps ||
+            (std::abs(a.x - z.x) <= kPointEps && a.y < z.y - kPointEps)) {
+            best = i;
+        }
+    }
+
+    Polygon normalized;
+    normalized.reserve(cleaned.size());
+    for (std::size_t offset = 0; offset < cleaned.size(); ++offset) {
+        normalized.push_back(cleaned[(best + offset) % cleaned.size()]);
+    }
+
     return {std::move(normalized), {b.minX, b.minY}};
+}
+
+bool validCachedNfp(const std::vector<Polygon>& polygons) {
+    if (polygons.empty()) return false;
+
+    for (const auto& polygon : polygons) {
+        if (polygon.size() < 3) return false;
+
+        double area = 0.0;
+        for (const auto& point : polygon) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+                return false;
+            }
+        }
+        area = signedArea(polygon);
+        if (!std::isfinite(area) || std::abs(area) <= kEps) {
+            return false;
+        }
+    }
+    return true;
 }
 
 long long quantize(double value) {
@@ -849,8 +891,15 @@ std::vector<Polygon> noFitPolygons(
             if (control && control->cacheHitCount) {
                 ++(*control->cacheHitCount);
             }
-            cachedPolygons = it->second.polygons;
-            cacheHit = true;
+            if (validCachedNfp(it->second.polygons)) {
+                cachedPolygons = it->second.polygons;
+                cacheHit = true;
+            } else {
+                // Never serve malformed data from a cache entry. Erase it and
+                // recompute from geometry rather than converting corruption
+                // into a silent "no candidates" result.
+                store.entries.erase(it);
+            }
         } else {
             ++store.misses;
             if (control && control->cacheMissCount) {
