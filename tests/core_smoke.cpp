@@ -1378,6 +1378,93 @@ void testNfpStressDeterministicMatrix() {
     assert(successfulCases == 48u * 7u);
 }
 
+
+void testNfpValidationDeepTopologyAndNumericGuards() {
+    const Polygon outer{{0,0},{100,0},{100,100},{0,100}};
+    const Polygon hole{{20,20},{20,80},{80,80},{80,20}};
+    const Polygon island{{40,40},{60,40},{60,60},{40,60}};
+
+    const auto valid = nfp::validateNfp({outer, hole, island});
+    assert(valid.valid);
+    assert(valid.loops == 3);
+    assert(valid.holes == 1);
+
+    const Polygon reversedOuter{{0,100},{100,100},{100,0},{0,0}};
+    const auto wrongOuter = nfp::validateNfp({reversedOuter});
+    assert(!wrongOuter.valid);
+    assert(wrongOuter.invalidOrientationLoops == 1);
+
+    Polygon repeatedVertex = outer;
+    repeatedVertex.insert(repeatedVertex.begin() + 2, repeatedVertex[2]);
+    const auto repeated = nfp::validateNfp({repeatedVertex});
+    assert(!repeated.valid);
+    assert(repeated.openBoundarySegments == 0);
+    assert(repeated.degenerateLoops == 0 || repeated.selfIntersectingLoops > 0);
+
+    const Polygon sharedEdgeA{{0,0},{40,0},{40,40},{0,40}};
+    const Polygon sharedEdgeB{{0,0},{40,0},{30,-20},{10,-20}};
+    const auto shared = nfp::validateNfp({sharedEdgeA, sharedEdgeB});
+    assert(!shared.valid);
+    assert(shared.intersectingLoops > 0 || shared.invalidTopologyLoops > 0);
+
+    Polygon huge{{1e12,1e12},{1e12+1000,1e12},{1e12+1000,1e12+1000},{1e12,1e12+1000}};
+    const auto hugeReport = nfp::validateNfp({huge});
+    assert(hugeReport.valid);
+    assert(hugeReport.nonFiniteVertices == 0);
+
+    const auto empty = nfp::validateNfp({});
+    assert(empty.valid);
+    assert(empty.loops == 0);
+}
+
+void testNfpStressMetamorphicAndScaleMatrix() {
+    const std::vector<Polygon> fixedCases{
+        rectangle(40, 30),
+        Polygon{{0,0},{70,0},{70,12},{48,12},{48,36},{22,36},{22,12},{0,12}},
+        Polygon{{0,0},{90,0},{90,10},{72,10},{72,26},{54,26},{54,14},{36,14},{36,32},{0,32}}
+    };
+    const std::vector<Polygon> movingCases{
+        rectangle(8, 6),
+        Polygon{{0,0},{10,0},{10,4},{7,4},{7,11},{0,11}},
+        Polygon{{0,0},{14,0},{14,5},{9,5},{9,12},{4,12},{4,7},{0,7}}
+    };
+
+    std::size_t cases = 0;
+    for (std::size_t i = 0; i < fixedCases.size(); ++i) {
+        for (double scale : {0.1, 1.0, 10.0, 100.0}) {
+            Polygon fixed;
+            Polygon moving;
+            for (const auto& p : fixedCases[i]) fixed.push_back({p.x * scale, p.y * scale});
+            for (const auto& p : movingCases[i]) moving.push_back({p.x * scale, p.y * scale});
+
+            for (int rotation : {0, 45, 90, 135, 180, 225, 270, 315}) {
+                const double gap = 0.05 * scale;
+                const auto first = nfp::noFitPolygons(fixed, moving, rotation, gap);
+                const auto second = nfp::noFitPolygons(fixed, moving, rotation + 360, gap);
+
+                assert(!first.empty());
+                assert(!second.empty());
+                assert(nfp::validateNfp(first).valid);
+                assert(nfp::validateNfp(second).valid);
+                assert(first.size() == second.size());
+
+                for (std::size_t k = 0; k < first.size(); ++k) {
+                    assert(first[k].size() == second[k].size());
+                    for (std::size_t j = 0; j < first[k].size(); ++j) {
+                        assert(std::hypot(
+                            first[k][j].x - second[k][j].x,
+                            first[k][j].y - second[k][j].y
+                        ) < 1e-7 * std::max(1.0, scale));
+                    }
+                }
+
+                ++cases;
+            }
+        }
+    }
+    assert(cases == 3u * 4u * 8u);
+}
+
 void testNfpStressCancellationAndBudget() {
     const Polygon fixed = {
         {0,0},{120,0},{120,30},{92,30},{92,65},
