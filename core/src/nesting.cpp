@@ -981,12 +981,14 @@ bool placeOnSheet(
                     );
 
             if (smallPartForScore) {
-                score.scoreContact = narrowSpaceScore(
-                    shape,
-                    state,
-                    sheet,
-                    options.gapMm
-                );
+                score.scoreContact =
+                    options.candidateContactWeight *
+                    narrowSpaceScore(
+                        shape,
+                        state,
+                        sheet,
+                        options.gapMm
+                    );
             }
 
             score.scoreResidual =
@@ -2809,6 +2811,33 @@ Result runAttempt(
 
     result.sheets.reserve(states.size());
     double placedArea = 0.0;
+    std::unordered_set<std::string> finalPlacedIds;
+    for (auto& state : states) {
+        for (const auto& placement : state.placements) {
+            finalPlacedIds.insert(placement.id);
+        }
+    }
+
+    // Authoritative reconciliation after ALL residual retries and new-sheet
+    // recovery. A detail recovered after the initial greedy pass must never
+    // remain reported as unplaced in diagnostics.
+    result.unplaced.erase(
+        std::remove_if(
+            result.unplaced.begin(),
+            result.unplaced.end(),
+            [&](const std::string& id) {
+                return finalPlacedIds.contains(id);
+            }
+        ),
+        result.unplaced.end()
+    );
+    for (auto& telemetry : result.instanceTelemetry) {
+        if (finalPlacedIds.contains(telemetry.instanceId)) {
+            telemetry.placed = true;
+            telemetry.reason = NestingFailureReason::None;
+        }
+    }
+
     for (auto& state : states) {
         result.sheets.push_back(std::move(state.placements));
         placedArea += state.placedArea;
@@ -3498,71 +3527,3 @@ bool adaptiveDestroyAndRepairResult(
                 localScore + kEps < roundBestScore) {
                 roundFoundComplete = true;
                 roundBestScore = localScore;
-                roundBestStates = std::move(trialStates);
-            }
-        }
-
-        // A failed round cannot provide a meaningful baseline for the next
-        // round, so stop without replacing the best completed result.
-        if (!roundFoundComplete) {
-            break;
-        }
-
-        // This is the key sequential repair step: the best completed local
-        // repair becomes the starting state of the next adaptive round.
-        roundBaselineStates = roundBestStates;
-
-        if (!foundComplete ||
-            roundBestScore + kEps < bestLocalScore) {
-            foundComplete = true;
-            bestLocalScore = roundBestScore;
-            bestStates = roundBaselineStates;
-        }
-    }
-    if (!foundComplete) {
-        return false;
-    }
-
-    Result bestResult = result;
-    bestResult.sheets.clear();
-    bestResult.sheets.reserve(bestStates.size());
-
-    double placedArea = 0.0;
-    for (const auto& state : bestStates) {
-        bestResult.sheets.push_back(state.placements);
-        placedArea += state.placedArea;
-    }
-
-    const double sheetArea =
-        std::max(0.0, sheet.width * sheet.height);
-    bestResult.utilization =
-        (sheetArea > 0.0 && !bestResult.sheets.empty())
-            ? placedArea / (sheetArea * bestResult.sheets.size())
-            : 0.0;
-    bestResult.stats = adaptiveStats;
-    ++bestResult.stats.refillMoves;
-    ++bestResult.stats.optimizerPasses;
-
-    if (extractedIdsOut) {
-        extractedIdsOut->assign(
-            extractedIds.begin(),
-            extractedIds.end()
-        );
-        std::sort(
-            extractedIdsOut->begin(),
-            extractedIdsOut->end()
-        );
-    }
-
-    // Preserve the original unplaced set: this operation only rearranges
-    // already-placed instances. The Production Validator decides whether the
-    // resulting layout is safe.
-    bestResult.productionValidated = false;
-    bestResult.productionValid = false;
-    bestResult.productionIssueCount = 0;
-
-    result = std::move(bestResult);
-    return true;
-}
-
-} // namespace sheetnest
