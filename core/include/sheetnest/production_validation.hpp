@@ -2,6 +2,10 @@
 
 #include "geometry.hpp"
 #include "nesting.hpp"
+#include "cutting_path.hpp"
+#include "cam_export.hpp"
+#include "dxf_model.hpp"
+#include "dxf_export.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,8 +15,11 @@
 namespace sheetnest {
 
 enum class ProductionPipelineStage {
+    DxfParse,
+    DxfPreflight,
     Nesting,
-    ProductionValidation,
+    AdaptiveRepair,
+    Coverage,
     CamRoute,
     CamValidation,
     DxfExport,
@@ -22,6 +29,33 @@ enum class ProductionPipelineStage {
 };
 
 const char* productionPipelineStageName(ProductionPipelineStage stage);
+struct ProductionPipelineReport {
+    bool valid{false};
+    ProductionPipelineStage failedStage{ProductionPipelineStage::Failed};
+    std::string failureReason;
+    std::vector<ProductionPipelineStage> completedStages;
+    DxfPreflightReport dxfPreflight;
+    ProductionValidationReport nestingValidation;
+    CamValidationReport camValidation;
+    std::size_t camOperationCount{};
+    std::size_t exportedBytes{};
+    bool roundTripValid{false};
+    DxfPreflightReport roundTripPreflight;
+    std::string exportedDxf;
+};
+
+ProductionPipelineReport validateProductionPipeline(
+    const DxfDocument& document,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const Result& result,
+    const CuttingParameters& cuttingParameters,
+    const PathOptions& pathOptions = {},
+    const CamExportOptions& camOptions = {},
+    const DxfExportOptions& dxfOptions = {}
+);
+
 
 enum class ProductionValidationIssueType {
     Collision,
