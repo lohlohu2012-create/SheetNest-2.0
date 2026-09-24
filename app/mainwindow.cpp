@@ -887,6 +887,7 @@ void MainWindow::connectUi() {
             result_ = output.result;
             technology_ = output.technology;
             validation_ = output.validation;
+            pipeline_ = output.pipeline;
             cuttingRoute_ = output.cuttingRoute;
             view_->setCuttingRoute(cuttingRoute_, sheet_.height);
             populateLaserOperationSelector();
@@ -1263,6 +1264,7 @@ void MainWindow::refreshInstances() {
     hasBenchmarkResult_ = false;
     validation_ = {};
     validation_.valid = false;
+    pipeline_ = {};
     if (repairRoundCombo_) {
         QSignalBlocker blocker(repairRoundCombo_);
         repairRoundCombo_->clear();
