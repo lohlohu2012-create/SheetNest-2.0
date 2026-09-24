@@ -3014,8 +3014,9 @@ void MainWindow::advanceLaserAnimation() {
     // About 20 seconds for a complete route at 1×. The animation is a
     // visual replay; the real CAM cutting time is shown separately in the
     // technology/result panel.
+    constexpr double kAnimationStepPerTick = 0.005;
     laserAnimationProgress_ +=
-        0.005 * speed;
+        kAnimationStepPerTick * speed;
 
     if (laserAnimationProgress_ >= 1.0) {
         laserAnimationProgress_ = 1.0;
