@@ -74,6 +74,10 @@ struct NfpValidationReport {
     std::size_t selfIntersectingLoops{};
     std::size_t nonFiniteVertices{};
     std::size_t openBoundarySegments{};
+    std::size_t intersectingLoops{};
+    std::size_t invalidTopologyLoops{};
+    std::size_t invalidOrientationLoops{};
+    std::size_t duplicateLoops{};
 };
 
 NfpValidationReport validateNfp(
