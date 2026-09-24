@@ -29,6 +29,16 @@ enum class ProductionPipelineStage {
 };
 
 const char* productionPipelineStageName(ProductionPipelineStage stage);
+
+enum class ProductionValidationIssueType {
+    Collision,
+    Gap,
+    Margin,
+    DuplicateId,
+    MissingId,
+    UnknownId
+};
+
 struct ProductionValidationIssue {
     ProductionValidationIssueType type{
         ProductionValidationIssueType::UnknownId
@@ -73,47 +83,10 @@ struct AdaptiveRepairRound {
 
 struct ProductionValidationReport {
     bool valid{true};
-
-
-struct ProductionPipelineReport {
-    bool valid{false};
-    ProductionPipelineStage failedStage{ProductionPipelineStage::Failed};
-    std::string failureReason;
-    std::vector<ProductionPipelineStage> completedStages;
-    DxfPreflightReport dxfPreflight;
-    ProductionValidationReport nestingValidation;
-    CamValidationReport camValidation;
-    std::size_t camOperationCount{};
-    std::size_t exportedBytes{};
-    bool roundTripValid{false};
-    DxfPreflightReport roundTripPreflight;
-    std::string exportedDxf;
-};
-
-ProductionPipelineReport validateProductionPipeline(
-    const DxfDocument& document,
-    const std::vector<Instance>& instances,
-    const Sheet& sheet,
-    const Options& options,
-    const Result& result,
-    const CuttingParameters& cuttingParameters,
-    const PathOptions& pathOptions = {},
-    const CamExportOptions& camOptions = {},
-    const DxfExportOptions& dxfOptions = {}
-);
-
-
-enum class ProductionValidationIssueType {
-    Collision,
-    Gap,
-    Margin,
-    DuplicateId,
-    MissingId,
-    UnknownId
-};
-
     bool pipelineValid{false};
-    ProductionPipelineStage pipelineStage{ProductionPipelineStage::Nesting};
+    ProductionPipelineStage pipelineStage{
+        ProductionPipelineStage::Nesting
+    };
     std::string pipelineMessage;
     std::size_t checkedPlacements{};
     std::size_t collisionCount{};
@@ -140,6 +113,35 @@ enum class ProductionValidationIssueType {
     std::vector<ProductionValidationIssue> issues;
 };
 
+struct ProductionPipelineReport {
+    bool valid{false};
+    ProductionPipelineStage failedStage{
+        ProductionPipelineStage::Failed
+    };
+    std::string failureReason;
+    std::vector<ProductionPipelineStage> completedStages;
+    DxfPreflightReport dxfPreflight;
+    ProductionValidationReport nestingValidation;
+    CamValidationReport camValidation;
+    std::size_t camOperationCount{};
+    std::size_t exportedBytes{};
+    bool roundTripValid{false};
+    DxfPreflightReport roundTripPreflight;
+    std::string exportedDxf;
+};
+
+ProductionPipelineReport validateProductionPipeline(
+    const DxfDocument& document,
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& options,
+    const Result& result,
+    const CuttingParameters& cuttingParameters,
+    const PathOptions& pathOptions = {},
+    const CamExportOptions& camOptions = {},
+    const DxfExportOptions& dxfOptions = {}
+);
+
 ProductionValidationReport validateProductionResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
@@ -147,9 +149,6 @@ ProductionValidationReport validateProductionResult(
     const Result& result
 );
 
-// Attempts to repair an invalid result by running several bounded,
-// higher-quality nesting passes. The current result is replaced only when
-// the repaired candidate passes Production Validator.
 bool repairProductionResult(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
