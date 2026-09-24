@@ -3303,7 +3303,25 @@ void MainWindow::calculationWatchdogTick() {
         return;
     }
 
-    if (sinceProgress >= 15000) {
+    constexpr qint64 kHeartbeatWarnMs = 15000;
+    constexpr qint64 kHeartbeatStallMs = 30000;
+
+    if (!watchdogTriggered_ && sinceProgress >= kHeartbeatStallMs) {
+        appendLog(
+            QString("GUI Watchdog: stall — heartbeat отсутствует %1 с; "
+                    "стадия=%2, worker=%3, листов=%4, размещено=%5, пропущено=%6.")
+                .arg(static_cast<qlonglong>(sinceProgress / 1000))
+                .arg(lastProgressStage_.isEmpty() ? "unknown" : lastProgressStage_)
+                .arg(static_cast<qulonglong>(lastProgressWorker_ + 1))
+                .arg(static_cast<qulonglong>(lastProgressSheets_))
+                .arg(static_cast<qulonglong>(lastProgressPlaced_))
+                .arg(static_cast<qulonglong>(lastProgressSkipped_))
+        );
+        stopCalculation(true);
+        return;
+    }
+
+    if (sinceProgress >= kHeartbeatWarnMs) {
         progressDetails_->setText(
             QString("Расчёт продолжается… последний heartbeat %1 с назад.\n"
                     "Стадия: %2\nWorker: %3 • листов: %4 • размещено: %5 • пропущено: %6")
