@@ -149,6 +149,16 @@ ProductionPipelineReport validateProductionPipeline(
         result.utilization
     );
 
+    // No repair is required when nesting already placed every requested
+    // instance. Keep the stage explicit so the production report distinguishes
+    // "repair not required" from Coverage validation.
+    addStage(
+        report,
+        "Adaptive Repair",
+        PipelineStatus::Skipped,
+        "Не требуется: все экземпляры размещены после Nesting."
+    );
+
     const auto contours = placedContours(result, instances);
     bool coverageOk = contours.size() >= report.placedInstances;
     if (!coverageOk) {
@@ -173,6 +183,26 @@ ProductionPipelineReport validateProductionPipeline(
         contours,
         technology,
         PathOptions{}
+    );
+
+    if (path.moves.empty()) {
+        addStage(
+            report,
+            "CAM Route",
+            PipelineStatus::Fail,
+            "CAM route не сформирован."
+        );
+        return report;
+    }
+
+    addStage(
+        report,
+        "CAM Route",
+        PipelineStatus::Ok,
+        {},
+        path.moves.size(),
+        static_cast<std::size_t>(path.pierces),
+        path.totalCutLengthMm
     );
 
     bool camOk = !path.moves.empty() &&
