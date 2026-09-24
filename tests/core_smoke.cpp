@@ -1307,6 +1307,125 @@ void testNfpLargeConcaveStress() {
     assert(validation.degenerateLoops == 0);
 }
 
+void testNfpStressDeterministicMatrix() {
+    // Deterministic pseudo-random geometry stress: no external RNG means the
+    // regression is reproducible in CI and locally.
+    std::uint32_t state = 0x51EET5A7u;
+    const auto next01 = [&]() mutable {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<double>(state & 0x00FFFFFFu) /
+               static_cast<double>(0x01000000u);
+    };
+
+    nfp::clearCache();
+    std::size_t successfulCases = 0;
+
+    for (int caseIndex = 0; caseIndex < 48; ++caseIndex) {
+        const int fixedCount = 5 + static_cast<int>(next01() * 7.0);
+        const int movingCount = 4 + static_cast<int>(next01() * 5.0);
+
+        Polygon fixed;
+        Polygon moving;
+        fixed.reserve(static_cast<std::size_t>(fixedCount));
+        moving.reserve(static_cast<std::size_t>(movingCount));
+
+        for (int i = 0; i < fixedCount; ++i) {
+            const double angle =
+                2.0 * 3.14159265358979323846 *
+                static_cast<double>(i) / static_cast<double>(fixedCount);
+            const double radius =
+                35.0 + 10.0 * next01() +
+                4.0 * std::sin(3.0 * angle + caseIndex);
+            fixed.push_back({
+                std::cos(angle) * radius,
+                std::sin(angle) * radius
+            });
+        }
+
+        for (int i = 0; i < movingCount; ++i) {
+            const double angle =
+                2.0 * 3.14159265358979323846 *
+                static_cast<double>(i) / static_cast<double>(movingCount);
+            const double radius =
+                4.0 + 2.0 * next01() +
+                1.5 * std::sin(2.0 * angle + caseIndex * 0.37);
+            moving.push_back({
+                std::cos(angle) * radius,
+                std::sin(angle) * radius
+            });
+        }
+
+        for (int rotation : {0, 23, 67, 90, 179, 271, 359}) {
+            const double gap = 0.05 + 0.15 * next01();
+            const auto result = nfp::noFitPolygons(
+                fixed, moving, rotation, gap
+            );
+
+            assert(!result.empty());
+            const auto report = nfp::validateNfp(result);
+            assert(report.valid);
+            assert(report.nonFiniteVertices == 0);
+            assert(report.degenerateLoops == 0);
+            assert(report.selfIntersectingLoops == 0);
+            assert(report.intersectingLoops == 0);
+            assert(report.invalidTopologyLoops == 0);
+            assert(report.invalidOrientationLoops == 0);
+            assert(report.duplicateLoops == 0);
+            ++successfulCases;
+        }
+    }
+
+    assert(successfulCases == 48u * 7u);
+}
+
+void testNfpStressCancellationAndBudget() {
+    const Polygon fixed = {
+        {0,0},{120,0},{120,30},{92,30},{92,65},
+        {70,65},{70,42},{50,42},{50,65},{28,65},
+        {28,30},{0,30}
+    };
+    const Polygon moving = {
+        {0,0},{18,0},{18,7},{11,7},{11,16},{0,16}
+    };
+
+    nfp::NfpRunControl control;
+    std::size_t stopChecks = 0;
+    control.shouldStop = [&]() {
+        ++stopChecks;
+        return stopChecks >= 3;
+    };
+    control.maxInputVertices = 256;
+    control.maxConvexPieces = 128;
+    control.maxPairwisePolygons = 512;
+    control.maxUnionSegments = 20000;
+
+    const auto result = nfp::noFitPolygons(
+        fixed, moving, 47, 0.5, &control
+    );
+    assert(result.empty() || nfp::validateNfp(result).valid);
+    assert(stopChecks >= 1);
+
+    nfp::SearchOptions searchOptions;
+    searchOptions.maxCandidates = 8;
+    searchOptions.boundarySpacingMm = 0.25;
+    searchOptions.isFeasible = [](const Point&) { return true; };
+
+    nfp::NfpRunControl searchControl;
+    std::size_t searchStops = 0;
+    searchControl.shouldStop = [&]() {
+        ++searchStops;
+        return searchStops >= 2;
+    };
+
+    const auto candidates = nfp::searchFeasibleBoundary(
+        fixed, moving, 47,
+        -20.0, -20.0, 160.0, 100.0,
+        0.5, searchOptions, &searchControl
+    );
+    assert(candidates.points.size() <= searchOptions.maxCandidates);
+    assert(candidates.telemetry.stopped || candidates.telemetry.budgetExceeded);
+}
+
 void testNfpAdaptiveNarrowCorridor() {
     const Polygon corridor{
         {0,0},{100,0},{100,8},{62,8},{62,30},
@@ -4197,6 +4316,8 @@ int main(int argc, char** argv) {
     testNfpRotationFractionalAndLargeAngles();
     testNfpBoundaryTouchAndMinimumGap();
     testNfpLargeConcaveStress();
+    testNfpStressDeterministicMatrix();
+    testNfpStressCancellationAndBudget();
     testNfpAdaptiveNarrowCorridor();
     testNfpBoundaryReconstructionStress();
     testNfpBoundaryReconstructionTouchingAndOverlap();
