@@ -642,6 +642,11 @@ ProductionValidationReport validateProductionResult(
         }
     }
 
+    report.coverageComplete =
+        report.valid &&
+        result.unplaced.empty() &&
+        report.placedInstanceCount == report.expectedInstanceCount;
+
     // Keep diagnostics and Adaptive Repair deterministic: physical geometry
     // violations are surfaced before boundary, missing-instance and metadata
     // issues. Severity then breaks ties within the same class.
