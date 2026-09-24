@@ -1572,4 +1572,197 @@ CacheStats cacheStats() {
     };
 }
 
+
+SearchResult searchFeasibleBoundary(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY,
+    double clearanceMm,
+    const SearchOptions& options,
+    const NfpRunControl* control
+) {
+    SearchResult result;
+
+    if (maxX < minX - kEps || maxY < minY - kEps ||
+        fixed.size() < 3 || moving.size() < 3) {
+        return result;
+    }
+
+    if (control && control->stop()) {
+        result.telemetry.stopped = true;
+        return result;
+    }
+
+    const std::size_t budget = std::max<std::size_t>(
+        1,
+        options.maxCandidates
+    );
+
+    const auto region = feasibilityRegion(
+        fixed,
+        moving,
+        rotation,
+        minX,
+        minY,
+        maxX,
+        maxY,
+        clearanceMm,
+        control
+    );
+
+    if (control && control->stop()) {
+        result.telemetry.stopped = true;
+        return result;
+    }
+
+    result.telemetry.boundarySegments =
+        region.boundary.size() + (
+            options.includeSheetBoundary
+                ? region.sheetBoundary.size()
+                : 0
+        );
+
+    // The boundary sampler is deliberately continuous: it samples segment
+    // interiors as well as endpoints. This avoids the historical failure mode
+    // where a valid placement exists in the middle of a long feasibility edge
+    // but no NFP vertex is feasible.
+    auto boundaryPoints = pointsOnFeasibilityBoundary(
+        region,
+        std::max(0.01, options.boundarySpacingMm),
+        budget,
+        options.includeSheetBoundary
+    );
+
+    result.telemetry.boundarySamples = boundaryPoints.size();
+    result.telemetry.generated += boundaryPoints.size();
+
+    std::vector<Point> candidates;
+    candidates.reserve(
+        std::min<std::size_t>(
+            budget * 2,
+            boundaryPoints.size() + 64
+        )
+    );
+
+    auto appendCandidate = [&](Point point) {
+        if (point.x < minX - kPointEps ||
+            point.x > maxX + kPointEps ||
+            point.y < minY - kPointEps ||
+            point.y > maxY + kPointEps) {
+            return;
+        }
+
+        candidates.push_back(point);
+    };
+
+    for (const auto point : boundaryPoints) {
+        if (control && control->stop()) {
+            result.telemetry.stopped = true;
+            return result;
+        }
+        appendCandidate(point);
+    }
+
+    if (options.includeNfpVertices && candidates.size() < budget) {
+        const auto nfpPolygons = noFitPolygons(
+            fixed,
+            moving,
+            rotation,
+            0.0,
+            control
+        );
+
+        for (const auto& polygon : nfpPolygons) {
+            for (const auto point : polygon) {
+                if (control && control->stop()) {
+                    result.telemetry.stopped = true;
+                    return result;
+                }
+                ++result.telemetry.nfpVertices;
+                appendCandidate(point);
+                if (candidates.size() >= budget) break;
+            }
+            if (candidates.size() >= budget) break;
+        }
+    }
+
+    // Stable spatial deduplication. Quantization is used only for duplicate
+    // suppression; the original double coordinates are retained for exact
+    // downstream validation.
+    std::sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const Point& a, const Point& b) {
+            if (std::abs(a.y - b.y) > kPointEps) return a.y < b.y;
+            return a.x < b.x;
+        }
+    );
+
+    candidates.erase(
+        std::unique(
+            candidates.begin(),
+            candidates.end(),
+            [](const Point& a, const Point& b) {
+                return samePoint(a, b);
+            }
+        ),
+        candidates.end()
+    );
+
+    result.telemetry.deduplicated = candidates.size();
+
+    if (candidates.size() > budget) {
+        result.telemetry.budgetExceeded = true;
+
+        // Preserve the lower-left ordering used by nesting, but retain
+        // spatially distributed samples so one dense boundary segment cannot
+        // monopolize the candidate budget.
+        const std::size_t keep = budget;
+        std::vector<Point> selected;
+        selected.reserve(keep);
+
+        if (keep == 1) {
+            selected.push_back(candidates.front());
+        } else {
+            for (std::size_t i = 0; i < keep; ++i) {
+                const std::size_t index =
+                    (i * (candidates.size() - 1)) /
+                    (keep - 1);
+                selected.push_back(candidates[index]);
+            }
+        }
+
+        candidates.swap(selected);
+    }
+
+    result.telemetry.generated += candidates.size();
+
+    for (const auto point : candidates) {
+        if (control && control->stop()) {
+            result.telemetry.stopped = true;
+            break;
+        }
+
+        if (options.isFeasible) {
+            ++result.telemetry.exactChecks;
+            if (!options.isFeasible(point)) {
+                ++result.telemetry.rejected;
+                continue;
+            }
+        }
+
+        result.points.push_back(point);
+        ++result.telemetry.feasible;
+
+        if (result.points.size() >= budget) break;
+    }
+
+    return result;
+}
+
+
 } // namespace sheetnest::nfp
