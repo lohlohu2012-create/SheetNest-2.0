@@ -971,7 +971,7 @@ bool placeOnSheet(
             Candidate score = candidate;
             score.scoreY = merged.maxY;
             score.scoreX = merged.maxX;
-            const smallPartForScore =
+            const bool smallPartForScore =
                 options.enableSmallPartOptimization &&
                 materialArea(instance.part) <=
                     std::max(
@@ -3498,32 +3498,3 @@ bool adaptiveDestroyAndRepairResult(
                         sheetEnvelopeScore(trial);
 
                     if (!placed ||
-                        score + kEps < bestSheetScore) {
-                        placed = true;
-                        bestSheetIndex = sheetIndex;
-                        bestSheetState = std::move(trial);
-                        bestSheetScore = score;
-                    }
-                }
-
-                if (!placed) {
-                    success = false;
-                    break;
-                }
-
-                trialStates[bestSheetIndex] =
-                    std::move(bestSheetState);
-            }
-
-            if (!success) continue;
-
-            double localScore = 0.0;
-            for (const auto sheetIndex : affectedSheets) {
-                localScore +=
-                    sheetEnvelopeScore(trialStates[sheetIndex]);
-            }
-
-            if (!roundFoundComplete ||
-                localScore + kEps < roundBestScore) {
-                roundFoundComplete = true;
-                roundBestScore = localScore;
