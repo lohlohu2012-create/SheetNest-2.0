@@ -961,9 +961,7 @@ std::vector<Polygon> computeUnionNfp(
         return conservativeNfpFallback(fixed, moving, 0);
     }
     auto unionResult = unionPolygons(pairwise, control);
-    if (!unionResult.empty() && validateNfp(unionResult).valid) {
-        return unionResult;
-    }
+    if (!unionResult.empty()) return unionResult;
 
     // Last-resort conservative NFP. This keeps the placement pipeline alive
     // for numerically pathological contours instead of returning an empty
