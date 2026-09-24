@@ -15,6 +15,21 @@ struct BenchmarkCase {
     std::size_t placed{};
     std::size_t skipped{};
     double utilization{};
+    std::size_t candidateChecks{};
+    std::size_t collisionChecks{};
+    std::size_t nfpChecks{};
+    std::size_t refillMoves{};
+    std::size_t exchangeAttempts{};
+    std::size_t sheetsEliminated{};
+    std::size_t optimizerPasses{};
+    std::size_t nfpTimeouts{};
+    std::size_t nfpComplexityFallbacks{};
+    std::size_t nfpTimeoutFallbacks{};
+    std::size_t nfpCacheHits{};
+    std::size_t nfpCacheMisses{};
+    std::vector<std::string> placedInstanceIds;
+    std::vector<std::string> skippedInstanceIds;
+    std::vector<InstanceNestingTelemetry> instanceTelemetry;
 };
 
 struct BenchmarkResult {

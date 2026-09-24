@@ -1,5 +1,8 @@
 #include "mainwindow.hpp"
 #include "nestview.hpp"
+#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/cam_export.hpp"
+#include "sheetnest/dxf_export.hpp"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -16,6 +19,13 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
+#include <QSaveFile>
+#include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -23,13 +33,17 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTabWidget>
+#include <QTimer>
 #include <QSignalBlocker>
+#include <QSlider>
 #include <QAbstractItemView>
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_map>
+#include <numeric>
 
 using namespace sheetnest;
 
@@ -71,62 +85,58 @@ QVector<Polygon> placementPolygons(
     return result;
 }
 
-CuttingEstimate estimateWholeResult(
+CuttingPath planWholeResultRoute(
     const Result& result,
     const std::vector<Instance>& instances,
     const CuttingParameters& technology
 ) {
     std::unordered_map<std::string, const Instance*> byId;
     byId.reserve(instances.size());
-    for (const auto& instance : instances) {
-        byId.emplace(instance.id, &instance);
-    }
+    for (const auto& instance : instances) byId.emplace(instance.id, &instance);
 
-    CuttingEstimate total;
-    total.parameters = technology;
+    std::vector<CuttingContour> contours;
+    for (std::size_t sheetIndex = 0; sheetIndex < result.sheets.size(); ++sheetIndex) {
+        for (const auto& placement : result.sheets[sheetIndex]) {
+            const auto it = byId.find(placement.id);
+            if (it == byId.end()) continue;
+
+            contours.push_back({
+                sheetIndex, placement.id, 0, false,
+                translate(rotate(it->second->part.outer, placement.rotation),
+                          placement.x, placement.y)
+            });
+
+            for (std::size_t holeIndex = 0;
+                 holeIndex < it->second->part.holes.size();
+                 ++holeIndex) {
+                contours.push_back({
+                    sheetIndex, placement.id, holeIndex, true,
+                    translate(
+                        rotate(it->second->part.holes[holeIndex], placement.rotation),
+                        placement.x, placement.y
+                    )
+                });
+            }
+        }
+    }
 
     PathOptions pathOptions;
     pathOptions.rapidSpeedMMin = 120.0;
     pathOptions.pierceSeconds = 0.25;
+    pathOptions.innerContoursFirst = true;
+    return planCuttingRoute(contours, technology, pathOptions);
+}
 
-    for (const auto& sheetPlacements : result.sheets) {
-        std::vector<Polygon> contours;
-
-        for (const auto& placement : sheetPlacements) {
-            const auto it = byId.find(placement.id);
-            if (it == byId.end()) continue;
-
-            const auto polygons = placementPolygons(
-                *it->second,
-                placement
-            );
-            for (const auto& polygon : polygons) {
-                contours.push_back(polygon);
-            }
-        }
-
-        if (contours.empty()) continue;
-
-        const auto path = planCuttingPath(
-            contours,
-            technology,
-            pathOptions
-        );
-        const auto estimate = estimateCuttingPath(
-            path,
-            technology,
-            pathOptions
-        );
-
-        total.contourLengthMm += estimate.contourLengthMm;
-        total.cuttingMinutes += estimate.cuttingMinutes;
-        total.piercingMinutes += estimate.piercingMinutes;
-        total.rapidMinutes += estimate.rapidMinutes;
-        total.totalMinutes += estimate.totalMinutes;
-        total.pierces += estimate.pierces;
-    }
-
-    return total;
+CuttingEstimate estimateWholeResult(
+    const Result& result,
+    const std::vector<Instance>& instances,
+    const CuttingParameters& technology
+) {
+    const auto route = planWholeResultRoute(result, instances, technology);
+    PathOptions options;
+    options.rapidSpeedMMin = 120.0;
+    options.pierceSeconds = 0.25;
+    return estimateCuttingPath(route, technology, options);
 }
 
 QDoubleSpinBox* makeDouble(
@@ -157,6 +167,21 @@ MainWindow::MainWindow(QWidget* parent)
     resize(1500, 900);
     statusBar()->showMessage("Готово");
     updateTechnologyPreview();
+
+    const auto technologyReport = validateBodor3kWTechnology();
+    if (!technologyReport.valid) {
+        appendLog(
+            QString("TECHNOLOGY DB: ОШИБКА • строк=%1 • invalid=%2 • duplicates=%3")
+                .arg(static_cast<qulonglong>(technologyReport.rows))
+                .arg(static_cast<qulonglong>(technologyReport.invalidRows))
+                .arg(static_cast<qulonglong>(technologyReport.duplicateRows))
+        );
+    } else {
+        appendLog(
+            QString("TECHNOLOGY DB: OK • Bodor 3 кВт • строк=%1")
+                .arg(static_cast<qulonglong>(technologyReport.rows))
+        );
+    }
 }
 
 MainWindow::~MainWindow() = default;
@@ -177,11 +202,16 @@ void MainWindow::buildUi() {
     calculateButton_ = new QPushButton("Рассчитать раскрой");
     calculateButton_->setEnabled(false);
 
+    repairButton_ = new QPushButton("Исправить ошибки");
+    repairButton_->setEnabled(false);
+
     benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
     benchmarkButton_->setEnabled(false);
 
     exportButton_ = new QPushButton("Экспорт раскладки DXF");
     exportButton_->setEnabled(false);
+    exportCamButton_ = new QPushButton("Экспорт CAM программы");
+    exportCamButton_->setEnabled(false);
 
     fileLabel_ = new QLabel("Файл не загружен");
     fileLabel_->setWordWrap(true);
@@ -237,6 +267,18 @@ void MainWindow::buildUi() {
     iterationsSpin_->setValue(24);
     settingsForm->addRow("Итерации оптимизации", iterationsSpin_);
 
+    workersSpin_ = new QSpinBox;
+    workersSpin_->setRange(0, 64);
+    workersSpin_->setValue(0);
+    workersSpin_->setSpecialValueText("Авто");
+    settingsForm->addRow("Параллельные workers", workersSpin_);
+
+    timeBudgetSpin_ = new QSpinBox;
+    timeBudgetSpin_->setRange(5, 3600);
+    timeBudgetSpin_->setValue(120);
+    timeBudgetSpin_->setSuffix(" с");
+    settingsForm->addRow("Лимит расчёта", timeBudgetSpin_);
+
     auto* rotationWidget = new QWidget;
     auto* rotationLayout = new QGridLayout(rotationWidget);
     rotationLayout->setContentsMargins(0, 0, 0, 0);
@@ -290,12 +332,108 @@ void MainWindow::buildUi() {
     progress_->setValue(0);
     controlLayout->addWidget(progress_);
 
+    progressDetails_ = new QLabel("Ожидание расчёта");
+    progressDetails_->setWordWrap(true);
+    controlLayout->addWidget(progressDetails_);
+
     controlLayout->addWidget(calculateButton_);
+    controlLayout->addWidget(repairButton_);
+
+    stopButton_ = new QPushButton("Остановить расчёт");
+    stopButton_->setEnabled(false);
+    controlLayout->addWidget(stopButton_);
 
     benchmarkButton_ = new QPushButton("Benchmark до / после оптимизации");
     controlLayout->addWidget(benchmarkButton_);
 
+    benchmarkExportButton_ = new QPushButton("Экспорт результатов Benchmark");
+    benchmarkExportButton_->setEnabled(false);
+    controlLayout->addWidget(benchmarkExportButton_);
+
+    cuttingRouteCheck_ = new QCheckBox("Показать маршрут лазера");
+    cuttingRouteCheck_->setChecked(true);
+    cuttingRouteCheck_->setToolTip(
+        "Пробивка, внутренние и внешние контуры, rapid-переходы и направление движения"
+    );
+    controlLayout->addWidget(cuttingRouteCheck_);
+
+    auto* laserControls = new QGroupBox("Анимация лазерной головки");
+    auto* laserLayout = new QGridLayout(laserControls);
+
+    laserPlayButton_ = new QPushButton("▶ Запуск");
+    laserPauseButton_ = new QPushButton("⏸ Пауза");
+    laserResetButton_ = new QPushButton("↺ В начало");
+    laserPrevButton_ = new QPushButton("◀ Предыдущая");
+    laserNextButton_ = new QPushButton("Следующая ▶");
+    laserContourStartButton_ = new QPushButton("⏮ Начало контура");
+    laserContourMiddleButton_ = new QPushButton("⏺ 50%");
+    laserContourEndButton_ = new QPushButton("Конец ⏭");
+    laserContourStepBackButton_ = new QPushButton("− Шаг");
+    laserContourStepForwardButton_ = new QPushButton("Шаг +");
+
+    laserOperationCombo_ = new QComboBox;
+    laserOperationCombo_->setMinimumWidth(260);
+    laserOperationCombo_->setToolTip(
+        "Выберите деталь или контур для перехода к нему"
+    );
+
+    laserContourProgressSlider_ = new QSlider(Qt::Horizontal);
+    laserContourProgressSlider_->setRange(0, 100);
+    laserContourProgressSlider_->setValue(0);
+    laserContourProgressSlider_->setSingleStep(5);
+    laserContourProgressSlider_->setPageStep(10);
+    laserContourProgressSlider_->setToolTip(
+        "Положение внутри выбранного контура: 0% — начало, 50% — середина, 100% — конец"
+    );
+
+    laserSpeedCombo_ = new QComboBox;
+    laserSpeedCombo_->addItem("0.5×", 0.5);
+    laserSpeedCombo_->addItem("1×", 1.0);
+    laserSpeedCombo_->addItem("2×", 2.0);
+    laserSpeedCombo_->addItem("4×", 4.0);
+    laserSpeedCombo_->setCurrentIndex(1);
+
+    laserStageLabel_ = new QLabel("Готово • маршрут завершён");
+    laserStageLabel_->setWordWrap(true);
+
+    laserAnimationTimer_ = new QTimer(this);
+    laserAnimationTimer_->setInterval(100);
+
+    laserLayout->addWidget(laserPlayButton_, 0, 0);
+    laserLayout->addWidget(laserPauseButton_, 0, 1);
+    laserLayout->addWidget(laserResetButton_, 0, 2);
+    laserLayout->addWidget(laserPrevButton_, 0, 3);
+    laserLayout->addWidget(laserNextButton_, 0, 4);
+    laserLayout->addWidget(new QLabel("Операция:"), 1, 0);
+    laserLayout->addWidget(laserOperationCombo_, 1, 1, 1, 4);
+    laserLayout->addWidget(new QLabel("Контур:"), 2, 0);
+    laserLayout->addWidget(laserContourStartButton_, 2, 1);
+    laserLayout->addWidget(laserContourMiddleButton_, 2, 2);
+    laserLayout->addWidget(laserContourEndButton_, 2, 3);
+    laserLayout->addWidget(laserContourStepBackButton_, 3, 0);
+    laserLayout->addWidget(laserContourProgressSlider_, 3, 1, 1, 3);
+    laserLayout->addWidget(laserContourStepForwardButton_, 3, 4);
+    laserLayout->addWidget(new QLabel("Скорость:"), 4, 0);
+    laserLayout->addWidget(laserSpeedCombo_, 4, 1);
+    laserLayout->addWidget(laserStageLabel_, 4, 2, 1, 3);
+
+    laserPauseButton_->setEnabled(false);
+    laserResetButton_->setEnabled(false);
+    laserPrevButton_->setEnabled(false);
+    laserNextButton_->setEnabled(false);
+    laserContourStartButton_->setEnabled(false);
+    laserContourMiddleButton_->setEnabled(false);
+    laserContourEndButton_->setEnabled(false);
+    laserContourStepBackButton_->setEnabled(false);
+    laserContourStepForwardButton_->setEnabled(false);
+    laserContourProgressSlider_->setEnabled(false);
+    laserOperationCombo_->setEnabled(false);
+    laserSpeedCombo_->setEnabled(false);
+
+    controlLayout->addWidget(laserControls);
+
     controlLayout->addWidget(exportButton_);
+    controlLayout->addWidget(exportCamButton_);
 
     log_ = new QPlainTextEdit;
     log_->setReadOnly(true);
@@ -304,10 +442,103 @@ void MainWindow::buildUi() {
     controlLayout->addWidget(log_, 1);
 
     view_ = new NestView;
+    view_->setCuttingRouteVisible(true);
 
-    diagnosticsTable_ = new QTableWidget(0, 6);
+    auto* repairViewPanel = new QWidget;
+    auto* repairViewLayout = new QVBoxLayout(repairViewPanel);
+    repairViewLayout->setContentsMargins(0, 0, 0, 0);
+    repairViewLayout->setSpacing(4);
+
+    auto* repairControls = new QGroupBox("Adaptive Repair");
+    auto* repairControlsLayout = new QGridLayout(repairControls);
+    repairControlsLayout->setContentsMargins(8, 6, 8, 6);
+
+    repairRoundCombo_ = new QComboBox;
+    repairRoundCombo_->addItem("Итоговая раскладка", -1);
+    repairRoundCombo_->setEnabled(false);
+
+    repairConflictLayer_ = new QCheckBox("Конфликты");
+    repairExtractedLayer_ = new QCheckBox("Извлечённые");
+    repairMovedLayer_ = new QCheckBox("Новые позиции");
+    repairStationaryLayer_ = new QCheckBox("Неподвижные");
+    repairConflictLayer_->setChecked(true);
+    repairExtractedLayer_->setChecked(true);
+    repairMovedLayer_->setChecked(true);
+    repairStationaryLayer_->setChecked(true);
+
+    repairPlayButton_ = new QPushButton("▶");
+    repairPauseButton_ = new QPushButton("⏸");
+    repairPrevButton_ = new QPushButton("◀");
+    repairNextButton_ = new QPushButton("▶|");
+    repairSpeedCombo_ = new QComboBox;
+    repairSpeedCombo_->addItem("0.5×", 0.5);
+    repairSpeedCombo_->addItem("1×", 1.0);
+    repairSpeedCombo_->addItem("2×", 2.0);
+    repairSpeedCombo_->setCurrentIndex(1);
+
+    repairStageLabel_ = new QLabel("Анимация: готово");
+    repairStageLabel_->setWordWrap(true);
+
+    repairAnimationTimer_ = new QTimer(this);
+    repairAnimationTimer_->setInterval(900);
+
+    calculationWatchdog_ = new QTimer(this);
+    calculationWatchdog_->setInterval(1000);
+
+    repairControlsLayout->addWidget(
+        new QLabel("История:"), 0, 0
+    );
+    repairControlsLayout->addWidget(
+        repairRoundCombo_, 0, 1, 1, 3
+    );
+    repairControlsLayout->addWidget(
+        repairConflictLayer_, 1, 0
+    );
+    repairControlsLayout->addWidget(
+        repairExtractedLayer_, 1, 1
+    );
+    repairControlsLayout->addWidget(
+        repairMovedLayer_, 1, 2
+    );
+    repairControlsLayout->addWidget(
+        repairStationaryLayer_, 1, 3
+    );
+
+    repairControlsLayout->addWidget(
+        repairPlayButton_, 2, 0
+    );
+    repairControlsLayout->addWidget(
+        repairPauseButton_, 2, 1
+    );
+    repairControlsLayout->addWidget(
+        repairPrevButton_, 2, 2
+    );
+    repairControlsLayout->addWidget(
+        repairNextButton_, 2, 3
+    );
+    repairControlsLayout->addWidget(
+        new QLabel("Скорость:"), 3, 0
+    );
+    repairControlsLayout->addWidget(
+        repairSpeedCombo_, 3, 1
+    );
+    repairControlsLayout->addWidget(
+        repairStageLabel_, 3, 2, 1, 2
+    );
+
+    repairPlayButton_->setEnabled(false);
+    repairPauseButton_->setEnabled(false);
+    repairPrevButton_->setEnabled(false);
+    repairNextButton_->setEnabled(false);
+    repairSpeedCombo_->setEnabled(false);
+
+    repairViewLayout->addWidget(repairControls);
+    repairViewLayout->addWidget(view_, 1);
+
+    diagnosticsTable_ = new QTableWidget(0, 24);
     diagnosticsTable_->setHorizontalHeaderLabels({
-        "instanceId", "unitId", "Source ID", "Слой", "Этап", "Сообщение"
+        "instanceId", "unitId", "Source ID", "Лист", "Этап", "Сообщение",
+        "CAM ops", "CAM sec", "Repair", "Кандидаты", "NFP checks", "NFP timeout", "NFP fallback", "NFP timeout fallback", "Bounds reject", "Collision reject", "Feasible", "Repair rounds", "Repair conflicts", "Extracted", "Moved", "Failure reason", "Nesting ms", "Final"
     });
     diagnosticsTable_->horizontalHeader()->setStretchLastSection(true);
     diagnosticsTable_->setSelectionBehavior(
@@ -315,9 +546,12 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 6);
+    benchmarkTable_ = new QTableWidget(0, 18);
     benchmarkTable_->setHorizontalHeaderLabels({
-        "Режим", "Время, мс", "Листов", "Размещено", "Пропущено", "Использование"
+        "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
+        "Использование", "Кандидаты", "Collision checks", "NFP checks",
+        "Refill moves", "Exchange attempts", "Sheets eliminated",
+        "Optimizer passes", "NFP timeouts", "NFP complexity fallbacks", "NFP timeout fallbacks", "Placed IDs", "Skipped IDs"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -325,9 +559,20 @@ void MainWindow::buildUi() {
         QAbstractItemView::SelectRows
     );
 
+    validatorTable_ = new QTableWidget(0, 4);
+    validatorTable_->setHorizontalHeaderLabels({
+        "Этап", "Статус", "Ключевые метрики", "Результат / причина"
+    });
+    validatorTable_->horizontalHeader()->setStretchLastSection(true);
+    validatorTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows
+    );
+    validatorTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
     auto* rightTabs = new QTabWidget;
-    rightTabs->addTab(view_, "Раскладка");
+    rightTabs->addTab(repairViewPanel, "Раскладка");
     rightTabs->addTab(diagnosticsTable_, "Диагностика");
+    rightTabs->addTab(validatorTable_, "Production Pipeline 2.0");
     rightTabs->addTab(benchmarkTable_, "Benchmark");
 
     splitter->addWidget(controlPanel);
@@ -411,9 +656,197 @@ void MainWindow::connectUi() {
         importDxf();
     });
 
+    connect(stopButton_, &QPushButton::clicked, this, [this] {
+        stopCalculation(false);
+    });
+
+    connect(calculationWatchdog_, &QTimer::timeout, this, [this] {
+        calculationWatchdogTick();
+    });
+
     connect(calculateButton_, &QPushButton::clicked, this, [this] {
+        repairRequested_ = false;
         calculate();
     });
+
+    connect(repairButton_, &QPushButton::clicked, this, [this] {
+        repairErrors();
+    });
+
+    const auto rerenderAdaptive = [this] {
+        refreshAdaptiveRepairView();
+    };
+
+    connect(
+        repairRoundCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [rerenderAdaptive](int) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairConflictLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairExtractedLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairMovedLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+    connect(
+        repairStationaryLayer_,
+        &QCheckBox::toggled,
+        this,
+        [rerenderAdaptive](bool) {
+            rerenderAdaptive();
+        }
+    );
+
+    connect(
+        repairPlayButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            toggleAdaptiveRepairAnimation();
+        }
+    );
+    connect(
+        repairPauseButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            pauseAdaptiveRepairAnimation();
+        }
+    );
+    connect(
+        repairPrevButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            stepAdaptiveRepairAnimation(-1);
+        }
+    );
+    connect(
+        repairNextButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            stepAdaptiveRepairAnimation(1);
+        }
+    );
+    connect(
+        repairSpeedCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            updateAdaptiveRepairAnimationUi();
+        }
+    );
+    connect(
+        repairAnimationTimer_,
+        &QTimer::timeout,
+        this,
+        [this] {
+            advanceAdaptiveRepairAnimation();
+        }
+    );
+
+    connect(
+        cuttingRouteCheck_,
+        &QCheckBox::toggled,
+        this,
+        [this](bool visible) {
+            view_->setCuttingRouteVisible(visible);
+            if (!visible) {
+                pauseLaserAnimation();
+            }
+            updateLaserAnimationUi();
+            refreshAdaptiveRepairView();
+        }
+    );
+    connect(
+        laserPlayButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            toggleLaserAnimation();
+        }
+    );
+    connect(
+        laserPauseButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            pauseLaserAnimation();
+        }
+    );
+    connect(
+        laserResetButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            resetLaserAnimation();
+        }
+    );
+
+    connect(
+        laserPrevButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            laserPreviousOperation();
+        }
+    );
+    connect(
+        laserNextButton_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            laserNextOperation();
+        }
+    );
+    connect(
+        laserOperationCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int index) {
+            if (index >= 0) {
+                laserSelectOperation(index);
+            }
+        }
+    );
+    connect(
+        laserSpeedCombo_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            updateLaserAnimationUi();
+        }
+    );
+    connect(
+        laserAnimationTimer_,
+        &QTimer::timeout,
+        this,
+        [this] {
+            advanceLaserAnimation();
+        }
+    );
 
     connect(exportButton_, &QPushButton::clicked, this, [this] {
         exportDxf();
@@ -425,6 +858,10 @@ void MainWindow::connectUi() {
 
     connect(benchmarkButton_, &QPushButton::clicked, this, [this] {
         benchmark();
+    });
+
+    connect(benchmarkExportButton_, &QPushButton::clicked, this, [this] {
+        exportBenchmarkResults();
     });
 
     connect(materialCombo_,
@@ -449,13 +886,60 @@ void MainWindow::connectUi() {
             const auto output = watcher_->result();
             result_ = output.result;
             technology_ = output.technology;
-            populateDiagnostics();
+            validation_ = output.validation;
+            pipeline_ = output.pipeline;
+            cuttingRoute_ = output.cuttingRoute;
+            view_->setCuttingRoute(cuttingRoute_, sheet_.height);
+            populateLaserOperationSelector();
+            resetAdaptiveRepairAnimation();
+            resetLaserAnimation();
 
-            view_->showResult(
-                result_,
-                instances_,
-                sheet_
-            );
+            {
+                const QSignalBlocker blocker(
+                    repairRoundCombo_
+                );
+                repairRoundCombo_->clear();
+                repairRoundCombo_->addItem(
+                    "Итоговая раскладка",
+                    -1
+                );
+                for (const auto& round :
+                     validation_.adaptiveHistory) {
+                    repairRoundCombo_->addItem(
+                        QString("Раунд %1")
+                            .arg(static_cast<qulonglong>(
+                                round.roundIndex)),
+                        static_cast<int>(round.roundIndex)
+                    );
+                }
+                const bool hasHistory =
+                    !validation_.adaptiveHistory.empty();
+                repairRoundCombo_->setEnabled(hasHistory);
+                if (repairConflictLayer_) {
+                    repairConflictLayer_->setEnabled(hasHistory);
+                }
+                if (repairExtractedLayer_) {
+                    repairExtractedLayer_->setEnabled(hasHistory);
+                }
+                if (repairMovedLayer_) {
+                    repairMovedLayer_->setEnabled(hasHistory);
+                }
+                if (repairStationaryLayer_) {
+                    repairStationaryLayer_->setEnabled(hasHistory);
+                }
+                if (repairPlayButton_) {
+                    repairPlayButton_->setEnabled(hasHistory);
+                }
+                if (repairSpeedCombo_) {
+                    repairSpeedCombo_->setEnabled(hasHistory);
+                }
+            }
+
+            updateAdaptiveRepairAnimationUi();
+            populateDiagnostics();
+            populateProductionValidation();
+
+            refreshAdaptiveRepairView();
 
             const auto minutes = output.cutting.totalMinutes;
             const int hours = static_cast<int>(minutes / 60.0);
@@ -464,31 +948,35 @@ void MainWindow::connectUi() {
             ) % 60;
 
             resultLabel_->setText(
-                QString("Листов: %1
-"
-                        "Размещено: %2
-"
-                        "Не размещено: %3
-"
-                        "Использование: %4%
-"
-                        "Длина реза: %5 м
-"
-                        "Пробивок: %6
-"
-                        "Время лазерной резки: %7 ч %8 мин")
+                QString("Листов: %1\n"
+                        "Размещено: %2\n"
+                        "Не размещено: %3\n"
+                        "Использование: %4%\n"
+                        "Production Validator: %5\n"
+                        "Pipeline: %6\n"
+                        "Длина реза: %7 м\n"
+                        "Пробивок: %8\n"
+                        "Время лазерной резки: %9 ч %10 мин")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(static_cast<int>(
                         instances_.size() - result_.unplaced.size()))
                     .arg(static_cast<int>(result_.unplaced.size()))
                     .arg(result_.utilization * 100.0, 0, 'f', 1)
+                    .arg(validation_.valid ? "OK" : "ОШИБКА")
+                    .arg(QString::fromUtf8(productionPipelineStageName(validation_.pipelineStage)))
                     .arg(output.cutting.contourLengthMm / 1000.0, 0, 'f', 2)
                     .arg(output.cutting.pierces)
                     .arg(hours)
                     .arg(mins)
             );
 
-            appendLog(
+            if (watchdogTriggered_) {
+                appendLog("Расчёт завершён после срабатывания GUI Watchdog.");
+            } else if (userCancelRequested_) {
+                appendLog("Расчёт завершён после отмены пользователем.");
+            }
+
+                        appendLog(
                 QString("Расчёт завершён: %1 листов, использование %2%.")
                     .arg(static_cast<int>(result_.sheets.size()))
                     .arg(result_.utilization * 100.0, 0, 'f', 1)
@@ -507,8 +995,42 @@ void MainWindow::connectUi() {
                 );
             }
 
+            appendLog(
+                QString("NFP telemetry: таймауты=%1, complexity fallback=%2, cache hit=%3, miss=%4.")
+                    .arg(static_cast<qulonglong>(result_.stats.nfpTimeouts))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpComplexityFallbacks))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpCacheHits))
+                    .arg(static_cast<qulonglong>(result_.stats.nfpCacheMisses))
+            );
+
+            appendLog(
+                QString("Production Pipeline: %1; stage=%2; %3")
+                    .arg(validation_.pipelineValid ? "COMPLETE" : "ОШИБКА")
+                    .arg(QString::fromUtf8(
+                        productionPipelineStageName(validation_.pipelineStage)))
+                    .arg(QString::fromStdString(validation_.pipelineMessage))
+            );
+
+            if (validation_.repairAttempts > 0 ||
+                validation_.adaptiveRepairRounds > 0) {
+                appendLog(
+                    QString("Auto Repair: %1; adaptive rounds=%2, group=%3, "
+                            "global attempts=%4, время=%5 мс.")
+                        .arg(validation_.repaired ? "успешно" : "не удалось")
+                        .arg(static_cast<qulonglong>(
+                            validation_.adaptiveRepairRounds))
+                        .arg(static_cast<qulonglong>(
+                            validation_.adaptiveRepairGroupSize))
+                        .arg(static_cast<qulonglong>(
+                            validation_.repairAttempts))
+                        .arg(static_cast<qulonglong>(
+                            validation_.repairElapsedMs))
+                );
+            }
+
             exportButton_->setEnabled(
-                !result_.sheets.empty()
+                !result_.sheets.empty() &&
+                validation_.valid
             );
         } catch (const std::exception& error) {
             QMessageBox::critical(
@@ -522,6 +1044,9 @@ void MainWindow::connectUi() {
             );
         }
 
+        if (calculationWatchdog_) calculationWatchdog_->stop();
+        repairRequested_ = false;
+        nestingController_.reset();
         setBusy(false);
     });
 
@@ -532,13 +1057,95 @@ void MainWindow::connectUi() {
         [this] {
             try {
                 const auto benchmarkResult = benchmarkWatcher_->result();
+                lastBenchmarkResult_ = benchmarkResult;
+                hasBenchmarkResult_ = true;
+                benchmarkExportButton_->setEnabled(true);
                 populateBenchmark(benchmarkResult);
                 appendLog(
-                    QString("Benchmark: базовый %1 мс / %2 листов; оптимизированный %3 мс / %4 листов.")
+                    QString("Benchmark: базовый %1 мс / %2 листов / %3 кандидатов / %4 NFP / refill %5 / exchange %6 / eliminated %7 / passes %8; оптимизированный %9 мс / %10 листов / %11 кандидатов / %12 NFP / refill %13 / exchange %14 / eliminated %15 / passes %16.")
                         .arg(benchmarkResult.baseline.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.baseline.sheets))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.candidateChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.nfpChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.refillMoves))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.exchangeAttempts))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.sheetsEliminated))
+                        .arg(static_cast<qulonglong>(benchmarkResult.baseline.optimizerPasses))
                         .arg(benchmarkResult.optimized.milliseconds, 0, 'f', 1)
                         .arg(static_cast<int>(benchmarkResult.optimized.sheets))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.candidateChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.nfpChecks))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.refillMoves))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.exchangeAttempts))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.sheetsEliminated))
+                        .arg(static_cast<qulonglong>(benchmarkResult.optimized.optimizerPasses))
+                );
+
+                const double timeDelta =
+                    benchmarkResult.optimized.milliseconds -
+                    benchmarkResult.baseline.milliseconds;
+                const double timeChangePercent =
+                    benchmarkResult.baseline.milliseconds > 1e-9
+                        ? (
+                            timeDelta /
+                            benchmarkResult.baseline.milliseconds
+                        ) * 100.0
+                        : 0.0;
+                const long long sheetDelta =
+                    static_cast<long long>(
+                        benchmarkResult.optimized.sheets
+                    ) -
+                    static_cast<long long>(
+                        benchmarkResult.baseline.sheets
+                    );
+                const long long placedDelta =
+                    static_cast<long long>(
+                        benchmarkResult.optimized.placed
+                    ) -
+                    static_cast<long long>(
+                        benchmarkResult.baseline.placed
+                    );
+                const double utilizationDelta =
+                    (
+                        benchmarkResult.optimized.utilization -
+                        benchmarkResult.baseline.utilization
+                    ) * 100.0;
+
+                appendLog(
+                    QString(
+                        "Benchmark итог: время %1%2%, листов %3%4, "
+                        "размещено %5%6, использование %7%8 п.п."
+                    )
+                        .arg(
+                            timeChangePercent >= 0.0 ? "+" : ""
+                        )
+                        .arg(
+                            timeChangePercent,
+                            0,
+                            'f',
+                            1
+                        )
+                        .arg(
+                            sheetDelta >= 0 ? "+" : ""
+                        )
+                        .arg(
+                            sheetDelta
+                        )
+                        .arg(
+                            placedDelta >= 0 ? "+" : ""
+                        )
+                        .arg(
+                            placedDelta
+                        )
+                        .arg(
+                            utilizationDelta >= 0.0 ? "+" : ""
+                        )
+                        .arg(
+                            utilizationDelta,
+                            0,
+                            'f',
+                            2
+                        )
                 );
             } catch (const std::exception& error) {
                 QMessageBox::critical(
@@ -576,14 +1183,14 @@ void MainWindow::importDxf() {
     const std::string text(data.constData(),
                            static_cast<std::size_t>(data.size()));
 
-    document_ = importDxf(text, 0.25);
+    document_ = sheetnest::importDxf(text, 0.25);
     parts_ = partsFromDxf(document_);
+    const auto preflight = preflightDxf(document_);
     currentFile_ = fileName;
     populatePartTable();
 
     fileLabel_->setText(
-        QString("%1
-Контуры: %2")
+        QString("%1\nКонтуры: %2")
             .arg(fileName)
             .arg(static_cast<int>(document_.contours.size()))
     );
@@ -605,6 +1212,25 @@ void MainWindow::importDxf() {
         );
     }
 
+    if (!preflight.valid) {
+        appendLog(
+            QString("DXF PRECHECK: FAIL • valid=%1/%2 • issues=%3")
+                .arg(static_cast<int>(preflight.validParts))
+                .arg(static_cast<int>(document_.contours.size()))
+                .arg(static_cast<int>(preflight.issues.size()))
+        );
+        for (const auto& issue : preflight.issues) {
+            appendLog(QString("DXF PRECHECK: %1").arg(QString::fromStdString(issue)));
+        }
+    } else {
+        appendLog(
+            QString("DXF PRECHECK: PASS • деталей=%1 • площадь min/max=%2/%3 мм²")
+                .arg(static_cast<int>(preflight.validParts))
+                .arg(preflight.minArea, 0, 'f', 2)
+                .arg(preflight.maxArea, 0, 'f', 2)
+        );
+    }
+
     if (document_.contours.empty()) {
         parts_.clear();
         if (partTable_) partTable_->setRowCount(0);
@@ -619,11 +1245,46 @@ void MainWindow::importDxf() {
         return;
     }
 
-    calculateButton_->setEnabled(true);
+    calculateButton_->setEnabled(preflight.valid);
     refreshInstances();
+
+    if (!preflight.valid) {
+        QMessageBox::warning(
+            this,
+            "DXF preflight",
+            QString("DXF найден, но часть контуров не прошла предварительную проверку. "
+                    "Расчёт заблокирован до исправления геометрии.\n\n%1")
+                .arg(static_cast<int>(preflight.issues.size()))
+        );
+    }
 }
 
 void MainWindow::refreshInstances() {
+    resetAdaptiveRepairAnimation();
+    hasBenchmarkResult_ = false;
+    validation_ = {};
+    validation_.valid = false;
+    pipeline_ = {};
+    if (repairRoundCombo_) {
+        QSignalBlocker blocker(repairRoundCombo_);
+        repairRoundCombo_->clear();
+        repairRoundCombo_->addItem("Итоговая раскладка", -1);
+        repairRoundCombo_->setEnabled(false);
+    }
+    if (repairConflictLayer_) repairConflictLayer_->setEnabled(false);
+    if (repairExtractedLayer_) repairExtractedLayer_->setEnabled(false);
+    if (repairMovedLayer_) repairMovedLayer_->setEnabled(false);
+    if (repairStationaryLayer_) repairStationaryLayer_->setEnabled(false);
+    if (repairButton_) {
+        repairButton_->setEnabled(false);
+    }
+    if (exportButton_) {
+        exportButton_->setEnabled(false);
+    }
+    if (benchmarkExportButton_) {
+        benchmarkExportButton_->setEnabled(false);
+    }
+
     if (parts_.empty()) {
         instances_.clear();
         partCountLabel_->setText("Деталей: 0");
@@ -714,9 +1375,15 @@ void MainWindow::populatePartTable() {
 void MainWindow::populateDiagnostics() {
     if (!diagnosticsTable_) return;
 
-    const auto diagnostics = diagnoseNest(
+    auto diagnostics = diagnoseNest(
         instances_,
         result_
+    );
+    enrichDiagnostics(
+        diagnostics,
+        cuttingRoute_,
+        validation_,
+        &result_
     );
 
     diagnosticsTable_->setRowCount(
@@ -742,13 +1409,35 @@ void MainWindow::populateDiagnostics() {
             QString::fromStdString(d.instanceId),
             QString::fromStdString(d.unitId),
             QString::fromStdString(d.sourceId),
-            QString::fromStdString(d.layer),
+            d.sheetIndex == static_cast<std::size_t>(-1)
+                ? "-"
+                : QString::number(static_cast<qulonglong>(d.sheetIndex + 1)),
             statusText(d.status) + " / " +
                 QString::fromStdString(d.stage),
-            QString::fromStdString(d.message)
+            QString::fromStdString(d.message),
+            QString::number(static_cast<qulonglong>(d.cuttingOperationCount)),
+            QString::number(d.cuttingSeconds, 'f', 2),
+            QString("%1 / %2")
+                .arg(static_cast<qulonglong>(d.repairAttempts))
+                .arg(static_cast<qulonglong>(d.adaptiveRepairRounds)),
+            QString::number(static_cast<qulonglong>(d.candidateChecks)),
+            QString::number(static_cast<qulonglong>(d.nfpChecks)),
+            QString::number(static_cast<qulonglong>(d.nfpTimeouts)),
+            QString::number(static_cast<qulonglong>(d.nfpFallbacks)),
+            QString::number(static_cast<qulonglong>(d.nfpTimeoutFallbacks)),
+            QString::number(static_cast<qulonglong>(d.boundsRejections)),
+            QString::number(static_cast<qulonglong>(d.collisionRejections)),
+            QString::number(static_cast<qulonglong>(d.feasibleCandidates)),
+            QString::number(static_cast<qulonglong>(d.repairRounds)),
+            QString::number(static_cast<qulonglong>(d.repairConflictRounds)),
+            d.repairExtracted ? "yes" : "no",
+            d.repairMoved ? "yes" : "no",
+            QString::fromStdString(d.failureReason),
+            QString::number(static_cast<qulonglong>(d.nestingElapsedMs)),
+            QString::fromStdString(d.finalStatus)
         };
 
-        for (int column = 0; column < 6; ++column) {
+        for (int column = 0; column < 24; ++column) {
             diagnosticsTable_->setItem(
                 static_cast<int>(i),
                 column,
@@ -758,6 +1447,154 @@ void MainWindow::populateDiagnostics() {
     }
 
     diagnosticsTable_->resizeColumnsToContents();
+}
+
+void MainWindow::populateProductionValidation() {
+    if (!validatorTable_) return;
+
+    const auto& pipeline = pipeline_;
+    const auto statusFor = [&pipeline](ProductionPipelineStage stage) {
+        if (std::find(
+                pipeline.completedStages.begin(),
+                pipeline.completedStages.end(),
+                stage
+            ) != pipeline.completedStages.end()) {
+            return QString("OK");
+        }
+        if (!pipeline.valid && pipeline.failedStage == stage) {
+            return QString("FAIL");
+        }
+        return QString("—");
+    };
+
+    const auto stageText = [](ProductionPipelineStage stage) {
+        return QString::fromUtf8(productionPipelineStageName(stage));
+    };
+
+    const auto metricText = [&pipeline](ProductionPipelineStage stage) {
+        switch (stage) {
+        case ProductionPipelineStage::DxfParse:
+            return QString("parts=%1")
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.validParts));
+        case ProductionPipelineStage::DxfPreflight:
+            return QString("valid=%1 • empty=%2 • invalid=%3 • area=%4…%5 mm²")
+                .arg(pipeline.dxfPreflight.valid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.emptyParts))
+                .arg(static_cast<qulonglong>(pipeline.dxfPreflight.invalidParts))
+                .arg(pipeline.dxfPreflight.minArea, 0, 'f', 1)
+                .arg(pipeline.dxfPreflight.maxArea, 0, 'f', 1);
+        case ProductionPipelineStage::Nesting:
+            return QString("placed=%1/%2 • unplaced=%3 • sheets=%4 • checks=%5")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.placedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.expectedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.unplacedInstanceCount))
+                .arg(static_cast<qulonglong>(result_.sheets.size()))
+                .arg(static_cast<qulonglong>(result_.stats.candidateChecks));
+        case ProductionPipelineStage::AdaptiveRepair:
+            return QString("rounds=%1 • attempts=%2 • group=%3 • elapsed=%4 ms")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.adaptiveRepairRounds))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.repairAttempts))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.adaptiveRepairGroupSize))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.repairElapsedMs));
+        case ProductionPipelineStage::Coverage:
+            return QString("expected=%1 • placed=%2 • missing=%3")
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.expectedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.placedInstanceCount))
+                .arg(static_cast<qulonglong>(pipeline.nestingValidation.unplacedInstanceCount));
+        case ProductionPipelineStage::CamRoute:
+            return QString("operations=%1 • time=%2 s")
+                .arg(static_cast<qulonglong>(pipeline.camOperationCount))
+                .arg(cuttingRoute_.totalSeconds, 0, 'f', 2);
+        case ProductionPipelineStage::CamValidation:
+            return QString("valid=%1 • invalid geometry=%2 • nonfinite XY=%3 • zero cuts=%4")
+                .arg(pipeline.camValidation.valid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.camValidation.invalidGeometryCount))
+                .arg(static_cast<qulonglong>(pipeline.camValidation.nonFiniteCoordinateCount))
+                .arg(static_cast<qulonglong>(pipeline.camValidation.zeroLengthCutCount));
+        case ProductionPipelineStage::DxfExport:
+            return QString("bytes=%1")
+                .arg(static_cast<qulonglong>(pipeline.exportedBytes));
+        case ProductionPipelineStage::DxfRoundTrip:
+            return QString("valid=%1 • parts=%2 • invalid=%3")
+                .arg(pipeline.roundTripValid ? "yes" : "no")
+                .arg(static_cast<qulonglong>(pipeline.roundTripPreflight.validParts))
+                .arg(static_cast<qulonglong>(pipeline.roundTripPreflight.invalidParts));
+        case ProductionPipelineStage::Complete:
+            return QString("all stages passed");
+        case ProductionPipelineStage::Failed:
+            return QString();
+        }
+        return QString();
+    };
+
+    const std::array<ProductionPipelineStage, 10> stages = {
+        ProductionPipelineStage::DxfParse,
+        ProductionPipelineStage::DxfPreflight,
+        ProductionPipelineStage::Nesting,
+        ProductionPipelineStage::AdaptiveRepair,
+        ProductionPipelineStage::Coverage,
+        ProductionPipelineStage::CamRoute,
+        ProductionPipelineStage::CamValidation,
+        ProductionPipelineStage::DxfExport,
+        ProductionPipelineStage::DxfRoundTrip,
+        ProductionPipelineStage::Complete
+    };
+
+    validatorTable_->setRowCount(static_cast<int>(stages.size()) + 1);
+
+    for (std::size_t i = 0; i < stages.size(); ++i) {
+        const auto stage = stages[i];
+        const QString status = statusFor(stage);
+        QString detail;
+        if (!pipeline.valid && pipeline.failedStage == stage) {
+            detail = QString::fromStdString(pipeline.failureReason);
+        } else if (stage == ProductionPipelineStage::Complete && pipeline.valid) {
+            detail = "Production Pipeline: COMPLETE.";
+        } else {
+            detail = "Пройден";
+        }
+
+        const QString values[] = {
+            stageText(stage),
+            status,
+            metricText(stage),
+            detail
+        };
+        for (int column = 0; column < 4; ++column) {
+            auto* item = new QTableWidgetItem(values[column]);
+            if (status == "FAIL") {
+                item->setToolTip(detail);
+            }
+            validatorTable_->setItem(static_cast<int>(i), column, item);
+        }
+    }
+
+    const int summaryRow = static_cast<int>(stages.size());
+    const QString summaryStatus = pipeline.valid ? "COMPLETE" : "FAIL";
+    const QString summaryDetail = pipeline.valid
+        ? "Production Pipeline 2.0 завершён без ошибок."
+        : QString("Отказ: %1 • %2")
+            .arg(stageText(pipeline.failedStage))
+            .arg(QString::fromStdString(pipeline.failureReason));
+    const QString summaryValues[] = {
+        "Итог",
+        summaryStatus,
+        QString("sheets=%1 • CAM ops=%2 • DXF=%3 B • round-trip=%4")
+            .arg(static_cast<qulonglong>(result_.sheets.size()))
+            .arg(static_cast<qulonglong>(pipeline.camOperationCount))
+            .arg(static_cast<qulonglong>(pipeline.exportedBytes))
+            .arg(pipeline.roundTripValid ? "OK" : "FAIL"),
+        summaryDetail
+    };
+    for (int column = 0; column < 4; ++column) {
+        validatorTable_->setItem(summaryRow, column, new QTableWidgetItem(summaryValues[column]));
+    }
+
+    validatorTable_->setColumnWidth(0, 150);
+    validatorTable_->setColumnWidth(1, 80);
+    validatorTable_->setColumnWidth(2, 430);
+    validatorTable_->horizontalHeader()->setStretchLastSection(true);
+    validatorTable_->resizeRowsToContents();
 }
 
 void MainWindow::populateBenchmark(
@@ -781,10 +1618,34 @@ void MainWindow::populateBenchmark(
             QString::number(static_cast<qulonglong>(b.sheets)),
             QString::number(static_cast<qulonglong>(b.placed)),
             QString::number(static_cast<qulonglong>(b.skipped)),
-            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2)
+            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2),
+            QString::number(static_cast<qulonglong>(b.candidateChecks)),
+            QString::number(static_cast<qulonglong>(b.collisionChecks)),
+            QString::number(static_cast<qulonglong>(b.nfpChecks)),
+            QString::number(static_cast<qulonglong>(b.refillMoves)),
+            QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
+            QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
+            QString::number(static_cast<qulonglong>(b.optimizerPasses)),
+            QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+            QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+            QString::number(static_cast<qulonglong>(b.nfpTimeoutFallbacks)),
+            QString::fromStdString(std::accumulate(
+                b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
+                std::string{},
+                [](std::string a, const std::string& id) {
+                    return a.empty() ? id : a + ";" + id;
+                }
+            )),
+            QString::fromStdString(std::accumulate(
+                b.skippedInstanceIds.begin(), b.skippedInstanceIds.end(),
+                std::string{},
+                [](std::string a, const std::string& id) {
+                    return a.empty() ? id : a + ";" + id;
+                }
+            ))
         };
 
-        for (int column = 0; column < 6; ++column) {
+        for (int column = 0; column < 18; ++column) {
             benchmarkTable_->setItem(
                 row,
                 column,
@@ -831,6 +1692,25 @@ void MainWindow::calculate() {
     options_.iterations =
         static_cast<std::size_t>(iterationsSpin_->value());
     options_.gapMm = gapSpin_->value();
+    options_.enableAutoRepair = true;
+
+    if (repairRequested_) {
+        options_.iterations =
+            std::clamp<std::size_t>(
+                std::max<std::size_t>(
+                    64,
+                    options_.iterations * 2
+                ),
+                64,
+                128
+            );
+        options_.seed += 0xA5A5F00Du;
+
+        appendLog(
+            QString("Запущено усиленное исправление: %1 итераций + Auto Repair.")
+                .arg(static_cast<int>(options_.iterations))
+        );
+    }
 
     Material material = Material::CarbonSteel;
     switch (materialCombo_->currentIndex()) {
@@ -845,13 +1725,87 @@ void MainWindow::calculate() {
         thicknessSpin_->value()
     );
 
+    validation_ = {};
+    validation_.valid = false;
+    if (repairRoundCombo_) {
+        QSignalBlocker blocker(repairRoundCombo_);
+        repairRoundCombo_->clear();
+        repairRoundCombo_->addItem("Итоговая раскладка", -1);
+        repairRoundCombo_->setEnabled(false);
+    }
+    if (repairConflictLayer_) repairConflictLayer_->setEnabled(false);
+    if (repairExtractedLayer_) repairExtractedLayer_->setEnabled(false);
+    if (repairMovedLayer_) repairMovedLayer_->setEnabled(false);
+    if (repairStationaryLayer_) repairStationaryLayer_->setEnabled(false);
+    exportButton_->setEnabled(false);
+
     const auto instancesCopy = instances_;
     const auto sheetCopy = sheet_;
     const auto optionsCopy = options_;
     const auto technologyCopy = technology_;
 
+    auto controller =
+        std::make_shared<sheetnest::ParallelNestingController>();
+    nestingController_ = controller;
+
+    sheetnest::ParallelNestingOptions parallelOptions;
+    parallelOptions.workers =
+        static_cast<std::size_t>(workersSpin_->value());
+    parallelOptions.iterations = options_.iterations;
+    parallelOptions.timeBudgetMs =
+        static_cast<std::uint64_t>(timeBudgetSpin_->value()) * 1000u;
+
+    QPointer<MainWindow> safeThis(this);
+    parallelOptions.onProgress =
+        [safeThis](const sheetnest::NestingProgress& event) {
+            if (!safeThis) return;
+
+            QMetaObject::invokeMethod(
+                safeThis,
+                [safeThis, event]() {
+                    if (!safeThis) return;
+                    safeThis->updateProgress(event);
+                },
+                Qt::QueuedConnection
+            );
+        };
+
+    pauseLaserAnimation();
+    resetLaserAnimation();
+    if (laserOperationCombo_) {
+        laserOperationCombo_->clear();
+    }
+
     setBusy(true);
-    appendLog("Запущен расчёт nesting в фоновом потоке...");
+    calculationStartedMs_ = QDateTime::currentMSecsSinceEpoch();
+    lastProgressMs_ = calculationStartedMs_;
+    lastProgressStage_ = "Starting";
+    lastProgressWorker_ = 0;
+    lastProgressPlaced_ = 0;
+    lastProgressSkipped_ = instances_.size();
+    lastProgressSheets_ = 0;
+    watchdogTriggered_ = false;
+    userCancelRequested_ = false;
+    if (calculationWatchdog_) {
+        calculationWatchdog_->start();
+    }
+    progress_->setRange(0, 100);
+    progress_->setValue(0);
+    progressDetails_->setText(
+        QString("Контроллер: %1 workers, лимит %2 с")
+            .arg(workersSpin_->value() == 0
+                ? QString("авто")
+                : QString::number(workersSpin_->value()))
+            .arg(timeBudgetSpin_->value())
+    );
+    appendLog(
+        QString("Запущен Parallel Nesting Engine: workers=%1, итераций=%2, лимит=%3 с.")
+            .arg(workersSpin_->value() == 0
+                ? QString("auto")
+                : QString::number(workersSpin_->value()))
+            .arg(static_cast<int>(options_.iterations))
+            .arg(timeBudgetSpin_->value())
+    );
 
     watcher_->setFuture(
         QtConcurrent::run(
@@ -859,16 +1813,42 @@ void MainWindow::calculate() {
              instancesCopy,
              sheetCopy,
              optionsCopy,
-             technologyCopy]() {
+             technologyCopy,
+             parallelOptions,
+             controller]() {
                 return performCalculation(
                     instancesCopy,
                     sheetCopy,
                     optionsCopy,
-                    technologyCopy
+                    technologyCopy,
+                    parallelOptions,
+                    controller
                 );
             }
         )
     );
+}
+
+void MainWindow::repairErrors() {
+    if (instances_.empty() || result_.sheets.empty()) {
+        return;
+    }
+
+    if (validation_.valid) {
+        QMessageBox::information(
+            this,
+            "Production Validator",
+            "Ошибок для исправления не обнаружено."
+        );
+        return;
+    }
+
+    repairRequested_ = true;
+    appendLog(
+        "Запущено автоматическое исправление: усиленный пересчёт → "
+        "Global Optimizer → Production Validator."
+    );
+    calculate();
 }
 
 void MainWindow::benchmark() {
@@ -911,6 +1891,12 @@ void MainWindow::benchmark() {
     const auto sheetCopy = sheet_;
     const auto optionsCopy = options_;
 
+    hasBenchmarkResult_ = false;
+    validation_ = {};
+    if (benchmarkExportButton_) {
+        benchmarkExportButton_->setEnabled(false);
+    }
+    nestingController_.reset();
     setBusy(true);
     appendLog("Запущен benchmark: базовый поиск vs оптимизированный...");
 
@@ -931,23 +1917,115 @@ CalculationOutput MainWindow::performCalculation(
     std::vector<Instance> instances,
     Sheet sheet,
     Options options,
-    CuttingParameters technology
+    CuttingParameters technology,
+    ParallelNestingOptions parallelOptions,
+    std::shared_ptr<ParallelNestingController> controller
 ) const {
     CalculationOutput output;
     output.technology = technology;
-    output.result = nest(
+    bool controllerProvidedValidation = false;
+
+    parallelOptions.onValidation =
+        [&output, &controllerProvidedValidation](
+            const sheetnest::ProductionValidationReport& report
+        ) {
+            output.validation = report;
+            controllerProvidedValidation = true;
+        };
+
+    output.validation.pipelineStage = ProductionPipelineStage::Nesting;
+    output.validation.pipelineMessage = "Nesting завершён.";
+
+    output.result = controller
+        ? controller->run(
+            instances,
+            sheet,
+            options,
+            parallelOptions
+        )
+        : nest(
+            instances,
+            sheet,
+            options
+        );
+
+    output.validation.pipelineStage = ProductionPipelineStage::Coverage;
+    if (!controllerProvidedValidation) {
+        output.validation = validateProductionResult(
+            instances,
+            sheet,
+            options,
+            output.result
+        );
+    }
+    output.validation.pipelineStage = ProductionPipelineStage::Coverage;
+    output.validation.pipelineMessage =
+        output.validation.valid
+            ? "Production Validator: OK."
+            : "Production Validator обнаружил ошибки раскладки.";
+
+    output.cuttingRoute = planWholeResultRoute(output.result, instances, technology);
+    output.validation.pipelineStage = ProductionPipelineStage::CamRoute;
+    if (output.cuttingRoute.operations.empty()) {
+        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+        output.validation.pipelineMessage = "CAM-маршрут пуст.";
+    } else {
+        output.validation.pipelineMessage = "CAM-маршрут построен.";
+    }
+
+    PathOptions routeOptions;
+    routeOptions.rapidSpeedMMin = 120.0;
+    routeOptions.pierceSeconds = 0.25;
+    output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
+
+    PathOptions pipelinePathOptions;
+    pipelinePathOptions.rapidSpeedMMin = 120.0;
+    pipelinePathOptions.pierceSeconds = 0.25;
+
+    const auto pipeline = validateProductionPipeline(
+        document_,
         instances,
         sheet,
-        options
-    );
-    output.cutting = estimateWholeResult(
+        options,
         output.result,
-        instances,
-        technology
+        technology,
+        pipelinePathOptions
     );
-    output.diagnostics = diagnoseNest(
-        instances,
-        output.result
+
+    output.pipeline = pipeline;
+    output.validation = pipeline.nestingValidation;
+    output.validation.pipelineValid = pipeline.valid;
+    output.validation.pipelineStage =
+        pipeline.valid
+            ? ProductionPipelineStage::Complete
+            : pipeline.failedStage;
+    output.validation.pipelineMessage =
+        pipeline.valid
+            ? "Production Pipeline: COMPLETE."
+            : QString::fromStdString(
+                pipeline.failureReason
+            ).toStdString();
+
+    if (pipeline.camValidation.valid) {
+        output.validation.pipelineMessage =
+            pipeline.valid
+                ? "Production Pipeline: COMPLETE."
+                : "Pipeline остановлен на этапе " +
+                    std::string(
+                        productionPipelineStageName(
+                            pipeline.failedStage
+                        )
+                    ) +
+                    ": " +
+                    pipeline.failureReason;
+    }
+
+    output.diagnostics = diagnoseNest(instances, output.result);
+    enrichDiagnostics(
+        output.diagnostics,
+        output.cuttingRoute,
+        output.validation,
+        &output.result
     );
     return output;
 }
@@ -964,8 +2042,308 @@ sheetnest::BenchmarkResult MainWindow::performBenchmark(
     );
 }
 
+void MainWindow::exportBenchmarkResults() {
+    if (!hasBenchmarkResult_) {
+        return;
+    }
+
+    const QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "Сохранить результаты Benchmark",
+        currentFile_.isEmpty()
+            ? "sheetnest-benchmark.csv"
+            : QFileInfo(currentFile_).completeBaseName() + "_benchmark.csv",
+        "CSV files (*.csv);;JSON files (*.json)"
+    );
+
+    if (fileName.isEmpty()) return;
+
+    auto appendCsvField = [](QString& row, const QString& value) {
+        QString escaped = value;
+        escaped.replace('"', "\"\"" );
+        row += '"';
+        row += escaped;
+        row += '"';
+    };
+
+    auto failureReasonCode = [](NestingFailureReason reason) {
+        switch (reason) {
+        case NestingFailureReason::None: return QString("None");
+        case NestingFailureReason::NoFeasiblePosition: return QString("NoFeasiblePosition");
+        case NestingFailureReason::Timeout: return QString("Timeout");
+        case NestingFailureReason::InvalidGeometry: return QString("InvalidGeometry");
+        case NestingFailureReason::RepairExhausted: return QString("RepairExhausted");
+        case NestingFailureReason::Cancelled: return QString("Cancelled");
+        }
+        return QString("None");
+    };
+
+    auto benchmarkObject = [&](const BenchmarkCase& b) {
+        QJsonObject object;
+        object["name"] = QString::fromStdString(b.name);
+        object["milliseconds"] = b.milliseconds;
+        object["sheets"] = static_cast<qint64>(b.sheets);
+        object["placed"] = static_cast<qint64>(b.placed);
+        object["skipped"] = static_cast<qint64>(b.skipped);
+        object["utilization"] = b.utilization;
+        object["candidateChecks"] = static_cast<qint64>(b.candidateChecks);
+        object["collisionChecks"] = static_cast<qint64>(b.collisionChecks);
+        object["nfpChecks"] = static_cast<qint64>(b.nfpChecks);
+        object["refillMoves"] = static_cast<qint64>(b.refillMoves);
+        object["exchangeAttempts"] = static_cast<qint64>(b.exchangeAttempts);
+        object["sheetsEliminated"] = static_cast<qint64>(b.sheetsEliminated);
+        object["optimizerPasses"] = static_cast<qint64>(b.optimizerPasses);
+        object["nfpTimeouts"] = static_cast<qint64>(b.nfpTimeouts);
+        object["nfpComplexityFallbacks"] = static_cast<qint64>(b.nfpComplexityFallbacks);
+        object["nfpCacheHits"] = static_cast<qint64>(b.nfpCacheHits);
+        object["nfpCacheMisses"] = static_cast<qint64>(b.nfpCacheMisses);
+        QJsonArray placed;
+        for (const auto& id : b.placedInstanceIds) {
+            placed.append(QString::fromStdString(id));
+        }
+        object["placedInstanceIds"] = placed;
+        QJsonArray skipped;
+        for (const auto& id : b.skippedInstanceIds) {
+            skipped.append(QString::fromStdString(id));
+        }
+        object["skippedInstanceIds"] = skipped;
+
+        QJsonArray telemetry;
+        for (const auto& item : b.instanceTelemetry) {
+            QJsonObject t;
+            t["instanceId"] = QString::fromStdString(item.instanceId);
+            t["unitId"] = QString::fromStdString(item.unitId);
+            t["reason"] = failureReasonCode(item.reason);
+            t["placed"] = item.placed;
+            t["candidateChecks"] = static_cast<qint64>(item.candidateChecks);
+            t["collisionChecks"] = static_cast<qint64>(item.collisionChecks);
+            t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
+            t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
+            t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+            t["nfpCacheHits"] = static_cast<qint64>(item.nfpCacheHits);
+            t["nfpCacheMisses"] = static_cast<qint64>(item.nfpCacheMisses);
+            t["repairRounds"] = static_cast<qint64>(item.repairRounds);
+            t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
+            t["repairExtracted"] = item.repairExtracted;
+            t["repairMoved"] = item.repairMoved;
+            t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
+            telemetry.append(t);
+        }
+        object["instanceTelemetry"] = telemetry;
+        return object;
+    };
+
+    const QString suffix = QFileInfo(fileName).suffix().toLower();
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(
+            this,
+            "Экспорт Benchmark",
+            "Не удалось открыть файл для записи."
+        );
+        return;
+    }
+
+    if (suffix == "json") {
+        QJsonObject root;
+        root["exportedAt"] =
+            QDateTime::currentDateTime().toString(Qt::ISODate);
+        root["baseline"] = benchmarkObject(lastBenchmarkResult_.baseline);
+        root["optimized"] = benchmarkObject(lastBenchmarkResult_.optimized);
+
+        const QByteArray data =
+            QJsonDocument(root).toJson(QJsonDocument::Indented);
+        file.write(data);
+    } else {
+        QString csv;
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,nfpCacheHits,nfpCacheMisses,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
+
+        const BenchmarkCase rows[] = {
+            lastBenchmarkResult_.baseline,
+            lastBenchmarkResult_.optimized
+        };
+
+        for (const auto& b : rows) {
+            QString row;
+            const QString values[] = {
+                QString::fromStdString(b.name),
+                QString::number(b.milliseconds, 'f', 3),
+                QString::number(static_cast<qulonglong>(b.sheets)),
+                QString::number(static_cast<qulonglong>(b.placed)),
+                QString::number(static_cast<qulonglong>(b.skipped)),
+                QString::number(b.utilization * 100.0, 'f', 4),
+                QString::number(static_cast<qulonglong>(b.candidateChecks)),
+                QString::number(static_cast<qulonglong>(b.collisionChecks)),
+                QString::number(static_cast<qulonglong>(b.nfpChecks)),
+                QString::number(static_cast<qulonglong>(b.refillMoves)),
+                QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
+                QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
+                QString::number(static_cast<qulonglong>(b.optimizerPasses)),
+                QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+                QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
+                QString::number(static_cast<qulonglong>(b.nfpCacheHits)),
+                QString::number(static_cast<qulonglong>(b.nfpCacheMisses)),
+                QString::fromStdString(std::accumulate(
+                    b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
+                    std::string{},
+                    [](std::string a, const std::string& id) {
+                        return a.empty() ? id : a + ";" + id;
+                    }
+                )),
+                QString::fromStdString(std::accumulate(
+                    b.skippedInstanceIds.begin(), b.skippedInstanceIds.end(),
+                    std::string{},
+                    [](std::string a, const std::string& id) {
+                        return a.empty() ? id : a + ";" + id;
+                    }
+                )),
+                [&]() {
+                    QJsonArray telemetry;
+                    for (const auto& item : b.instanceTelemetry) {
+                        QJsonObject t;
+                        t["instanceId"] = QString::fromStdString(item.instanceId);
+                        t["unitId"] = QString::fromStdString(item.unitId);
+                        t["reason"] = failureReasonCode(item.reason);
+                        t["placed"] = item.placed;
+                        t["candidateChecks"] = static_cast<qint64>(item.candidateChecks);
+                        t["nfpChecks"] = static_cast<qint64>(item.nfpChecks);
+                        t["nfpTimeouts"] = static_cast<qint64>(item.nfpTimeouts);
+                        t["nfpFallbacks"] = static_cast<qint64>(item.nfpFallbacks);
+                        t["nfpCacheHits"] = static_cast<qint64>(item.nfpCacheHits);
+                        t["nfpCacheMisses"] = static_cast<qint64>(item.nfpCacheMisses);
+                        t["repairRounds"] = static_cast<qint64>(item.repairRounds);
+                        t["repairConflictRounds"] = static_cast<qint64>(item.repairConflictRounds);
+                        t["repairExtracted"] = item.repairExtracted;
+                        t["repairMoved"] = item.repairMoved;
+                        t["elapsedMs"] = static_cast<qint64>(item.elapsedMs);
+                        telemetry.append(t);
+                    }
+                    return QString::fromUtf8(
+                        QJsonDocument(telemetry).toJson(QJsonDocument::Compact)
+                    );
+                }()
+            };
+
+            for (int i = 0; i < 20; ++i) {
+                if (i > 0) row += ',';
+                appendCsvField(row, values[i]);
+            }
+            row += '\n';
+            csv += row;
+        }
+
+        file.write(csv.toUtf8());
+    }
+
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт Benchmark",
+            "Не удалось завершить запись файла."
+        );
+        return;
+    }
+
+    appendLog(QString("Результаты Benchmark сохранены: %1").arg(fileName));
+    statusBar()->showMessage("Benchmark экспортирован", 5000);
+}
+
+// Production Validator: final export gate
+void MainWindow::exportCam() {
+    if (cuttingRoute_.operations.empty()) {
+        QMessageBox::information(
+            this,
+            "Экспорт CAM",
+            "Нет рассчитанного CAM-маршрута."
+        );
+        return;
+    }
+
+    const auto report = validateCuttingPath(cuttingRoute_);
+    if (!report.valid) {
+        QMessageBox::warning(
+            this,
+            "Экспорт CAM",
+            QString("CAM-маршрут не прошёл проверку: %1")
+                .arg(QString::fromStdString(report.message))
+        );
+        return;
+    }
+
+    const QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "Экспорт CAM программы",
+        currentFile_.isEmpty()
+            ? "sheetnest.nc"
+            : QFileInfo(currentFile_).completeBaseName() + ".nc",
+        "CAM / NC (*.nc *.gcode *.tap);;Все файлы (*)"
+    );
+    if (fileName.isEmpty()) return;
+
+    CamExportOptions exportOptions;
+    exportOptions.programName = "SHEETNEST";
+    exportOptions.includeComments = true;
+    exportOptions.includeSheetMarkers = true;
+
+    const std::string program =
+        exportCamProgram(
+            cuttingRoute_,
+            technology_,
+            exportOptions
+        );
+
+    if (program.empty()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось сформировать CAM программу."
+        );
+        return;
+    }
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось открыть файл для записи."
+        );
+        return;
+    }
+
+    file.write(QByteArray::fromStdString(program));
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт CAM",
+            "Не удалось сохранить CAM файл."
+        );
+        return;
+    }
+
+    appendLog(
+        QString("CAM экспортирован: %1 • операций %2 • %3 с")
+            .arg(fileName)
+            .arg(static_cast<qulonglong>(cuttingRoute_.operations.size()))
+            .arg(cuttingRoute_.totalSeconds, 0, 'f', 1)
+    );
+    statusBar()->showMessage("CAM программа сохранена");
+}
+
 void MainWindow::exportDxf() {
     if (result_.sheets.empty()) {
+        return;
+    }
+
+    if (!validation_.pipelineValid) {
+        QMessageBox::warning(
+            this,
+            "Production Pipeline",
+            "Раскладка не прошла полный Production Pipeline. "
+            "Экспорт DXF заблокирован. Стадия: " +
+            QString::fromUtf8(productionPipelineStageName(validation_.pipelineStage)) +
+            ". " + QString::fromStdString(validation_.pipelineMessage)
+        );
         return;
     }
 
@@ -986,25 +2364,45 @@ void MainWindow::exportDxf() {
         sheet_
     );
 
-    QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    const QByteArray payload(
+        text.data(),
+        static_cast<int>(text.size())
+    );
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly)) {
         QMessageBox::critical(
             this,
             "Экспорт DXF",
-            "Не удалось записать файл."
+            "Не удалось открыть файл для безопасной записи."
         );
         return;
     }
 
-    file.write(
-        QByteArray(
-            text.data(),
-            static_cast<int>(text.size())
-        )
-    );
+    const qint64 written = file.write(payload);
+    if (written != payload.size()) {
+        file.cancelWriting();
+        QMessageBox::critical(
+            this,
+            "Экспорт DXF",
+            "Не удалось полностью записать DXF-файл."
+        );
+        return;
+    }
+
+    if (!file.commit()) {
+        QMessageBox::critical(
+            this,
+            "Экспорт DXF",
+            "Не удалось завершить безопасную запись DXF-файла."
+        );
+        return;
+    }
 
     appendLog(
-        QString("Раскладка сохранена: %1").arg(fileName)
+        QString("Раскладка сохранена: %1 • %2 байт")
+            .arg(fileName)
+            .arg(payload.size())
     );
     statusBar()->showMessage(
         "DXF экспортирован",
@@ -1056,18 +2454,971 @@ void MainWindow::appendLog(const QString& text) {
     log_->appendPlainText(text);
 }
 
+void MainWindow::updateProgress(
+    const sheetnest::NestingProgress& progress
+) {
+    lastProgressMs_ = QDateTime::currentMSecsSinceEpoch();
+    lastProgressStage_ = QString::fromStdString(progress.message);
+    lastProgressWorker_ = progress.workerIndex;
+    lastProgressPlaced_ = progress.placed;
+    lastProgressSkipped_ = progress.skipped;
+    lastProgressSheets_ = progress.sheets;
+    if (progress.totalIterations > 0) {
+        const auto completed =
+            std::min(
+                progress.completedIterations,
+                progress.totalIterations
+            );
+        const int percent =
+            static_cast<int>(
+                (completed * 100u) /
+                progress.totalIterations
+            );
+        progress_->setRange(0, 100);
+        progress_->setValue(percent);
+    }
+
+    const int remainingSeconds =
+        static_cast<int>(progress.remainingMs / 1000u);
+
+    progressDetails_->setText(
+        QString("%1\nWorkers: %2\nИтерации: %3 / %4\n"
+                "Листов: %5 • размещено: %6 • пропущено: %7\n"
+                "Прошло: %8 с • осталось: %9 с")
+            .arg(QString::fromStdString(progress.message))
+            .arg(static_cast<int>(progress.workerCount))
+            .arg(static_cast<int>(progress.completedIterations))
+            .arg(static_cast<int>(progress.totalIterations))
+            .arg(static_cast<int>(progress.sheets))
+            .arg(static_cast<int>(progress.placed))
+            .arg(static_cast<int>(progress.skipped))
+            .arg(static_cast<int>(progress.elapsedMs / 1000u))
+            .arg(remainingSeconds)
+    );
+
+    statusBar()->showMessage(
+        QString("%1 | %2/%3 итераций | %4 листов")
+            .arg(QString::fromStdString(progress.message))
+            .arg(static_cast<int>(progress.completedIterations))
+            .arg(static_cast<int>(progress.totalIterations))
+            .arg(static_cast<int>(progress.sheets))
+    );
+
+    switch (progress.phase) {
+    case sheetnest::NestingProgressPhase::Starting:
+        break;
+
+    case sheetnest::NestingProgressPhase::WorkerStarted:
+        break;
+
+    case sheetnest::NestingProgressPhase::IterationFinished:
+        break;
+
+    case sheetnest::NestingProgressPhase::CandidatesCollected:
+        appendLog(
+            QString("Candidate Collector: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::NfpSearch:
+        appendLog(
+            QString("NFP Search: %1").arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::GlobalOptimization:
+        appendLog(
+            QString("Global Optimizer: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::ProductionValidation:
+        appendLog(
+            QString("Production Validator: %1")
+                .arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::AutoRepair:
+        appendLog(
+            QString("Adaptive Auto Repair: %1").arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::Finalizing:
+        appendLog(
+            QString("Finalizing: %1").arg(QString::fromStdString(progress.message))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::Completed:
+        progress_->setValue(100);
+        appendLog(
+            QString("Parallel Nesting: завершено %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::Cancelled:
+        appendLog(
+            QString("Parallel Nesting остановлен пользователем после %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+
+    case sheetnest::NestingProgressPhase::TimedOut:
+        appendLog(
+            QString("Parallel Nesting остановлен по лимиту времени после %1/%2 итераций.")
+                .arg(static_cast<int>(progress.completedIterations))
+                .arg(static_cast<int>(progress.totalIterations))
+        );
+        break;
+    }
+}
+
+void MainWindow::resetAdaptiveRepairAnimation() {
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    repairAnimationPlaying_ = false;
+    repairAnimationSession_ = false;
+    repairAnimationFrame_ = -1;
+    updateAdaptiveRepairAnimationUi();
+}
+
+void MainWindow::toggleAdaptiveRepairAnimation() {
+    if (validation_.adaptiveHistory.empty()) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    if (!repairAnimationSession_) {
+        int selectedRound =
+            repairRoundCombo_
+                ? repairRoundCombo_->currentData().toInt()
+                : -1;
+
+        if (selectedRound > 0) {
+            repairAnimationFrame_ =
+                std::clamp(
+                    (selectedRound - 1) * 4,
+                    0,
+                    totalFrames - 1
+                );
+        } else {
+            repairAnimationFrame_ = 0;
+        }
+
+        repairAnimationSession_ = true;
+    }
+
+    if (repairAnimationFrame_ >= totalFrames - 1) {
+        repairAnimationFrame_ = 0;
+    }
+
+    repairAnimationPlaying_ = true;
+    updateAdaptiveRepairAnimationUi();
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->start();
+    }
+
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::pauseAdaptiveRepairAnimation() {
+    repairAnimationPlaying_ = false;
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    updateAdaptiveRepairAnimationUi();
+}
+
+void MainWindow::stepAdaptiveRepairAnimation(int direction) {
+    if (validation_.adaptiveHistory.empty() ||
+        direction == 0) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    if (!repairAnimationSession_) {
+        int selectedRound =
+            repairRoundCombo_
+                ? repairRoundCombo_->currentData().toInt()
+                : -1;
+
+        repairAnimationFrame_ =
+            selectedRound > 0
+                ? std::clamp(
+                    (selectedRound - 1) * 4,
+                    0,
+                    totalFrames - 1
+                )
+                : 0;
+        repairAnimationSession_ = true;
+    }
+
+    repairAnimationPlaying_ = false;
+
+    if (repairAnimationTimer_) {
+        repairAnimationTimer_->stop();
+    }
+
+    repairAnimationFrame_ =
+        std::clamp(
+            repairAnimationFrame_ + direction,
+            0,
+            totalFrames - 1
+        );
+
+    updateAdaptiveRepairAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::advanceAdaptiveRepairAnimation() {
+    if (!repairAnimationPlaying_ ||
+        validation_.adaptiveHistory.empty()) {
+        return;
+    }
+
+    const int totalFrames =
+        static_cast<int>(
+            validation_.adaptiveHistory.size() * 4
+        );
+
+    ++repairAnimationFrame_;
+
+    if (repairAnimationFrame_ >= totalFrames) {
+        repairAnimationFrame_ = totalFrames - 1;
+        repairAnimationPlaying_ = false;
+
+        if (repairAnimationTimer_) {
+            repairAnimationTimer_->stop();
+        }
+    }
+
+    updateAdaptiveRepairAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::updateAdaptiveRepairAnimationUi() {
+    const bool hasHistory =
+        !validation_.adaptiveHistory.empty();
+
+    if (!hasHistory) {
+        if (repairPlayButton_) repairPlayButton_->setEnabled(false);
+        if (repairPauseButton_) repairPauseButton_->setEnabled(false);
+        if (repairPrevButton_) repairPrevButton_->setEnabled(false);
+        if (repairNextButton_) repairNextButton_->setEnabled(false);
+        if (repairSpeedCombo_) repairSpeedCombo_->setEnabled(false);
+        if (repairStageLabel_) {
+            repairStageLabel_->setText("Анимация: нет истории");
+        }
+        return;
+    }
+
+    if (repairPlayButton_) {
+        repairPlayButton_->setEnabled(!repairAnimationPlaying_);
+    }
+    if (repairPauseButton_) {
+        repairPauseButton_->setEnabled(repairAnimationPlaying_);
+    }
+    if (repairPrevButton_) {
+        repairPrevButton_->setEnabled(true);
+    }
+    if (repairNextButton_) {
+        repairNextButton_->setEnabled(true);
+    }
+    if (repairSpeedCombo_) {
+        repairSpeedCombo_->setEnabled(true);
+    }
+
+    if (repairSpeedCombo_ &&
+        repairAnimationTimer_) {
+        const double speed =
+            repairSpeedCombo_->currentData().toDouble();
+        const int interval =
+            std::max(
+                150,
+                static_cast<int>(
+                    900.0 /
+                    std::max(0.25, speed)
+                )
+            );
+        repairAnimationTimer_->setInterval(interval);
+    }
+
+    if (!repairAnimationSession_ ||
+        repairAnimationFrame_ < 0) {
+        if (repairStageLabel_) {
+            repairStageLabel_->setText(
+                QString("Анимация: готово • %1 раундов")
+                    .arg(
+                        static_cast<qulonglong>(
+                            validation_.adaptiveHistory.size()
+                        )
+                    )
+            );
+        }
+        return;
+    }
+
+    const int roundIndex =
+        repairAnimationFrame_ / 4 + 1;
+    const int stage =
+        repairAnimationFrame_ % 4;
+
+    const QString stages[] = {
+        "Конфликт",
+        "Извлечение деталей",
+        "Локальная перепаковка",
+        "Production Validator"
+    };
+
+    if (repairRoundCombo_) {
+        const QSignalBlocker blocker(repairRoundCombo_);
+        const int index =
+            repairRoundCombo_->findData(roundIndex);
+        if (index >= 0) {
+            repairRoundCombo_->setCurrentIndex(index);
+        }
+    }
+
+    if (repairStageLabel_) {
+        repairStageLabel_->setText(
+            QString("Раунд %1 • этап %2/4: %3%4")
+                .arg(roundIndex)
+                .arg(stage + 1)
+                .arg(stages[stage])
+                .arg(
+                    repairAnimationPlaying_
+                        ? " • воспроизведение"
+                        : ""
+                )
+        );
+    }
+}
+
+void MainWindow::refreshAdaptiveRepairView() {
+    if (!view_) return;
+
+    int selectedRound = -1;
+    if (repairRoundCombo_) {
+        selectedRound =
+            repairRoundCombo_->currentData().toInt();
+    }
+
+    int animationRound = selectedRound;
+    int animationStage = -1;
+
+    if (repairAnimationSession_ &&
+        repairAnimationFrame_ >= 0) {
+        animationRound =
+            repairAnimationFrame_ / 4 + 1;
+        animationStage =
+            repairAnimationFrame_ % 4;
+    }
+
+    if (laserAnimationOperation_ >= 0) {
+        view_->setCuttingAnimationOperationProgress(
+            laserAnimationOperation_,
+            laserContourProgress_
+        );
+    } else {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
+
+    view_->setCuttingRoute(cuttingRoute_, sheet_.height);
+    view_->showResult(
+        result_,
+        instances_,
+        sheet_,
+        &validation_,
+        animationRound,
+        repairConflictLayer_
+            ? repairConflictLayer_->isChecked()
+            : true,
+        repairExtractedLayer_
+            ? repairExtractedLayer_->isChecked()
+            : true,
+        repairMovedLayer_
+            ? repairMovedLayer_->isChecked()
+            : true,
+        repairStationaryLayer_
+            ? repairStationaryLayer_->isChecked()
+            : true,
+        animationStage
+    );
+}
+
+void MainWindow::populateLaserOperationSelector() {
+    if (!laserOperationCombo_ || !view_) return;
+
+    const QSignalBlocker blocker(laserOperationCombo_);
+    laserOperationCombo_->clear();
+
+    const auto& operations = view_->cuttingRouteOperations();
+    for (const auto& op : operations) {
+        const QString type =
+            op.inner ? "внутренний контур" : "внешний контур";
+        const QString detail =
+            QString::fromStdString(op.instanceId);
+
+        const QString label =
+            op.inner
+                ? QString(
+                    "Операция %1 • лист %2 • %3 • отверстие %4 • %5 • %6 мм • %7 с"
+                )
+                    .arg(static_cast<qulonglong>(op.operation + 1))
+                    .arg(static_cast<qulonglong>(op.sheetIndex + 1))
+                    .arg(detail)
+                    .arg(static_cast<qulonglong>(op.contourIndex + 1))
+                    .arg(type)
+                    .arg(op.cutLengthMm, 0, 'f', 1)
+                    .arg(op.totalSeconds, 0, 'f', 1)
+                : QString(
+                    "Операция %1 • лист %2 • %3 • внешний контур • %4 мм • %5 с"
+                )
+                    .arg(static_cast<qulonglong>(op.operation + 1))
+                    .arg(static_cast<qulonglong>(op.sheetIndex + 1))
+                    .arg(detail)
+                    .arg(op.cutLengthMm, 0, 'f', 1)
+                    .arg(op.totalSeconds, 0, 'f', 1);
+
+        laserOperationCombo_->addItem(
+            label,
+            static_cast<int>(op.operation)
+        );
+    }
+
+    laserAnimationOperation_ = -1;
+    laserContourProgress_ = 0.0;
+    if (!operations.empty()) {
+        laserOperationCombo_->setCurrentIndex(0);
+    }
+    if (laserContourProgressSlider_) {
+        QSignalBlocker sliderBlocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(0);
+    }
+    updateLaserAnimationUi();
+}
+
+void MainWindow::laserSelectOperation(int index) {
+    if (!view_) return;
+
+    const auto& operations = view_->cuttingRouteOperations();
+    if (index < 0 ||
+        static_cast<std::size_t>(index) >= operations.size()) {
+        return;
+    }
+
+    pauseLaserAnimation();
+
+    laserAnimationOperation_ = index;
+    laserAnimationProgress_ = 0.0;
+    laserContourProgress_ = 0.0;
+    view_->setCuttingAnimationProgress(0.0);
+    view_->setCuttingAnimationOperationProgress(index, 0.0);
+    if (laserContourProgressSlider_) {
+        QSignalBlocker blocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(0);
+    }
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::laserSetContourProgress(double progress) {
+    if (!view_ || laserAnimationPlaying_) return;
+    if (laserAnimationOperation_ < 0 ||
+        static_cast<std::size_t>(laserAnimationOperation_) >=
+            view_->cuttingRouteOperations().size()) {
+        return;
+    }
+
+    laserContourProgress_ = std::clamp(progress, 0.0, 1.0);
+    if (laserContourProgressSlider_) {
+        QSignalBlocker blocker(laserContourProgressSlider_);
+        laserContourProgressSlider_->setValue(
+            static_cast<int>(std::lround(laserContourProgress_ * 100.0))
+        );
+    }
+
+    view_->setCuttingAnimationOperationProgress(
+        laserAnimationOperation_,
+        laserContourProgress_
+    );
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::laserContourStart() {
+    laserSetContourProgress(0.0);
+}
+
+void MainWindow::laserContourMiddle() {
+    laserSetContourProgress(0.5);
+}
+
+void MainWindow::laserContourEnd() {
+    laserSetContourProgress(1.0);
+}
+
+void MainWindow::laserContourStep(int direction) {
+    constexpr double step = 0.05;
+    laserSetContourProgress(
+        laserContourProgress_ + direction * step
+    );
+}
+
+void MainWindow::laserPreviousOperation() {
+    const auto& operations = view_->cuttingRouteOperations();
+    if (operations.empty()) return;
+
+    const int current =
+        laserAnimationOperation_ >= 0
+            ? laserAnimationOperation_
+            : 0;
+    const int target = std::max(0, current - 1);
+
+    laserSelectOperation(target);
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(target);
+    }
+}
+
+void MainWindow::laserNextOperation() {
+    const auto& operations = view_->cuttingRouteOperations();
+    if (operations.empty()) return;
+
+    const int current =
+        laserAnimationOperation_ >= 0
+            ? laserAnimationOperation_
+            : -1;
+    const int target = std::min(
+        static_cast<int>(operations.size()) - 1,
+        current + 1
+    );
+
+    laserSelectOperation(target);
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(target);
+    }
+}
+
+void MainWindow::toggleLaserAnimation() {
+    if (!cuttingRouteCheck_ ||
+        !cuttingRouteCheck_->isChecked() ||
+        result_.sheets.empty()) {
+        return;
+    }
+
+    if (laserAnimationProgress_ >= 1.0 - 1e-9) {
+        laserAnimationProgress_ = 0.0;
+        laserAnimationOperation_ = -1;
+        view_->setCuttingAnimationOperation(-1);
+    }
+
+    laserAnimationPlaying_ = true;
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->start();
+    }
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::pauseLaserAnimation() {
+    laserAnimationPlaying_ = false;
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->stop();
+    }
+    updateLaserAnimationUi();
+}
+
+void MainWindow::resetLaserAnimation() {
+    laserAnimationPlaying_ = false;
+    laserAnimationProgress_ = 1.0;
+    laserAnimationOperation_ = -1;
+    laserContourProgress_ = 0.0;
+
+    if (view_) {
+        view_->setCuttingAnimationOperation(-1);
+    }
+
+    if (laserOperationCombo_) {
+        QSignalBlocker blocker(laserOperationCombo_);
+        laserOperationCombo_->setCurrentIndex(-1);
+    }
+
+    if (laserAnimationTimer_) {
+        laserAnimationTimer_->stop();
+    }
+
+    if (view_) {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
+
+    updateLaserAnimationUi();
+}
+
+void MainWindow::advanceLaserAnimation() {
+    if (!laserAnimationPlaying_ ||
+        result_.sheets.empty() ||
+        !cuttingRouteCheck_ ||
+        !cuttingRouteCheck_->isChecked()) {
+        pauseLaserAnimation();
+        return;
+    }
+
+    const double speed =
+        laserSpeedCombo_
+            ? std::max(
+                0.25,
+                laserSpeedCombo_->currentData().toDouble()
+            )
+            : 1.0;
+
+    // About 20 seconds for a complete route at 1×. The animation is a
+    // visual replay; the real CAM cutting time is shown separately in the
+    // technology/result panel.
+    constexpr double kAnimationStepPerTick = 0.005;
+    laserAnimationProgress_ +=
+        kAnimationStepPerTick * speed;
+
+    if (laserAnimationProgress_ >= 1.0) {
+        laserAnimationProgress_ = 1.0;
+        laserAnimationOperation_ = -1;
+        view_->setCuttingAnimationOperation(-1);
+        laserAnimationPlaying_ = false;
+        if (laserAnimationTimer_) {
+            laserAnimationTimer_->stop();
+        }
+    }
+
+    if (view_) {
+        view_->setCuttingAnimationProgress(
+            laserAnimationProgress_
+        );
+    }
+
+    updateLaserAnimationUi();
+    refreshAdaptiveRepairView();
+}
+
+void MainWindow::updateLaserAnimationUi() {
+    const bool hasRoute =
+        cuttingRouteCheck_ &&
+        cuttingRouteCheck_->isChecked() &&
+        !result_.sheets.empty() &&
+        !cuttingRoute_.operations.empty();
+
+    if (laserPlayButton_) laserPlayButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserPauseButton_) laserPauseButton_->setEnabled(
+        hasRoute && laserAnimationPlaying_);
+    if (laserPrevButton_) laserPrevButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserNextButton_) laserNextButton_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+    if (laserOperationCombo_) laserOperationCombo_->setEnabled(
+        hasRoute && !laserAnimationPlaying_);
+
+    const bool hasSelectedContour =
+        hasRoute &&
+        !laserAnimationPlaying_ &&
+        laserAnimationOperation_ >= 0 &&
+        static_cast<std::size_t>(laserAnimationOperation_) <
+            cuttingRoute_.operations.size();
+
+    const auto setContourControl = [hasSelectedContour](QWidget* widget) {
+        if (widget) widget->setEnabled(hasSelectedContour);
+    };
+    setContourControl(laserContourStartButton_);
+    setContourControl(laserContourMiddleButton_);
+    setContourControl(laserContourEndButton_);
+    setContourControl(laserContourStepBackButton_);
+    setContourControl(laserContourStepForwardButton_);
+    if (laserContourProgressSlider_) {
+        laserContourProgressSlider_->setEnabled(hasSelectedContour);
+    }
+    if (laserResetButton_) laserResetButton_->setEnabled(hasRoute);
+    if (laserSpeedCombo_) laserSpeedCombo_->setEnabled(hasRoute);
+
+    if (!hasRoute) {
+        if (laserStageLabel_) {
+            laserStageLabel_->setText("Нет готовой раскладки для анимации");
+        }
+        return;
+    }
+
+    double elapsedSeconds = 0.0;
+    std::size_t activeOperation = 0;
+    if (laserAnimationOperation_ >= 0 &&
+        static_cast<std::size_t>(laserAnimationOperation_) <
+            cuttingRoute_.operations.size()) {
+        activeOperation =
+            static_cast<std::size_t>(laserAnimationOperation_);
+        for (std::size_t i = 0; i < activeOperation; ++i) {
+            elapsedSeconds += cuttingRoute_.operations[i].totalSeconds;
+        }
+        const auto& op = cuttingRoute_.operations[activeOperation];
+        const double p = std::clamp(laserContourProgress_, 0.0, 1.0);
+        elapsedSeconds += op.rapidSeconds +
+            op.pierceSeconds +
+            op.cuttingSeconds * p;
+    } else {
+        const double p = std::clamp(laserAnimationProgress_, 0.0, 1.0);
+        const double total = cuttingRoute_.totalSeconds;
+        elapsedSeconds = total * p;
+        const std::size_t operationCount = cuttingRoute_.operations.size();
+        if (operationCount == 0) {
+            activeOperation = 0;
+        } else {
+            const auto candidate = static_cast<std::size_t>(
+                std::floor(p * static_cast<double>(operationCount))
+            );
+            activeOperation = std::min(
+                operationCount - 1,
+                candidate
+            );
+        }
+    }
+
+    const double remainingSeconds =
+        std::max(0.0, cuttingRoute_.totalSeconds - elapsedSeconds);
+    const int percent =
+        static_cast<int>(std::lround(
+            std::clamp(laserAnimationProgress_, 0.0, 1.0) * 100.0
+        ));
+
+    const auto formatSeconds = [](double seconds) {
+        const auto whole = static_cast<long long>(std::llround(
+            std::max(0.0, seconds)
+        ));
+        const long long h = whole / 3600;
+        const long long m = (whole % 3600) / 60;
+        const long long sec = whole % 60;
+        if (h > 0) {
+            return QString("%1 ч %2 мин %3 с").arg(h).arg(m).arg(sec);
+        }
+        if (m > 0) {
+            return QString("%1 мин %2 с").arg(m).arg(sec);
+        }
+        return QString("%1 с").arg(sec);
+    };
+
+    QString stage;
+    if (laserAnimationOperation_ >= 0) {
+        const int contourPercent =
+            static_cast<int>(std::lround(
+                std::clamp(laserContourProgress_, 0.0, 1.0) * 100.0
+            ));
+        stage = QString("Операция %1 • контур %2%")
+            .arg(laserAnimationOperation_ + 1)
+            .arg(contourPercent);
+    } else if (percent >= 100) {
+        stage = "Готово • маршрут завершён";
+    } else if (percent <= 0) {
+        stage = "Старт • лазерная головка готова";
+    } else if (laserAnimationPlaying_) {
+        stage = "Выполнение маршрута";
+    } else {
+        stage = "Пауза";
+    }
+
+    if (laserStageLabel_) {
+        laserStageLabel_->setText(
+            QString("%1 • %2% • прошло %3 • осталось %4 • текущая операция %5")
+                .arg(stage)
+                .arg(percent)
+                .arg(formatSeconds(elapsedSeconds))
+                .arg(formatSeconds(remainingSeconds))
+                .arg(static_cast<qulonglong>(activeOperation + 1))
+        );
+    }
+}
+
+void MainWindow::stopCalculation(bool watchdogTriggered) {
+    if (!nestingController_) return;
+
+    if (watchdogTriggered) {
+        watchdogTriggered_ = true;
+        appendLog("GUI Watchdog: расчёт не отвечает — отправлен запрос отмены.");
+        progressDetails_->setText("Watchdog: остановка зависшего расчёта…");
+        statusBar()->showMessage("Watchdog: остановка расчёта…");
+    } else {
+        userCancelRequested_ = true;
+        appendLog("Пользователь запросил остановку расчёта.");
+        progressDetails_->setText("Остановка расчёта… ожидается завершение worker.");
+        statusBar()->showMessage("Остановка расчёта…");
+    }
+
+    nestingController_->requestCancel();
+    stopButton_->setEnabled(false);
+}
+
+void MainWindow::calculationWatchdogTick() {
+    if (!watcher_ || !watcher_->isRunning() || !nestingController_) {
+        if (calculationWatchdog_) calculationWatchdog_->stop();
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 elapsed = now - calculationStartedMs_;
+    const qint64 sinceProgress = now - lastProgressMs_;
+    const qint64 budgetMs =
+        static_cast<qint64>(timeBudgetSpin_->value()) * 1000;
+
+    // The engine owns the normal deadline. The GUI watchdog is a secondary
+    // safety net: it never kills a healthy long NFP operation merely because
+    // no iteration event arrived yet. It only enforces a hard GUI-side
+    // deadline with a grace period, while the UI remains responsive.
+    constexpr qint64 kDeadlineGraceMs = 10000;
+
+    if (!watchdogTriggered_ &&
+        elapsed >= budgetMs + kDeadlineGraceMs) {
+        stopCalculation(true);
+        return;
+    }
+
+    if (sinceProgress >= 15000) {
+        progressDetails_->setText(
+            QString("Расчёт продолжается… последний heartbeat %1 с назад.\n"
+                    "Стадия: %2\nWorker: %3 • листов: %4 • размещено: %5 • пропущено: %6")
+                .arg(static_cast<qlonglong>(sinceProgress / 1000))
+                .arg(lastProgressStage_.isEmpty() ? "unknown" : lastProgressStage_)
+                .arg(static_cast<qulonglong>(lastProgressWorker_ + 1))
+                .arg(static_cast<qulonglong>(lastProgressSheets_))
+                .arg(static_cast<qulonglong>(lastProgressPlaced_))
+                .arg(static_cast<qulonglong>(lastProgressSkipped_))
+        );
+    }
+
+    if (watchdogTriggered_) {
+        constexpr qint64 kCancelGraceMs = 10000;
+        if (elapsed >= budgetMs + kDeadlineGraceMs + kCancelGraceMs) {
+            progressDetails_->setText(
+                "Worker завершает отменённый расчёт… "
+                "ожидается безопасное завершение."
+            );
+        }
+    }
+}
+
 void MainWindow::setBusy(bool busy) {
     importButton_->setEnabled(!busy);
     calculateButton_->setEnabled(!busy && !instances_.empty());
+    repairButton_->setEnabled(
+        !busy &&
+        !instances_.empty() &&
+        !result_.sheets.empty() &&
+        !validation_.valid
+    );
     benchmarkButton_->setEnabled(!busy && !instances_.empty());
-    exportButton_->setEnabled(!busy && !result_.sheets.empty());
+    exportButton_->setEnabled(
+        !busy &&
+        !result_.sheets.empty() &&
+        validation_.pipelineValid
+    );
+    exportCamButton_->setEnabled(
+        !busy &&
+        validation_.pipelineValid &&
+        !cuttingRoute_.operations.empty()
+    );
+    benchmarkExportButton_->setEnabled(!busy && hasBenchmarkResult_);
 
-    progress_->setRange(0, busy ? 0 : 1);
-    if (!busy) progress_->setValue(0);
+    const bool hasRepairHistory =
+        !validation_.adaptiveHistory.empty();
+    if (repairPlayButton_) {
+        repairPlayButton_->setEnabled(
+            !busy &&
+            hasRepairHistory &&
+            !repairAnimationPlaying_
+        );
+    }
+    if (repairPauseButton_) {
+        repairPauseButton_->setEnabled(
+            !busy &&
+            hasRepairHistory &&
+            repairAnimationPlaying_
+        );
+    }
+    if (repairPrevButton_) {
+        repairPrevButton_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+    if (repairNextButton_) {
+        repairNextButton_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+    if (repairSpeedCombo_) {
+        repairSpeedCombo_->setEnabled(
+            !busy && hasRepairHistory
+        );
+    }
+
+    stopButton_->setEnabled(busy && nestingController_ != nullptr);
+
+    if (laserPlayButton_) {
+        laserPlayButton_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty() &&
+            !laserAnimationPlaying_
+        );
+    }
+    if (laserPauseButton_) {
+        laserPauseButton_->setEnabled(
+            !busy && laserAnimationPlaying_
+        );
+    }
+    if (laserResetButton_) {
+        laserResetButton_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty()
+        );
+    }
+    if (laserSpeedCombo_) {
+        laserSpeedCombo_->setEnabled(
+            !busy &&
+            cuttingRouteCheck_ &&
+            cuttingRouteCheck_->isChecked() &&
+            !result_.sheets.empty()
+        );
+    }
 
     if (busy) {
+        progress_->setRange(0, 0);
         statusBar()->showMessage("Выполняется расчёт…");
     } else {
+        progress_->setRange(0, 100);
         statusBar()->showMessage("Готово");
     }
 }

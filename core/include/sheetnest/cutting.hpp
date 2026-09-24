@@ -19,6 +19,24 @@ struct CuttingParameters {
     std::string assistGas;
 };
 
+struct TechnologyRow {
+    Material material{Material::CarbonSteel};
+    double thicknessMm{};
+    double speedMMin{};
+    std::string assistGas;
+};
+
+struct TechnologyValidationReport {
+    bool valid{true};
+    std::size_t rows{};
+    std::size_t invalidRows{};
+    std::size_t duplicateRows{};
+    std::vector<std::string> issues;
+};
+
+std::vector<TechnologyRow> bodor3kWTechnologyTable();
+TechnologyValidationReport validateBodor3kWTechnology();
+
 struct CutContour {
     std::string id;
     double lengthMm{};

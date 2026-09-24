@@ -1,3 +1,219 @@
 #include "sheetnest/cutting_path.hpp"
+#include <algorithm>
 #include <cmath>
-namespace sheetnest{static double d(Point a,Point b){return std::hypot(a.x-b.x,a.y-b.y);}CuttingPath planCuttingPath(const std::vector<Polygon>&cs,const CuttingParameters&p,const PathOptions&o){CuttingPath r;Point h{};std::vector<bool>u(cs.size());for(size_t k=0;k<cs.size();++k){size_t bi=cs.size();double bd=1e100;for(size_t i=0;i<cs.size();++i)if(!u[i]&&!cs[i].empty()){double z=d(h,cs[i][0]);if(z<bd)bd=z,bi=i;}if(bi==cs.size())break;u[bi]=true;auto&g=cs[bi];auto s=g.front();r.moves.push_back({CutType::Rapid,h,s,bd,o.rapidSpeedMMin});r.totalRapidLengthMm+=bd;r.moves.push_back({CutType::Pierce,s,s,0,p.speedMMin});++r.pierces;for(size_t i=0;i<g.size();++i){auto a=g[i],b=g[(i+1)%g.size()];auto z=d(a,b);r.moves.push_back({CutType::Cut,a,b,z,p.speedMMin});r.totalCutLengthMm+=z;}h=s;}return r;}CuttingEstimate estimateCuttingPath(const CuttingPath&p,const CuttingParameters&c,const PathOptions&o){CuttingEstimate e;e.parameters=c;e.contourLengthMm=p.totalCutLengthMm;e.pierces=p.pierces;e.cuttingMinutes=c.speedMMin>0?p.totalCutLengthMm/(c.speedMMin*1000):0;e.rapidMinutes=o.rapidSpeedMMin>0?p.totalRapidLengthMm/(o.rapidSpeedMMin*1000):0;e.piercingMinutes=p.pierces*o.pierceSeconds/60;e.totalMinutes=e.cuttingMinutes+e.rapidMinutes+e.piercingMinutes;return e;}}
+#include <limits>
+
+namespace sheetnest {
+
+static double distance(Point a, Point b) {
+    return std::hypot(a.x - b.x, a.y - b.y);
+}
+
+static void appendOperation(
+    CuttingPath& result,
+    const CuttingContour& source,
+    std::size_t operationIndex,
+    Point& head,
+    const CuttingParameters& parameters,
+    const PathOptions& options
+) {
+    const auto& contour = source.polygon;
+    if (contour.empty()) return;
+
+    const Point start = contour.front();
+    const double rapidLength = distance(head, start);
+    const double rapidSeconds =
+        options.rapidSpeedMMin > 0.0
+            ? rapidLength / (options.rapidSpeedMMin * 1000.0 / 60.0)
+            : 0.0;
+
+    double cutLength = 0.0;
+    for (std::size_t i = 0; i < contour.size(); ++i) {
+        cutLength += distance(contour[i], contour[(i + 1) % contour.size()]);
+    }
+
+    const double cuttingSeconds =
+        parameters.speedMMin > 0.0
+            ? cutLength / (parameters.speedMMin * 1000.0 / 60.0)
+            : 0.0;
+
+    const double pierceSeconds = std::max(0.0, options.pierceSeconds);
+    const double totalSeconds =
+        rapidSeconds + pierceSeconds + cuttingSeconds;
+
+    result.operations.push_back({
+        operationIndex,
+        source.sheetIndex,
+        source.instanceId,
+        source.contourIndex,
+        source.inner,
+        contour,
+        head,
+        start,
+        contour.back(),
+        cutLength,
+        rapidLength,
+        pierceSeconds,
+        cuttingSeconds,
+        rapidSeconds,
+        totalSeconds
+    });
+
+    if (rapidLength > 1e-9) {
+        result.moves.push_back({
+            CutType::Rapid,
+            head,
+            start,
+            rapidLength,
+            options.rapidSpeedMMin
+        });
+    }
+
+    result.moves.push_back({
+        CutType::Pierce,
+        start,
+        start,
+        0.0,
+        parameters.speedMMin
+    });
+
+    for (std::size_t i = 0; i < contour.size(); ++i) {
+        const Point from = contour[i];
+        const Point to = contour[(i + 1) % contour.size()];
+        result.moves.push_back({
+            CutType::Cut,
+            from,
+            to,
+            distance(from, to),
+            parameters.speedMMin
+        });
+    }
+
+    result.totalCutLengthMm += cutLength;
+    result.totalRapidLengthMm += rapidLength;
+    result.totalPiercingSeconds += pierceSeconds;
+    result.totalCuttingSeconds += cuttingSeconds;
+    result.totalRapidSeconds += rapidSeconds;
+    result.totalSeconds += totalSeconds;
+    ++result.pierces;
+    head = start;
+}
+
+CuttingPath planCuttingRoute(
+    const std::vector<CuttingContour>& contours,
+    const CuttingParameters& parameters,
+    const PathOptions& options
+) {
+    CuttingPath result;
+
+    std::size_t operationIndex = 0;
+    std::size_t sheetStart = 0;
+    while (sheetStart < contours.size()) {
+        const std::size_t sheetIndex = contours[sheetStart].sheetIndex;
+        std::size_t sheetEnd = sheetStart + 1;
+        while (sheetEnd < contours.size() &&
+               contours[sheetEnd].sheetIndex == sheetIndex) {
+            ++sheetEnd;
+        }
+
+        std::vector<std::size_t> order;
+        order.reserve(sheetEnd - sheetStart);
+        for (std::size_t i = sheetStart; i < sheetEnd; ++i) {
+            if (!contours[i].polygon.empty() &&
+                contours[i].polygon.size() >= 2) {
+                order.push_back(i);
+            }
+        }
+
+        Point head{};
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            std::size_t bestPos = k;
+            double bestDistance = std::numeric_limits<double>::infinity();
+
+            bool hasInnerRemaining = false;
+            if (options.innerContoursFirst) {
+                for (std::size_t pos = k; pos < order.size(); ++pos) {
+                    if (contours[order[pos]].inner) {
+                        hasInnerRemaining = true;
+                        break;
+                    }
+                }
+            }
+
+            for (std::size_t pos = k; pos < order.size(); ++pos) {
+                const auto index = order[pos];
+                if (hasInnerRemaining && !contours[index].inner) continue;
+                const double candidateDistance =
+                    distance(head, contours[index].polygon.front());
+                if (candidateDistance < bestDistance - 1e-9 ||
+                    (std::abs(candidateDistance - bestDistance) <= 1e-9 &&
+                     index < order[bestPos])) {
+                    bestDistance = candidateDistance;
+                    bestPos = pos;
+                }
+            }
+
+            std::swap(order[k], order[bestPos]);
+            appendOperation(
+                result,
+                contours[order[k]],
+                operationIndex++,
+                head,
+                parameters,
+                options
+            );
+        }
+
+        sheetStart = sheetEnd;
+    }
+
+    return result;
+}
+
+CuttingPath planCuttingPath(
+    const std::vector<Polygon>& contours,
+    const CuttingParameters& parameters,
+    const PathOptions& options
+) {
+    std::vector<CuttingContour> inputs;
+    inputs.reserve(contours.size());
+    for (std::size_t i = 0; i < contours.size(); ++i) {
+        inputs.push_back({
+            0,
+            {},
+            i,
+            false,
+            contours[i]
+        });
+    }
+    return planCuttingRoute(inputs, parameters, options);
+}
+
+CuttingEstimate estimateCuttingPath(
+    const CuttingPath& path,
+    const CuttingParameters& parameters,
+    const PathOptions& options
+) {
+    CuttingEstimate result;
+    result.parameters = parameters;
+    result.contourLengthMm = path.totalCutLengthMm;
+    result.pierces = path.pierces;
+
+    result.cuttingMinutes = parameters.speedMMin > 0.0
+        ? path.totalCutLengthMm / (parameters.speedMMin * 1000.0)
+        : 0.0;
+    result.rapidMinutes = options.rapidSpeedMMin > 0.0
+        ? path.totalRapidLengthMm / (options.rapidSpeedMMin * 1000.0)
+        : 0.0;
+    result.piercingMinutes =
+        path.totalPiercingSeconds / 60.0;
+    result.totalMinutes =
+        path.totalSeconds > 0.0
+            ? path.totalSeconds / 60.0
+            : result.cuttingMinutes +
+              result.rapidMinutes +
+              result.piercingMinutes;
+    return result;
+}
+
+} // namespace sheetnest

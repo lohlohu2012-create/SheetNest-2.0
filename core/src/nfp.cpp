@@ -19,7 +19,7 @@ namespace {
 constexpr double kEps = 1e-9;
 constexpr double kPointEps = 1e-8;
 constexpr double kQuant = 1e6;
-constexpr std::size_t kMaxCacheEntries = 2048;
+constexpr std::size_t kMaxCacheEntries = 4096;
 
 struct SegmentPiece {
     Point a{};
@@ -313,7 +313,8 @@ Point outwardNormal(
 }
 
 std::vector<SegmentPiece> unionBoundaryPieces(
-    const std::vector<Polygon>& polygons
+    const std::vector<Polygon>& polygons,
+    const NfpRunControl* control
 ) {
     std::vector<SegmentPiece> retained;
     if (polygons.empty()) return retained;
@@ -333,6 +334,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
     };
 
     for (std::size_t polyIndex = 0; polyIndex < polygons.size(); ++polyIndex) {
+        if (control && control->stop()) return retained;
         const Polygon polygon = cleanPolygon(polygons[polyIndex]);
         if (polygon.size() < 3) continue;
 
@@ -340,6 +342,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
         if (std::abs(area) <= kEps) continue;
 
         for (std::size_t edgeIndex = 0; edgeIndex < polygon.size(); ++edgeIndex) {
+            if (control && control->stop()) return retained;
             const Point a = polygon[edgeIndex];
             const Point b = polygon[(edgeIndex + 1) % polygon.size()];
             const Point edge{b.x - a.x, b.y - a.y};
@@ -356,6 +359,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
             const Point outward = outwardNormal(a, b, area);
 
             for (std::size_t p = 1; p < parameters.size(); ++p) {
+                if (control && control->stop()) return retained;
                 const double t0 = parameters[p - 1];
                 const double t1 = parameters[p];
                 if (t1 - t0 <= 1e-10) continue;
@@ -377,6 +381,7 @@ std::vector<SegmentPiece> unionBoundaryPieces(
                 bool onBoundaryOther = false;
 
                 for (const auto& other : others) {
+                    if (control && control->stop()) return retained;
                     if (pointInPolygonInclusive(mid, other)) {
                         onBoundaryOther = false;
                         strictlyInsideOther = true;
@@ -432,6 +437,10 @@ std::vector<SegmentPiece> unionBoundaryPieces(
         }
     }
 
+    if (control && retained.size() > control->maxUnionSegments) {
+        control->complexityFallback();
+        retained.clear();
+    }
     return retained;
 }
 
@@ -549,7 +558,8 @@ std::vector<Polygon> assembleBoundaryLoops(
 }
 
 std::vector<Polygon> unionPolygons(
-    const std::vector<Polygon>& polygons
+    const std::vector<Polygon>& polygons,
+    const NfpRunControl* control
 ) {
     std::vector<Polygon> cleaned;
     cleaned.reserve(polygons.size());
@@ -564,38 +574,164 @@ std::vector<Polygon> unionPolygons(
     if (cleaned.empty()) return {};
     if (cleaned.size() == 1) return cleaned;
 
-    const auto boundary = unionBoundaryPieces(cleaned);
+    const auto boundary = unionBoundaryPieces(cleaned, control);
     return assembleBoundaryLoops(boundary);
+}
+
+std::vector<Polygon> conservativeConvexFallback(const Polygon& polygon) {
+    Polygon cleaned = cleanPolygon(polygon);
+    if (cleaned.size() < 3) return {};
+
+    Polygon hull = convexHull(std::move(cleaned));
+    if (hull.size() >= 3 && std::abs(signedArea(hull)) > kEps) {
+        return {std::move(hull)};
+    }
+
+    const Bounds b = bounds(polygon);
+    if (b.width() <= kPointEps || b.height() <= kPointEps) return {};
+
+    return {Polygon{
+        {b.minX, b.minY},
+        {b.maxX, b.minY},
+        {b.maxX, b.maxY},
+        {b.minX, b.maxY}
+    }};
+}
+
+std::vector<Polygon> conservativeNfpFallback(
+    const Polygon& fixed,
+    const Polygon& moving,
+    int rotation
+) {
+    const auto fixedFallback = conservativeConvexFallback(fixed);
+    const auto movingFallback = conservativeConvexFallback(
+        rotate(moving, rotation)
+    );
+    if (fixedFallback.empty() || movingFallback.empty()) return {};
+
+    const auto fallback = minkowskiConvexSum(
+        fixedFallback.front(),
+        reflected(movingFallback.front())
+    );
+    if (fallback.size() < 3) return {};
+    return {fallback};
+}
+
+std::vector<Polygon> decomposeWithFallback(
+    const Polygon& polygon,
+    const NfpRunControl* control
+) {
+    if (control && control->stop()) return conservativeConvexFallback(polygon);
+    if (control && polygon.size() > control->maxInputVertices) {
+        control->complexityFallback();
+        return conservativeConvexFallback(polygon);
+    }
+    auto pieces = convexDecompose(polygon, control);
+    if (!pieces.empty() &&
+        (!control || pieces.size() <= control->maxConvexPieces)) return pieces;
+    if (control && pieces.size() > control->maxConvexPieces) {
+        control->complexityFallback();
+    }
+
+    // A malformed/near-degenerate contour must not collapse the NFP stage to
+    // zero candidates. The convex-hull fallback is deliberately conservative:
+    // it may reject some valid concave placements, but it never authorizes an
+    // overlap. The nesting layer still performs exact true-shape validation
+    // and can enter its geometric grid recovery path when needed.
+    return conservativeConvexFallback(polygon);
 }
 
 std::vector<Polygon> computeUnionNfp(
     const Polygon& fixed,
-    const Polygon& moving
+    const Polygon& moving,
+    const NfpRunControl* control
 ) {
-    const auto fixedPieces = convexDecompose(fixed);
-    const auto movingPieces = convexDecompose(moving);
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, 0);
+    }
+    const auto fixedPieces = decomposeWithFallback(fixed, control);
+    const auto movingPieces = decomposeWithFallback(moving, control);
 
     std::vector<Polygon> pairwise;
     pairwise.reserve(fixedPieces.size() * movingPieces.size());
 
     for (const auto& fixedPiece : fixedPieces) {
+        if (control && control->stop()) {
+            return conservativeNfpFallback(fixed, moving, 0);
+        }
+        if (control && pairwise.size() >= control->maxPairwisePolygons) {
+            control->complexityFallback();
+            return conservativeNfpFallback(fixed, moving, 0);
+        }
         for (const auto& movingPiece : movingPieces) {
+            if (control && control->stop()) {
+                return conservativeNfpFallback(fixed, moving, 0);
+            }
             const auto reflectedPiece = reflected(movingPiece);
             const auto nfp = minkowskiConvexSum(
                 fixedPiece,
                 reflectedPiece
             );
-            if (nfp.size() >= 3) pairwise.push_back(nfp);
+            if (nfp.size() >= 3) {
+                pairwise.push_back(nfp);
+                if (control && pairwise.size() >= control->maxPairwisePolygons) {
+                    control->complexityFallback();
+                    return conservativeNfpFallback(fixed, moving, 0);
+                }
+            }
         }
     }
 
-    return unionPolygons(pairwise);
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, 0);
+    }
+    auto unionResult = unionPolygons(pairwise, control);
+    if (!unionResult.empty()) return unionResult;
+
+    // Last-resort conservative NFP. This keeps the placement pipeline alive
+    // for numerically pathological contours instead of returning an empty
+    // forbidden region and producing parsed=1/candidates=0 diagnostics.
+    return conservativeNfpFallback(fixed, moving, 0);
 }
 
 } // namespace
 
-std::vector<Polygon> convexDecompose(const Polygon& input) {
+std::vector<Polygon> convexDecompose(
+    const Polygon& input,
+    const NfpRunControl* control
+) {
     Polygon polygon = cleanPolygon(input);
+    if (polygon.size() < 3) return {};
+
+    // DXF chains often contain runs of collinear segments. Removing only
+    // collinear interior vertices makes ear clipping deterministic without
+    // changing the represented simple polygon.
+    bool removedCollinear = true;
+    while (removedCollinear && polygon.size() > 3) {
+        if (control && control->stop()) return {};
+        removedCollinear = false;
+        for (std::size_t i = 0; i < polygon.size(); ++i) {
+            if (control && control->stop()) return {};
+            const std::size_t prev =
+                (i + polygon.size() - 1) % polygon.size();
+            const std::size_t next =
+                (i + 1) % polygon.size();
+
+            if (std::abs(cross(
+                    polygon[prev],
+                    polygon[i],
+                    polygon[next]
+                )) <= 1e-10) {
+                polygon.erase(
+                    polygon.begin() +
+                    static_cast<std::ptrdiff_t>(i)
+                );
+                removedCollinear = true;
+                break;
+            }
+        }
+    }
+
     if (polygon.size() < 3) return {};
 
     if (signedArea(polygon) < 0.0) {
@@ -613,9 +749,11 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
     std::size_t guard = 0;
     while (indices.size() > 3 &&
            guard++ < polygon.size() * polygon.size()) {
+        if (control && control->stop()) return {};
         bool clipped = false;
 
         for (std::size_t i = 0; i < indices.size(); ++i) {
+            if (control && control->stop()) return {};
             const std::size_t ia =
                 indices[(i + indices.size() - 1) % indices.size()];
             const std::size_t ib = indices[i];
@@ -629,6 +767,7 @@ std::vector<Polygon> convexDecompose(const Polygon& input) {
 
             bool containsOther = false;
             for (const auto idx : indices) {
+                if (control && control->stop()) return {};
                 if (idx == ia || idx == ib || idx == ic) continue;
                 if (pointInTriangle(polygon[idx], a, b, c)) {
                     containsOther = true;
@@ -682,10 +821,15 @@ std::vector<Polygon> noFitPolygons(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     const int normalizedRotation =
         ((rotation % 360) + 360) % 360;
+
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, normalizedRotation);
+    }
 
     const std::string key = makeCacheKey(
         fixed,
@@ -695,42 +839,55 @@ std::vector<Polygon> noFitPolygons(
     );
 
     CacheStore& store = cacheStore();
+    std::vector<Polygon> cachedPolygons;
+    bool cacheHit = false;
     {
         std::lock_guard<std::mutex> lock(store.mutex);
         const auto it = store.entries.find(key);
         if (it != store.entries.end()) {
             ++store.hits;
-
-            const auto [fixedCanonical, fixedOrigin] = canonicalize(fixed);
-            const auto [movingCanonical, movingOrigin] =
-                canonicalize(rotate(moving, normalizedRotation));
-
-            (void)fixedCanonical;
-            return [&] {
-                std::vector<Polygon> restored;
-                restored.reserve(it->second.polygons.size());
-
-                const double dx = fixedOrigin.x - movingOrigin.x;
-                const double dy = fixedOrigin.y - movingOrigin.y;
-
-                for (const auto& polygon : it->second.polygons) {
-                    restored.push_back(translate(polygon, dx, dy));
-                }
-                return restored;
-            }();
+            if (control && control->cacheHitCount) {
+                ++(*control->cacheHitCount);
+            }
+            cachedPolygons = it->second.polygons;
+            cacheHit = true;
+        } else {
+            ++store.misses;
+            if (control && control->cacheMissCount) {
+                ++(*control->cacheMissCount);
+            }
         }
-
-        ++store.misses;
     }
 
     const auto [fixedCanonical, fixedOrigin] = canonicalize(fixed);
     const auto [movingCanonical, movingOrigin] =
         canonicalize(rotate(moving, normalizedRotation));
 
+    if (cacheHit) {
+        std::vector<Polygon> restored;
+        restored.reserve(cachedPolygons.size());
+
+        const double dx = fixedOrigin.x - movingOrigin.x;
+        const double dy = fixedOrigin.y - movingOrigin.y;
+
+        for (const auto& polygon : cachedPolygons) {
+            restored.push_back(translate(polygon, dx, dy));
+        }
+        return restored;
+    }
+
     const auto computed = computeUnionNfp(
         fixedCanonical,
-        movingCanonical
+        movingCanonical,
+        control
     );
+
+    // A deadline is request-scoped and must never poison the shared cache with
+    // an incomplete/partial NFP. Return a conservative fallback and leave the
+    // normal cache untouched when the guard stopped the computation.
+    if (control && control->stop()) {
+        return conservativeNfpFallback(fixed, moving, normalizedRotation);
+    }
 
     {
         std::lock_guard<std::mutex> lock(store.mutex);
@@ -875,7 +1032,8 @@ std::vector<Point> noFitVertices(
     const Polygon& fixed,
     const Polygon& moving,
     int rotation,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     std::vector<Point> vertices;
 
@@ -883,7 +1041,8 @@ std::vector<Point> noFitVertices(
         fixed,
         moving,
         rotation,
-        clearanceMm
+        clearanceMm,
+        control
     );
 
     vertices.reserve(
@@ -948,11 +1107,12 @@ FeasibilityRegion feasibilityRegion(
     double minY,
     double maxX,
     double maxY,
-    double clearanceMm
+    double clearanceMm,
+    const NfpRunControl* control
 ) {
     FeasibilityRegion region;
 
-    if (maxX <= minX || maxY <= minY ||
+    if (maxX < minX - kPointEps || maxY < minY - kPointEps ||
         fixed.size() < 3 || moving.size() < 3) {
         return region;
     }
@@ -964,11 +1124,15 @@ FeasibilityRegion feasibilityRegion(
         fixed,
         moving,
         rotation,
-        0.0
+        0.0,
+        control
     );
 
     const double safeGap = std::max(1e-7, clearanceMm);
 
+    // Edge offsets alone do not describe the complete Euclidean clearance
+    // boundary at NFP vertices. Add sampled circular joins around each
+    // forbidden vertex. Candidates remain subject to exact collision checks.
     for (const auto& polygon : forbidden) {
         const auto segments = offsetBoundary(
             polygon,
@@ -983,6 +1147,49 @@ FeasibilityRegion feasibilityRegion(
             segments.begin(),
             segments.end()
         );
+
+        if (safeGap > 1e-7) {
+            constexpr int kArcSamples = 16;
+            const double twoPi =
+                2.0 * 3.14159265358979323846;
+
+            for (const auto& vertex : polygon) {
+                Point previous{};
+                bool hasPrevious = false;
+
+                for (int sample = 0;
+                     sample <= kArcSamples;
+                     ++sample) {
+                    const double angle =
+                        twoPi *
+                        static_cast<double>(sample) /
+                        static_cast<double>(kArcSamples);
+
+                    const Point current{
+                        vertex.x + std::cos(angle) * safeGap,
+                        vertex.y + std::sin(angle) * safeGap
+                    };
+
+                    if (hasPrevious) {
+                        Point a = previous;
+                        Point b = current;
+                        if (clipSegmentToRect(
+                                a,
+                                b,
+                                minX,
+                                minY,
+                                maxX,
+                                maxY
+                            )) {
+                            region.boundary.push_back({a, b});
+                        }
+                    }
+
+                    previous = current;
+                    hasPrevious = true;
+                }
+            }
+        }
     }
 
     const Polygon sheet{
@@ -1058,25 +1265,109 @@ std::vector<Point> pointsOnFeasibilityBoundary(
         points.push_back(p);
     };
 
-    // Every segment gets at least one analytically best point. This avoids
-    // losing an entire long NFP edge just because a global sampling budget is
-    // tight. The point is chosen by the current lexicographic objective.
+    // When the number of segments exceeds the global budget, do not
+    // discard whole spatial regions merely because their segments are short.
+    // The candidate budget is deliberately split between:
+    //   1) spatially stratified segments covering the full boundary order;
+    //   2) the longest segments, which preserve dense coverage on large
+    //      feasibility edges.
+    // Each selected segment contributes an endpoint and, when useful, an
+    // interior midpoint. This keeps the search continuous without allowing
+    // one long edge to monopolize the candidate budget.
     if (segments.size() >= budget) {
-        std::nth_element(
-            segments.begin(),
-            segments.begin() +
-                static_cast<std::ptrdiff_t>(
-                    std::min<std::size_t>(segments.size(), budget) - 1
-                ),
-            segments.end(),
-            [](const SegmentWork& a, const SegmentWork& b) {
-                return std::tie(a.bestY, a.bestX) <
-                       std::tie(b.bestY, b.bestX);
+        const std::size_t selectedSegments =
+            std::max<std::size_t>(1, budget / 2);
+
+        std::vector<std::size_t> spatialOrder(segments.size());
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            spatialOrder[i] = i;
+        }
+
+        std::sort(
+            spatialOrder.begin(),
+            spatialOrder.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
+                }
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
             }
         );
-        segments.resize(std::min<std::size_t>(segments.size(), budget));
 
-        for (const auto& work : segments) {
+        std::vector<std::size_t> lengthOrder(segments.size());
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            lengthOrder[i] = i;
+        }
+
+        std::sort(
+            lengthOrder.begin(),
+            lengthOrder.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].length - segments[b].length) > kPointEps) {
+                    return segments[a].length > segments[b].length;
+                }
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
+                }
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
+            }
+        );
+
+        std::vector<std::size_t> selected;
+        selected.reserve(selectedSegments);
+        std::vector<bool> selectedFlags(segments.size(), false);
+
+        // First reserve half of the selected slots across the complete
+        // spatially ordered boundary. Evenly spaced indices guarantee that
+        // short/isolated feasibility segments remain visible.
+        const std::size_t spatialSlots =
+            std::max<std::size_t>(1, selectedSegments / 2);
+        for (std::size_t slot = 0;
+             slot < spatialSlots && selected.size() < selectedSegments;
+             ++slot) {
+            const std::size_t index =
+                (slot * segments.size()) /
+                std::max<std::size_t>(1, spatialSlots);
+            const std::size_t clamped =
+                std::min(index, segments.size() - 1);
+
+            if (!selectedFlags[spatialOrder[clamped]]) {
+                selected.push_back(spatialOrder[clamped]);
+                selectedFlags[spatialOrder[clamped]] = true;
+            }
+        }
+
+        // Fill the remaining slots with the longest segments, but only after
+        // the global boundary coverage has been reserved.
+        for (const auto index : lengthOrder) {
+            if (selected.size() >= selectedSegments) break;
+            if (selectedFlags[index]) continue;
+            selected.push_back(index);
+            selectedFlags[index] = true;
+        }
+
+        std::sort(
+            selected.begin(),
+            selected.end(),
+            [&](std::size_t a, std::size_t b) {
+                if (std::abs(segments[a].bestY - segments[b].bestY) > kPointEps) {
+                    return segments[a].bestY < segments[b].bestY;
+                }
+                if (std::abs(segments[a].bestX - segments[b].bestX) > kPointEps) {
+                    return segments[a].bestX < segments[b].bestX;
+                }
+                return a < b;
+            }
+        );
+
+        for (const auto index : selected) {
+            const auto& work = segments[index];
             const Point a = work.segment.a;
             const Point b = work.segment.b;
 
@@ -1085,6 +1376,17 @@ std::vector<Point> pointsOnFeasibilityBoundary(
             } else {
                 appendPoint(a);
             }
+        }
+
+        for (const auto index : selected) {
+            if (points.size() >= budget) break;
+            const auto& work = segments[index];
+            if (work.length + kPointEps < spacing) continue;
+
+            appendPoint({
+                (work.segment.a.x + work.segment.b.x) * 0.5,
+                (work.segment.a.y + work.segment.b.y) * 0.5
+            });
         }
     } else {
         for (const auto& work : segments) {

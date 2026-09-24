@@ -1,9 +1,73 @@
 #include "sheetnest/dxf_model.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <string>
 
 namespace sheetnest {
+
+
+DxfPreflightReport preflightDxf(const DxfDocument& document) {
+    DxfPreflightReport report;
+    report.minArea = std::numeric_limits<double>::max();
+
+    for (std::size_t i = 0; i < document.contours.size(); ++i) {
+        const auto& contour = document.contours[i];
+        if (contour.outer.size() < 3) {
+            ++report.emptyParts;
+            report.issues.push_back(
+                "Контур " + std::to_string(i + 1) +
+                " содержит менее 3 вершин."
+            );
+            continue;
+        }
+
+        double area = 0.0;
+        for (std::size_t j = 0; j < contour.outer.size(); ++j) {
+            const auto& a = contour.outer[j];
+            const auto& b = contour.outer[(j + 1) % contour.outer.size()];
+            if (!std::isfinite(a.x) || !std::isfinite(a.y) ||
+                !std::isfinite(b.x) || !std::isfinite(b.y)) {
+                ++report.invalidParts;
+                report.issues.push_back(
+                    "Контур " + std::to_string(i + 1) +
+                    " содержит нечисловые координаты."
+                );
+                area = 0.0;
+                break;
+            }
+            area += a.x * b.y - b.x * a.y;
+        }
+        area = std::abs(area) * 0.5;
+
+        if (area <= 1e-7) {
+            ++report.invalidParts;
+            report.issues.push_back(
+                "Контур " + std::to_string(i + 1) +
+                " имеет нулевую площадь."
+            );
+            continue;
+        }
+
+        ++report.validParts;
+        report.minArea = std::min(report.minArea, area);
+        report.maxArea = std::max(report.maxArea, area);
+    }
+
+    if (report.validParts == 0) {
+        report.minArea = 0.0;
+        report.maxArea = 0.0;
+    }
+
+    report.valid =
+        report.validParts == document.contours.size() &&
+        !document.contours.empty() &&
+        !document.contours.empty() &&
+        report.invalidParts == 0;
+
+    return report;
+}
 
 std::vector<Part> partsFromDxf(const DxfDocument& document) {
     std::vector<Part> parts;

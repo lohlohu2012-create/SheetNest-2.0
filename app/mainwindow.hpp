@@ -5,10 +5,14 @@
 
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting.hpp"
+#include "sheetnest/cutting_path.hpp"
+#include "sheetnest/cam_export.hpp"
 #include "sheetnest/diagnostics.hpp"
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/parallel_nesting.hpp"
+#include "sheetnest/production_validation.hpp"
 
 class QComboBox;
 class QCheckBox;
@@ -17,17 +21,22 @@ class QPlainTextEdit;
 class QLabel;
 class QProgressBar;
 class QSpinBox;
+class QSlider;
 class QPushButton;
 class QTableWidget;
 class QTabWidget;
+class QTimer;
 
 class NestView;
 
 struct CalculationOutput {
     sheetnest::Result result;
     sheetnest::CuttingEstimate cutting;
+    sheetnest::CuttingPath cuttingRoute;
     sheetnest::CuttingParameters technology;
     std::vector<sheetnest::InstanceDiagnostic> diagnostics;
+    sheetnest::ProductionValidationReport validation;
+    sheetnest::ProductionPipelineReport pipeline;
 };
 
 Q_DECLARE_METATYPE(CalculationOutput)
@@ -42,21 +51,51 @@ private:
     void connectUi();
     void importDxf();
     void calculate();
+    void repairErrors();
     void benchmark();
     void exportDxf();
+    void exportCam();
     void populatePartTable();
     void populateDiagnostics();
     void populateBenchmark(const sheetnest::BenchmarkResult& benchmarkResult);
+    void populateProductionValidation();
+    void exportBenchmarkResults();
     void updateTechnologyPreview();
     void refreshInstances();
     void appendLog(const QString& text);
+    void updateProgress(const sheetnest::NestingProgress& progress);
     void setBusy(bool busy);
+    void stopCalculation(bool watchdogTriggered = false);
+    void calculationWatchdogTick();
+    void refreshAdaptiveRepairView();
+    void resetAdaptiveRepairAnimation();
+    void toggleAdaptiveRepairAnimation();
+    void pauseAdaptiveRepairAnimation();
+    void stepAdaptiveRepairAnimation(int direction);
+    void advanceAdaptiveRepairAnimation();
+    void updateAdaptiveRepairAnimationUi();
+    void toggleLaserAnimation();
+    void pauseLaserAnimation();
+    void resetLaserAnimation();
+    void advanceLaserAnimation();
+    void updateLaserAnimationUi();
+    void laserNextOperation();
+    void laserPreviousOperation();
+    void laserSelectOperation(int index);
+    void laserSetContourProgress(double progress);
+    void laserContourStart();
+    void laserContourMiddle();
+    void laserContourEnd();
+    void laserContourStep(int direction);
+    void populateLaserOperationSelector();
 
     CalculationOutput performCalculation(
         std::vector<sheetnest::Instance> instances,
         sheetnest::Sheet sheet,
         sheetnest::Options options,
-        sheetnest::CuttingParameters technology
+        sheetnest::CuttingParameters technology,
+        sheetnest::ParallelNestingOptions parallelOptions,
+        std::shared_ptr<sheetnest::ParallelNestingController> controller
     ) const;
 
     sheetnest::BenchmarkResult performBenchmark(
@@ -74,6 +113,7 @@ private:
     sheetnest::Sheet sheet_;
     sheetnest::Options options_;
     sheetnest::CuttingParameters technology_;
+    sheetnest::CuttingPath cuttingRoute_;
     QString currentFile_;
 
     NestView* view_{};
@@ -84,27 +124,89 @@ private:
     QDoubleSpinBox* marginSpin_{};
     QDoubleSpinBox* gapSpin_{};
     QSpinBox* iterationsSpin_{};
+    QSpinBox* workersSpin_{};
+    QSpinBox* timeBudgetSpin_{};
 
     QCheckBox* rotation0_{};
     QCheckBox* rotation90_{};
     QCheckBox* rotation180_{};
     QCheckBox* rotation270_{};
+    QCheckBox* cuttingRouteCheck_{};
+    QPushButton* laserPlayButton_{};
+    QPushButton* laserPauseButton_{};
+    QPushButton* laserResetButton_{};
+    QComboBox* laserSpeedCombo_{};
+    QComboBox* laserOperationCombo_{};
+    QPushButton* laserPrevButton_{};
+    QPushButton* laserNextButton_{};
+    QPushButton* laserContourStartButton_{};
+    QPushButton* laserContourMiddleButton_{};
+    QPushButton* laserContourEndButton_{};
+    QPushButton* laserContourStepBackButton_{};
+    QPushButton* laserContourStepForwardButton_{};
+    QSlider* laserContourProgressSlider_{};
+    QLabel* laserStageLabel_{};
 
     QLabel* fileLabel_{};
     QLabel* partCountLabel_{};
     QLabel* techLabel_{};
     QLabel* resultLabel_{};
+    QLabel* progressDetails_{};
     QProgressBar* progress_{};
     QPlainTextEdit* log_{};
     QTableWidget* partTable_{};
     QTableWidget* diagnosticsTable_{};
     QTableWidget* benchmarkTable_{};
+    QTableWidget* validatorTable_{};
+
+    QComboBox* repairRoundCombo_{};
+    QCheckBox* repairConflictLayer_{};
+    QCheckBox* repairExtractedLayer_{};
+    QCheckBox* repairMovedLayer_{};
+    QCheckBox* repairStationaryLayer_{};
+    QPushButton* repairPlayButton_{};
+    QPushButton* repairPauseButton_{};
+    QPushButton* repairPrevButton_{};
+    QPushButton* repairNextButton_{};
+    QComboBox* repairSpeedCombo_{};
+    QLabel* repairStageLabel_{};
 
     QPushButton* importButton_{};
     QPushButton* calculateButton_{};
+    QPushButton* repairButton_{};
     QPushButton* benchmarkButton_{};
+    QPushButton* benchmarkExportButton_{};
+    QPushButton* stopButton_{};
     QPushButton* exportButton_{};
+    QPushButton* exportCamButton_{};
 
+    sheetnest::BenchmarkResult lastBenchmarkResult_{};
+    bool hasBenchmarkResult_{false};
+    bool repairRequested_{false};
+    sheetnest::ProductionPipelineReport pipeline_{};
+    bool repairAnimationPlaying_{false};
+    bool repairAnimationSession_{false};
+    int repairAnimationFrame_{-1};
+    sheetnest::ProductionValidationReport validation_{};
+
+    QTimer* repairAnimationTimer_{};
+    QTimer* calculationWatchdog_{};
+    QTimer* laserAnimationTimer_{};
+    bool laserAnimationPlaying_{false};
+    double laserAnimationProgress_{1.0};
+    int laserAnimationOperation_{-1};
+    double laserContourProgress_{0.0};
+    qint64 calculationStartedMs_{0};
+    qint64 lastProgressMs_{0};
+    QString lastProgressStage_;
+    std::size_t lastProgressWorker_{0};
+    std::size_t lastProgressPlaced_{0};
+    std::size_t lastProgressSkipped_{0};
+    std::size_t lastProgressSheets_{0};
+    bool watchdogTriggered_{false};
+    bool userCancelRequested_{false};
+
+    std::shared_ptr<sheetnest::ParallelNestingController> nestingController_;
     QFutureWatcher<CalculationOutput>* watcher_{};
     QFutureWatcher<sheetnest::BenchmarkResult>* benchmarkWatcher_{};
 };
