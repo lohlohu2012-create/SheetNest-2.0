@@ -1881,54 +1881,80 @@ CalculationOutput MainWindow::performCalculation(
     routeOptions.pierceSeconds = 0.25;
     output.cutting = estimateCuttingPath(output.cuttingRoute, technology, routeOptions);
 
-    const auto camValidation = validateCuttingPath(output.cuttingRoute);
-    if (!camValidation.valid) {
-        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+    PathOptions pipelinePathOptions;
+    pipelinePathOptions.rapidSpeedMMin = 120.0;
+    pipelinePathOptions.pierceSeconds = 0.25;
+
+    const auto pipeline = validateProductionPipeline(
+        document_,
+        instances,
+        sheet,
+        options,
+        output.result,
+        technology,
+        pipelinePathOptions
+    );
+
+    output.validation = pipeline.nestingValidation;
+    output.validation.pipelineValid = pipeline.valid;
+    output.validation.pipelineStage =
+        pipeline.valid
+            ? ProductionPipelineStage::Complete
+            : pipeline.failedStage;
+    output.validation.pipelineMessage =
+        pipeline.valid
+            ? "Production Pipeline: COMPLETE."
+            : QString::fromStdString(
+                pipeline.failureReason
+            ).toStdString();
+
+    if (pipeline.camValidation.valid) {
         output.validation.pipelineMessage =
-            "CAM Validation: " + camValidation.message;
+            pipeline.valid
+                ? "Production Pipeline: COMPLETE."
+                : "Pipeline остановлен на этапе " +
+                    std::string(
+                        productionPipelineStageName(
+                            pipeline.failedStage
+                        )
+                    ) +
+                    ": " +
+                    pipeline.failureReason;
+    }
+
+    if (!pipeline.exportedDxf.empty()) {
+        appendLog(
+            QString("Production Pipeline: %1 • DXF=%2 bytes • CAM=%3 ops")
+                .arg(
+                    pipeline.valid ? "COMPLETE" : "FAIL"
+                )
+                .arg(
+                    static_cast<qulonglong>(
+                        pipeline.exportedBytes
+                    )
+                )
+                .arg(
+                    static_cast<qulonglong>(
+                        pipeline.camOperationCount
+                    )
+                )
+        );
     } else {
-        output.validation.pipelineStage = ProductionPipelineStage::CamValidation;
-        output.validation.pipelineMessage = "CAM Validation: OK.";
-    }
-
-    const auto exportedDxf =
-        exportNestDxf(output.result, instances, sheet);
-    if (exportedDxf.empty()) {
-        output.validation.pipelineStage = ProductionPipelineStage::Failed;
-        output.validation.pipelineMessage = "DXF Export: пустой результат.";
-    } else {
-        output.validation.pipelineStage = ProductionPipelineStage::DxfExport;
-        output.validation.pipelineMessage = "DXF Export: OK.";
-    }
-
-    if (!exportedDxf.empty()) {
-        const auto roundTripDocument = sheetnest::importDxf(exportedDxf);
-        const auto roundTripPreflight = preflightDxf(roundTripDocument);
-        if (!roundTripPreflight.valid) {
-            output.validation.pipelineStage = ProductionPipelineStage::Failed;
-            output.validation.pipelineMessage =
-                "DXF RoundTrip: " +
-                (roundTripPreflight.issues.empty()
-                    ? std::string("preflight не пройден.")
-                    : roundTripPreflight.issues.front());
-        } else {
-            output.validation.pipelineStage = ProductionPipelineStage::DxfRoundTrip;
-            output.validation.pipelineMessage = "DXF RoundTrip: OK.";
-        }
-    }
-
-    const bool geometryOk = output.validation.valid;
-    const bool camOk = camValidation.valid && !output.cuttingRoute.operations.empty();
-    const bool dxfOk = !exportedDxf.empty();
-    const bool roundTripOk = dxfOk && output.validation.pipelineStage == ProductionPipelineStage::DxfRoundTrip;
-    output.validation.pipelineValid =
-        geometryOk && camOk && dxfOk && roundTripOk;
-    if (output.validation.pipelineValid) {
-        output.validation.pipelineStage = ProductionPipelineStage::Complete;
-        output.validation.pipelineMessage =
-            "Production Pipeline: COMPLETE.";
-    } else if (output.validation.pipelineStage != ProductionPipelineStage::Failed) {
-        output.validation.pipelineStage = ProductionPipelineStage::Failed;
+        appendLog(
+            QString("Production Pipeline: FAIL • stage=%1 • %2")
+                .arg(
+                    QString::fromUtf8(
+                        productionPipelineStageName(
+                            pipeline.failedStage
+                        )
+                    )
+                )
+                .arg(
+                    QString::fromStdString(
+                        pipeline.failureReason
+                    )
+                )
+        );
     }
 
     output.diagnostics = diagnoseNest(instances, output.result);
