@@ -966,6 +966,97 @@ void testNfpHolePipeline() {
     assert(pipeline.completedStages.size() == 10);
 }
 
+
+void testNfpContinuousSearchApi() {
+    nfp::clearCache();
+
+    const Polygon fixed = rectangle(100.0, 40.0);
+    const Polygon moving = rectangle(20.0, 10.0);
+
+    std::size_t exactChecks = 0;
+    nfp::SearchOptions options;
+    options.boundarySpacingMm = 2.0;
+    options.maxCandidates = 64;
+    options.includeSheetBoundary = true;
+    options.includeNfpVertices = true;
+    options.isFeasible = [&](const Point& p) {
+        ++exactChecks;
+        // Exact validation is intentionally supplied by the caller. For this
+        // API regression we accept only points inside the requested search
+        // rectangle; the nesting engine can replace this callback with its
+        // true-shape collision/clearance predicate.
+        return p.x >= -1e-8 && p.x <= 120.0 + 1e-8 &&
+               p.y >= -1e-8 && p.y <= 60.0 + 1e-8;
+    };
+
+    const auto result = nfp::searchFeasibleBoundary(
+        fixed,
+        moving,
+        0,
+        0.0,
+        0.0,
+        120.0,
+        60.0,
+        2.0,
+        options
+    );
+
+    assert(!result.points.empty());
+    assert(result.points.size() <= options.maxCandidates);
+    assert(result.telemetry.generated > 0);
+    assert(result.telemetry.boundarySegments > 0);
+    assert(result.telemetry.boundarySamples > 0);
+    assert(result.telemetry.exactChecks == exactChecks);
+    assert(result.telemetry.feasible == result.points.size());
+    assert(result.telemetry.exactChecks >= result.telemetry.feasible);
+
+    bool sawNonVertexLikePoint = false;
+    const auto rawVertices = nfp::noFitVertices(fixed, moving);
+    for (const auto& candidate : result.points) {
+        bool isVertex = false;
+        for (const auto& vertex : rawVertices) {
+            if (std::hypot(
+                    candidate.x - vertex.x,
+                    candidate.y - vertex.y
+                ) <= 1e-7) {
+                isVertex = true;
+                break;
+            }
+        }
+        if (!isVertex) {
+            sawNonVertexLikePoint = true;
+            break;
+        }
+    }
+    assert(sawNonVertexLikePoint);
+
+    std::size_t stoppedCount = 0;
+    nfp::NfpRunControl stopGuard;
+    stopGuard.shouldStop = [&]() {
+        ++stoppedCount;
+        return true;
+    };
+
+    nfp::SearchOptions stoppedOptions;
+    stoppedOptions.maxCandidates = 32;
+    const auto stopped = nfp::searchFeasibleBoundary(
+        fixed,
+        moving,
+        0,
+        0.0,
+        0.0,
+        120.0,
+        60.0,
+        2.0,
+        stoppedOptions,
+        &stopGuard
+    );
+
+    assert(stopped.points.empty());
+    assert(stopped.telemetry.stopped);
+    assert(stoppedCount > 0);
+}
+
 void testNfpTimeoutRecovery() {
     auto control = std::make_shared<NestingRunControl>();
     control->deadline = std::chrono::steady_clock::now() +
@@ -3195,6 +3286,7 @@ int main(int argc, char** argv) {
     testFeasibilitySamplingBudget();
     testFeasibilitySegmentCoverage();
     testFeasibilityGap();
+    testNfpContinuousSearchApi();
     testNfpUnionAndCache();
     testNfpComplexContourMatrix();
     testNfpHolePipeline();
