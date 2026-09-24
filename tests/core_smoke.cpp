@@ -1273,6 +1273,149 @@ void testNfpAdaptiveNarrowCorridor() {
     assert(sawInterior);
 }
 
+
+static bool polygonFitsInside(const Polygon& part, const Polygon& container,
+                              double tx, double ty, double clearance = 0.0) {
+    for (const auto& p : part) {
+        Point q{p.x + tx, p.y + ty};
+        if (!pointInPolygon(q, container)) return false;
+    }
+    (void)clearance;
+    return true;
+}
+
+void testNfpLockKeyStressMatrix() {
+    const std::vector<double> widths{2.0, 3.0, 4.0, 6.0, 8.0};
+    const std::vector<double> gaps{0.0, 0.1, 0.5, 1.0};
+    for (double corridorWidth : widths) {
+        Polygon corridor{
+            {0,0},{120,0},{120,corridorWidth},
+            {72,corridorWidth},{72,24},
+            {48,24},{48,corridorWidth},{0,corridorWidth}
+        };
+        Polygon key{
+            {0,0},{6,0},{6,corridorWidth-0.5},
+            {4,corridorWidth-0.5},{4,10},
+            {2,10},{2,corridorWidth-0.5},{0,corridorWidth-0.5}
+        };
+
+        for (double gap : gaps) {
+            const auto region = nfp::feasibilityRegion(
+                corridor, key, 0,
+                -20,-20,140,50,gap
+            );
+            assert(!region.boundary.empty());
+
+            const auto sampled = nfp::pointsOnFeasibilityBoundary(
+                region, std::max(0.1, corridorWidth / 3.0), 1024, true
+            );
+            assert(!sampled.empty());
+
+            for (const auto& p : sampled) {
+                assert(std::isfinite(p.x) && std::isfinite(p.y));
+            }
+        }
+    }
+}
+
+void testNfpLockKeyRotationStress() {
+    const Polygon lock{
+        {0,0},{80,0},{80,10},{52,10},{52,30},
+        {28,30},{28,10},{0,10}
+    };
+    const Polygon key{
+        {0,0},{8,0},{8,5},{5,5},{5,12},{3,12},{3,5},{0,5}
+    };
+
+    for (int rotation = 0; rotation < 360; ++rotation) {
+        const auto polygons = nfp::noFitPolygons(
+            lock, key, rotation, 0.25
+        );
+        assert(!polygons.empty());
+        const auto report = nfp::validateNfp(polygons);
+        assert(report.valid);
+        for (const auto& polygon : polygons) {
+            for (const auto& p : polygon) {
+                assert(std::isfinite(p.x) && std::isfinite(p.y));
+            }
+        }
+    }
+}
+
+void testNfpNarrowPassageThreshold() {
+    const Polygon corridor{
+        {0,0},{100,0},{100,5},{60,5},
+        {60,30},{40,30},{40,5},{0,5}
+    };
+    const Polygon part = rectangle(8, 4);
+
+    const auto region = nfp::feasibilityRegion(
+        corridor, part, 0, -20,-20,120,60,0.25
+    );
+    assert(!region.boundary.empty());
+
+    const auto points = nfp::pointsOnFeasibilityBoundary(
+        region, 0.25, 4096, true
+    );
+    assert(points.size() > 4);
+
+    bool foundCorridorCandidate = false;
+    for (const auto& p : points) {
+        if (polygonFitsInside(part, corridor, p.x, p.y)) {
+            foundCorridorCandidate = true;
+            break;
+        }
+    }
+    assert(foundCorridorCandidate);
+}
+
+void testNfpLockKeyCandidateSearch() {
+    const Polygon lock{
+        {0,0},{90,0},{90,7},{58,7},{58,26},
+        {32,26},{32,7},{0,7}
+    };
+    const Polygon key{
+        {0,0},{6,0},{6,5},{4,5},{4,12},{2,12},{2,5},{0,5}
+    };
+
+    nfp::SearchOptions options;
+    options.boundarySpacingMm = 0.5;
+    options.maxCandidates = 2048;
+    options.includeSheetBoundary = false;
+    options.includeNfpVertices = true;
+    options.includeBoundaryMidpoints = true;
+
+    const auto result = nfp::searchFeasibleBoundary(
+        lock, key, 0, -20,-20,110,45,0.1, options
+    );
+    assert(!result.points.empty());
+    assert(result.telemetry.generated > 0);
+    assert(result.telemetry.boundarySamples > 0);
+    assert(result.telemetry.exactChecks >= result.points.size());
+}
+
+void testNfpLockKeyMetamorphicStress() {
+    const Polygon lock{
+        {0,0},{100,0},{100,6},{65,6},{65,28},
+        {35,28},{35,6},{0,6}
+    };
+    const Polygon key{
+        {0,0},{5,0},{5,4},{3.5,4},{3.5,10},
+        {1.5,10},{1.5,4},{0,4}
+    };
+
+    for (int rotation : {0, 45, 90, 135, 180, 225, 270, 315}) {
+        for (double gap : {0.0, 0.1, 0.25, 0.5, 1.0}) {
+            const auto polygons = nfp::noFitPolygons(
+                lock, key, rotation, gap
+            );
+            assert(!polygons.empty());
+            const auto report = nfp::validateNfp(polygons);
+            assert(report.valid);
+        }
+    }
+}
+
 void testNfpTimeoutRecovery() {
     auto control = std::make_shared<NestingRunControl>();
     control->deadline = std::chrono::steady_clock::now() +
@@ -3834,6 +3977,11 @@ int main(int argc, char** argv) {
     testNfpBoundaryTouchAndMinimumGap();
     testNfpLargeConcaveStress();
     testNfpAdaptiveNarrowCorridor();
+    testNfpLockKeyStressMatrix();
+    testNfpLockKeyRotationStress();
+    testNfpNarrowPassageThreshold();
+    testNfpLockKeyCandidateSearch();
+    testNfpLockKeyMetamorphicStress();
 
     testNfpComplexContourMatrix();
     testNfpHolePipeline();
