@@ -1,7 +1,7 @@
 #include "sheetnest/nesting.hpp"
-#include "sheetnest/nfp.hpp"
+#include "sheetnest/nfp.hpp"\n#include "sheetnest/nfp_search.hpp"\n#include "sheetnest/watchdog.hpp"
 
-#include <algorithm>
+#include <algorithm>\n#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -388,13 +388,18 @@ std::vector<Candidate> candidatesFor(
             nfp::FeasibilityRegion obstacleRegion = region;
             obstacleRegion.sheetBoundary.clear();
 
-            for (const auto& point :
-                 nfp::pointsOnFeasibilityBoundary(
-                     obstacleRegion,
-                     boundarySpacing,
-                     boundaryBudget,
-                     false
-                 )) {
+            nfp::SearchOptions searchOptions;
+            searchOptions.budgetMs = 250.0;
+            searchOptions.segmentSpacingMm = boundarySpacing;
+            searchOptions.maxCandidates = boundaryBudget;
+            searchOptions.includeSheetBoundary = false;
+
+            const auto search = nfp::searchFeasibilityRegion(
+                obstacleRegion,
+                searchOptions
+            );
+
+            for (const auto& point : search.candidates) {
                 result.push_back({
                     point.x,
                     point.y,
