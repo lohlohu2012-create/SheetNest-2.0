@@ -1284,6 +1284,84 @@ static bool polygonFitsInside(const Polygon& part, const Polygon& container,
     return true;
 }
 
+
+void testNfpBoundaryReconstructionStress() {
+    const std::vector<std::pair<Polygon, Polygon>> cases{
+        {
+            rectangle(30, 20),
+            rectangle(8, 6)
+        },
+        {
+            Polygon{{0,0},{50,0},{50,12},{28,12},{28,32},{0,32}},
+            Polygon{{0,0},{7,0},{7,5},{4,5},{4,10},{0,10}}
+        },
+        {
+            Polygon{{0,0},{70,0},{70,8},{48,8},{48,26},{22,26},{22,8},{0,8}},
+            Polygon{{0,0},{9,0},{9,6},{6,6},{6,14},{3,14},{3,6},{0,6}}
+        }
+    };
+
+    for (const auto& [fixed, moving] : cases) {
+        for (int rotation : {0, 17, 45, 90, 133, 180, 271, 359}) {
+            for (double clearance : {0.0, 0.1, 0.5, 2.0}) {
+                const auto loops = nfp::noFitPolygons(
+                    fixed, moving, rotation, clearance
+                );
+                assert(!loops.empty());
+
+                const auto report = nfp::validateNfp(loops);
+                assert(report.valid);
+                assert(report.openBoundarySegments == 0);
+                assert(report.degenerateLoops == 0);
+                assert(report.selfIntersectingLoops == 0);
+                assert(report.nonFiniteVertices == 0);
+
+                for (const auto& loop : loops) {
+                    assert(loop.size() >= 3);
+                    for (std::size_t i = 0; i < loop.size(); ++i) {
+                        const auto& a = loop[i];
+                        const auto& b = loop[(i + 1) % loop.size()];
+                        assert(std::isfinite(a.x) && std::isfinite(a.y));
+                        assert(std::isfinite(b.x) && std::isfinite(b.y));
+                        assert(std::hypot(a.x-b.x, a.y-b.y) > 1e-9);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void testNfpBoundaryReconstructionTouchingAndOverlap() {
+    const Polygon a{{0,0},{20,0},{20,20},{0,20}};
+    const Polygon b{{10,0},{30,0},{30,20},{10,20}};
+    const Polygon touching{{20,0},{40,0},{40,20},{20,20}};
+
+    for (const auto& moving : {b, touching}) {
+        const auto loops = nfp::noFitPolygons(a, moving, 0, 0.0);
+        assert(!loops.empty());
+        const auto report = nfp::validateNfp(loops);
+        assert(report.valid);
+        assert(report.openBoundarySegments == 0);
+    }
+}
+
+void testNfpBoundaryReconstructionDegenerateInput() {
+    const Polygon point{{0,0},{0,0},{0,0}};
+    const Polygon line{{0,0},{10,0},{20,0},{30,0}};
+    const auto pointResult = nfp::noFitPolygons(point, rectangle(5,5));
+    const auto lineResult = nfp::noFitPolygons(line, rectangle(5,5));
+
+    assert(pointResult.empty());
+    assert(lineResult.empty());
+
+    const auto pointReport = nfp::validateNfp(pointResult);
+    const auto lineReport = nfp::validateNfp(lineResult);
+    assert(pointReport.valid);
+    assert(lineReport.valid);
+    assert(pointReport.openBoundarySegments == 0);
+    assert(lineReport.openBoundarySegments == 0);
+}
+
 void testNfpLockKeyStressMatrix() {
     const std::vector<double> widths{2.0, 3.0, 4.0, 6.0, 8.0};
     const std::vector<double> gaps{0.0, 0.1, 0.5, 1.0};
@@ -3977,6 +4055,9 @@ int main(int argc, char** argv) {
     testNfpBoundaryTouchAndMinimumGap();
     testNfpLargeConcaveStress();
     testNfpAdaptiveNarrowCorridor();
+    testNfpBoundaryReconstructionStress();
+    testNfpBoundaryReconstructionTouchingAndOverlap();
+    testNfpBoundaryReconstructionDegenerateInput();
     testNfpLockKeyStressMatrix();
     testNfpLockKeyRotationStress();
     testNfpNarrowPassageThreshold();
