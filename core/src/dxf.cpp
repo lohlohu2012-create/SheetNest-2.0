@@ -98,9 +98,11 @@ std::string trimCode(std::string value) {
 
 std::optional<int> parseIntExact(const std::string& value) {
     try {
+        const std::string normalized = trimCode(value);
+        if (normalized.empty()) return std::nullopt;
         std::size_t used{};
-        const int n = std::stoi(value, &used);
-        if (used != trimCode(value).size()) return std::nullopt;
+        const int n = std::stoi(normalized, &used);
+        if (used != normalized.size()) return std::nullopt;
         return n;
     } catch (...) {
         return std::nullopt;
