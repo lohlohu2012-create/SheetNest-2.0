@@ -1310,7 +1310,7 @@ void testNfpLargeConcaveStress() {
 void testNfpStressDeterministicMatrix() {
     // Deterministic pseudo-random geometry stress: no external RNG means the
     // regression is reproducible in CI and locally.
-    std::uint32_t state = 0x51EET5A7u;
+    std::uint32_t state = 0x51EE75A7u;
     const auto next01 = [&]() mutable {
         state = state * 1664525u + 1013904223u;
         return static_cast<double>(state & 0x00FFFFFFu) /
