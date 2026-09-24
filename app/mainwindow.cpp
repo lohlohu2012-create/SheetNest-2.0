@@ -40,6 +40,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_map>
 #include <numeric>
@@ -1989,6 +1990,7 @@ CalculationOutput MainWindow::performCalculation(
         pipelinePathOptions
     );
 
+    output.pipeline = pipeline;
     output.validation = pipeline.nestingValidation;
     output.validation.pipelineValid = pipeline.valid;
     output.validation.pipelineStage =
