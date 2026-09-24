@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QFutureWatcher>
+#include <memory>
 
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/cutting.hpp"
@@ -9,6 +10,7 @@
 #include "sheetnest/dxf.hpp"
 #include "sheetnest/dxf_model.hpp"
 #include "sheetnest/nesting.hpp"
+#include "sheetnest/watchdog.hpp"
 
 class QComboBox;
 class QCheckBox;
@@ -20,6 +22,7 @@ class QSpinBox;
 class QPushButton;
 class QTableWidget;
 class QTabWidget;
+class QTimer;
 
 class NestView;
 
@@ -107,4 +110,7 @@ private:
 
     QFutureWatcher<CalculationOutput>* watcher_{};
     QFutureWatcher<sheetnest::BenchmarkResult>* benchmarkWatcher_{};
+    std::shared_ptr<sheetnest::Watchdog> activeWatchdog_;
+    QTimer* watchdogTimer_{};
+
 };
