@@ -3291,6 +3291,94 @@ void testAdaptiveRepairNewCollisionPriority() {
 
 } // namespace
 
+
+void testNesting20DenseResidualPacking() {
+    std::vector<Instance> parts;
+    for (int i = 0; i < 12; ++i) {
+        parts.push_back({
+            "dense-" + std::to_string(i),
+            Part{"dense", rectangle(18.0, 9.0), {}}
+        });
+    }
+
+    Sheet sheet{60.0, 60.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 12;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.enableSmallPartOptimization = true;
+    options.smallPartCandidateBudget = 1024;
+    options.residualRetryPasses = 3;
+
+    const auto result = nest(parts, sheet, options);
+
+    assert(result.unplaced.empty());
+    assert(result.sheets.size() <= 4);
+    assert(result.stats.refillMoves >= 0);
+    assert(result.stats.exchangeAttempts >= 0);
+
+    std::unordered_set<std::string> placed;
+    for (const auto& sheetPlacements : result.sheets) {
+        for (const auto& placement : sheetPlacements) {
+            placed.insert(placement.id);
+        }
+    }
+    assert(placed.size() == parts.size());
+}
+
+void testNesting20NewSheetRecovery() {
+    std::vector<Instance> parts{
+        {"large-a", Part{"large", rectangle(48.0, 48.0), {}}},
+        {"large-b", Part{"large", rectangle(48.0, 48.0), {}}},
+        {"large-c", Part{"large", rectangle(48.0, 48.0), {}}},
+        {"large-d", Part{"large", rectangle(48.0, 48.0), {}}}
+    };
+
+    Sheet sheet{100.0, 100.0, 1.0};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 8;
+    options.gapMm = 2.0;
+    options.enableOptimizer = true;
+    options.residualRetryPasses = 3;
+
+    const auto result = nest(parts, sheet, options);
+
+    assert(result.unplaced.empty());
+    assert(result.sheets.size() == 4);
+}
+
+void testNesting20OptimizerDoesNotDropPlacedInstances() {
+    std::vector<Instance> parts;
+    for (int i = 0; i < 16; ++i) {
+        parts.push_back({
+            "optimizer-" + std::to_string(i),
+            Part{"optimizer", rectangle(12.0, 7.0), {}}
+        });
+    }
+
+    Sheet sheet{80.0, 50.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 16;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.residualRetryPasses = 3;
+
+    const auto result = nest(parts, sheet, options);
+
+    std::unordered_set<std::string> placed;
+    for (const auto& sheetPlacements : result.sheets) {
+        for (const auto& placement : sheetPlacements) {
+            const bool inserted = placed.insert(placement.id).second;
+            assert(inserted && "Nesting 2.0 must never duplicate an instance");
+        }
+    }
+
+    assert(placed.size() + result.unplaced.size() == parts.size());
+}
+
 int main(int argc, char** argv) {
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Nesting)) == "Nesting");
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Complete)) == "Complete");
@@ -3346,6 +3434,10 @@ int main(int argc, char** argv) {
 testAdaptiveRepairConflictGraph();
     testAdaptiveRepairNewCollisionPriority();
     testAutomaticProductionRepair();
+    testNesting20DenseResidualPacking();
+    testNesting20NewSheetRecovery();
+    testNesting20OptimizerDoesNotDropPlacedInstances();
+
 
     std::cout << "[PASS] NFP tests" << std::endl;
     std::cout << "[PASS] Adaptive Repair tests" << std::endl;
