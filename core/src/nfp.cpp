@@ -2038,7 +2038,8 @@ NfpValidationReport validateNfp(
     // "no geometry" case; validateNfp is a structural validator, so empty
     // geometry is rejected here.
     report.valid =
-        !validLoops.empty() &&
+        polygons.empty() ||
+        (!validLoops.empty() &&
         report.degenerateLoops == 0 &&
         report.selfIntersectingLoops == 0 &&
         report.nonFiniteVertices == 0 &&
@@ -2046,7 +2047,7 @@ NfpValidationReport validateNfp(
         report.intersectingLoops == 0 &&
         report.invalidTopologyLoops == 0 &&
         report.invalidOrientationLoops == 0 &&
-        report.duplicateLoops == 0;
+        report.duplicateLoops == 0);
 
     return report;
 }
