@@ -145,6 +145,15 @@ struct Options {
     double smallPartBoundarySpacingMm{1.0};
     std::size_t smallPartRefillPasses{4};
 
+    // Nesting 2.0 candidate-search controls. These weights affect only
+    // ranking after exact geometry validation; they never relax clearance.
+    double candidateContactWeight{1.0};
+    double candidateResidualWeight{1.75};
+    double candidateCompactnessWeight{1.25};
+    double candidateRotationWeight{0.15};
+    std::size_t candidateVariantBudget{8};
+    std::size_t residualRetryPasses{3};
+
     std::shared_ptr<NestingRunControl> control{};
 };
 
