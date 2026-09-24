@@ -1776,11 +1776,18 @@ ProductionPipelineReport validateProductionPipeline(
 
     if (options.enableAdaptiveDestroyRepair ||
         options.enableAutoRepair) {
-        if (!pipeline.nestingValidation.valid) {
+        const bool repairGeometryValid =
+            pipeline.nestingValidation.collisionCount == 0 &&
+            pipeline.nestingValidation.gapViolationCount == 0 &&
+            pipeline.nestingValidation.marginViolationCount == 0 &&
+            pipeline.nestingValidation.duplicateIdCount == 0 &&
+            pipeline.nestingValidation.unknownIdCount == 0;
+
+        if (!repairGeometryValid) {
             return fail(
                 ProductionPipelineStage::AdaptiveRepair,
                 pipeline.nestingValidation.issues.empty()
-                    ? "Adaptive Repair did not produce a valid final result."
+                    ? "Adaptive Repair did not produce a valid geometric result."
                     : pipeline.nestingValidation.issues.front().message
             );
         }
