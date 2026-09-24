@@ -1,4 +1,5 @@
 #include "sheetnest/dxf.hpp"
+#include "sheetnest/svg.hpp"
 #include "sheetnest/dxf_export.hpp"
 #include "sheetnest/cam_export.hpp"
 #include "sheetnest/benchmark.hpp"
@@ -3557,6 +3558,186 @@ void testNesting20OptimizerDoesNotDropPlacedInstances() {
     assert(placed.size() + result.unplaced.size() == parts.size());
 }
 
+
+void testDxfMalformedInputDiagnostics() {
+    const auto empty = importDxf("");
+    assert(!empty.valid());
+    assert(empty.hasErrors());
+
+    const auto missingEntities = importDxf(
+        "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nEOF\n"
+    );
+    assert(!missingEntities.valid());
+    assert(missingEntities.hasErrors());
+
+    const auto truncated =
+        importDxf("0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n");
+    assert(!truncated.valid());
+    assert(truncated.hasErrors());
+
+    const auto nonFinite =
+        importDxf("0\nSECTION\n2\nENTITIES\n0\nLINE\n10\nnan\n20\n0\n11\n10\n21\n0\n0\nENDSEC\n0\nEOF\n");
+    assert(!nonFinite.valid());
+    assert(nonFinite.hasErrors());
+}
+
+void testDxfWhitespaceAndCrLf() {
+    const std::string dxf =
+        " 0 \r\nSECTION\r\n 2\r\nENTITIES\r\n"
+        "0\r\nLWPOLYLINE\r\n8\r\nP\r\n70\r\n1\r\n"
+        "10\r\n0\r\n20\r\n0\r\n10\r\n20\r\n20\r\n0\r\n"
+        "10\r\n20\r\n20\r\n20\r\n10\r\n0\r\n20\r\n20\r\n"
+        "0\r\nENDSEC\r\n0\r\nEOF\r\n";
+    const auto doc = importDxf(dxf);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(std::abs(std::abs(polygonArea(doc.contours.front().outer)) - 400.0) < 1e-6);
+}
+
+void testDxfBulgeExtremeArcs() {
+    const std::string dxf =
+        "0\nSECTION\n2\nENTITIES\n"
+        "0\nLWPOLYLINE\n8\nP\n70\n1\n"
+        "10\n0\n20\n0\n42\n-1\n"
+        "10\n20\n20\n0\n42\n1\n"
+        "0\nENDSEC\n0\nEOF\n";
+    const auto doc = importDxf(dxf, 0.05);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(doc.contours.front().outer.size() > 8);
+}
+
+void testDxfIndependentHolesAndNestedIslands() {
+    const std::string dxf =
+        "0\nSECTION\n2\nENTITIES\n"
+        "0\nCIRCLE\n8\nP\n10\n0\n20\n0\n40\n100\n"
+        "0\nCIRCLE\n8\nP\n10\n0\n20\n0\n40\n40\n"
+        "0\nCIRCLE\n8\nP\n10\n0\n20\n0\n40\n10\n"
+        "0\nENDSEC\n0\nEOF\n";
+    const auto doc = importDxf(dxf, 0.2);
+    assert(doc.valid());
+    // Outer circle owns the 40 mm hole; the 10 mm island is a separate
+    // nesting contour because topology alternates at each nesting depth.
+    assert(doc.contours.size() == 2);
+    std::size_t holes = 0;
+    for (const auto& contour : doc.contours) holes += contour.holes.size();
+    assert(holes == 1);
+}
+
+void testDxfUnsupportedEntityIsNonFatal() {
+    const std::string dxf =
+        "0\nSECTION\n2\nENTITIES\n"
+        "0\nPOINT\n8\nP\n10\n5\n20\n5\n"
+        "0\nLWPOLYLINE\n8\nP\n70\n1\n"
+        "10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n"
+        "0\nENDSEC\n0\nEOF\n";
+    const auto doc = importDxf(dxf);
+    assert(doc.valid());
+    assert(doc.unsupportedEntities == 1);
+    assert(!doc.hasErrors());
+    assert(doc.contours.size() == 1);
+}
+
+void testSvgBasicShapes() {
+    const std::string svg =
+        R"SVG(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+          <rect id="r" x="0" y="0" width="40" height="20"/>
+          <circle id="c" cx="70" cy="30" r="10"/>
+          <polygon id="p" points="50,60 80,60 65,90"/>
+        </svg>)SVG";
+    const auto doc = importSvg(svg, 0.1);
+    assert(doc.valid());
+    assert(doc.contours.size() == 3);
+    assert(doc.supportedEntities == 3);
+    assert(doc.hasWarnings() == false);
+}
+
+void testSvgPathCommandsAndTransforms() {
+    const std::string svg =
+        R"SVG(<svg xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(10,20) rotate(15)">
+            <path id="p" d="M 0 0 L 40 0 H 40 V 30
+              C 40 40 20 40 10 30
+              Q 0 20 10 10
+              A 10 10 0 0 1 0 0 Z"/>
+          </g>
+        </svg>)SVG";
+    const auto doc = importSvg(svg, 0.25);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(doc.contours.front().outer.size() > 10);
+    for (const auto& p : doc.contours.front().outer) {
+        assert(std::isfinite(p.x));
+        assert(std::isfinite(p.y));
+    }
+}
+
+void testSvgNestedTransformsAndVisibility() {
+    const std::string svg =
+        R"SVG(<svg xmlns="http://www.w3.org/2000/svg">
+          <g transform="translate(100,50)">
+            <g transform="scale(2)">
+              <rect x="0" y="0" width="10" height="20"/>
+            </g>
+          </g>
+          <g display="none"><rect x="0" y="0" width="999" height="999"/></g>
+          <g visibility="hidden"><circle cx="0" cy="0" r="999"/></g>
+        </svg>)SVG";
+    const auto doc = importSvg(svg, 0.1);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    const auto& p = doc.contours.front().outer;
+    assert(std::abs(polygonArea(p) - 800.0) < 1e-6);
+    for (const auto& q : p) {
+        assert(q.x >= 100.0 - 1e-6);
+        assert(q.y >= 50.0 - 1e-6);
+    }
+}
+
+void testSvgHolesAndOpenGeometry() {
+    const std::string svg =
+        R"SVG(<svg xmlns="http://www.w3.org/2000/svg">
+          <rect x="0" y="0" width="100" height="100"/>
+          <circle cx="50" cy="50" r="20"/>
+          <line x1="0" y1="0" x2="100" y2="100"/>
+          <polyline points="0,0 20,0 20,20"/>
+        </svg>)SVG";
+    const auto doc = importSvg(svg, 0.2);
+    assert(doc.valid());
+    assert(doc.contours.size() == 1);
+    assert(doc.contours.front().holes.size() == 1);
+    assert(doc.malformedEntities >= 2);
+    assert(doc.hasWarnings());
+}
+
+void testSvgDegenerateAndInvalidPath() {
+    const auto invalid = importSvg(
+        "<svg><path d=\"M 0 0 L nope Z\"/></svg>"
+    );
+    assert(!invalid.valid());
+    assert(invalid.hasErrors());
+
+    const auto degenerate = importSvg(
+        "<svg><polygon points=\"0,0 1,1 2,2\"/></svg>"
+    );
+    assert(!degenerate.valid());
+    assert(degenerate.hasErrors());
+}
+
+void testSvgRoundTripIntoDxfModel() {
+    const std::string svg =
+        R"SVG(<svg><path d="M0 0 L50 0 L50 30 L0 30 Z"/></svg>)SVG";
+    const auto doc = importSvg(svg);
+    assert(doc.valid());
+    const auto preflight = preflightDxf(doc);
+    assert(preflight.valid);
+    assert(preflight.validParts == 1);
+    const auto instances = instancesFromDxf(doc, 3);
+    assert(instances.size() == 3);
+    assert(instances[0].unitId == "SVG#1:unit-1");
+    assert(instances[2].unitId == "SVG#1:unit-3");
+}
+
 int main(int argc, char** argv) {
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Nesting)) == "Nesting");
     assert(std::string(productionPipelineStageName(ProductionPipelineStage::Complete)) == "Complete");
@@ -3568,6 +3749,17 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    testDxfMalformedInputDiagnostics();
+    testDxfWhitespaceAndCrLf();
+    testDxfBulgeExtremeArcs();
+    testDxfIndependentHolesAndNestedIslands();
+    testDxfUnsupportedEntityIsNonFatal();
+    testSvgBasicShapes();
+    testSvgPathCommandsAndTransforms();
+    testSvgNestedTransformsAndVisibility();
+    testSvgHolesAndOpenGeometry();
+    testSvgDegenerateAndInvalidPath();
+    testSvgRoundTripIntoDxfModel();
     testGeometry();
     testDxfHoleRecovery();
     testLayerSeparation();
