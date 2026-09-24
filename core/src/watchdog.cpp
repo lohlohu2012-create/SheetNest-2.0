@@ -26,6 +26,9 @@ void Watchdog::stage(
 ) {
     std::lock_guard<std::mutex> lock(mutex_);
     stage_ = stage;
+    state_ = stage == WatchdogStage::Completed
+        ? WatchdogState::Completed
+        : WatchdogState::Running;
     message_ = message;
     heartbeat_++;
     lastHeartbeatNs_ = nowNs();
