@@ -543,23 +543,11 @@ std::vector<Candidate> candidatesFor(
             );
         }
 
-        // Continuous NFP feasibility boundary: candidate positions are
-        // generated along the entire admissible boundary, not only at NFP
-        // vertices. Final collision/clearance checks remain authoritative.
-        // Safe NFP broad phase: if the expanded AABB of the fixed
-        // outer contour cannot intersect the moving part's admissible
-        // translation domain, the forbidden region is completely outside
-        // the search rectangle and computing its NFP cannot add a candidate.
-        // Ring/hole candidates above remain available; exact collision checks
-        // remain authoritative for every candidate that is emitted.
-        const double forbiddenMinX =
-            placed.outerBounds.minX - pb.maxX - g;
-        const double forbiddenMaxX =
-            placed.outerBounds.maxX - pb.minX + g;
-        const double forbiddenMinY =
-            placed.outerBounds.minY - pb.maxY - g;
-        const double forbiddenMaxY =
-            placed.outerBounds.maxY - pb.minY + g;
+        // Continuous NFP feasibility boundary. The NFP module owns boundary sampling and candidate budgeting; final true-shape validation remains in placeOnSheet().
+        const double forbiddenMinX = placed.outerBounds.minX - pb.maxX - g;
+        const double forbiddenMaxX = placed.outerBounds.maxX - pb.minX + g;
+        const double forbiddenMinY = placed.outerBounds.minY - pb.maxY - g;
+        const double forbiddenMaxY = placed.outerBounds.maxY - pb.minY + g;
         const bool nfpDomainIntersects =
             placementMaxX >= placementMinX &&
             placementMaxY >= placementMinY &&
@@ -572,7 +560,22 @@ std::vector<Candidate> candidatesFor(
             if (control && control->shouldStop()) break;
             if (stats) ++stats->nfpChecks;
 
-            const auto region = nfp::feasibilityRegion(
+            const double characteristicSize = std::sqrt(std::max(1.0, partArea));
+            const double boundarySpacing = smallPart
+                ? std::clamp(options.smallPartBoundarySpacingMm, 0.25, 10.0)
+                : std::clamp(std::max(4.0, characteristicSize * 0.08), 4.0, 20.0);
+            const std::size_t boundaryBudget = smallPart
+                ? std::max<std::size_t>(128, std::min<std::size_t>(options.smallPartCandidateBudget, 2048))
+                : (part.size() > 256 ? 72 : (part.size() > 128 ? 96 : 128));
+
+            nfp::SearchOptions searchOptions;
+            searchOptions.boundarySpacingMm = boundarySpacing;
+            searchOptions.maxCandidates = boundaryBudget;
+            searchOptions.includeSheetBoundary = true;
+            searchOptions.includeNfpVertices = true;
+            searchOptions.includeBoundaryMidpoints = true;
+
+            const auto search = nfp::searchFeasibleBoundary(
                 placed.outer,
                 part,
                 rotation,
@@ -581,56 +584,12 @@ std::vector<Candidate> candidatesFor(
                 placementMaxX,
                 placementMaxY,
                 g,
+                searchOptions,
                 &nfpControl
             );
 
-            const double characteristicSize = std::sqrt(
-                std::max(1.0, partArea)
-            );
-
-            // Large details do not benefit from dense uniform sampling of
-            // every long NFP edge. Keep a bounded candidate budget and make
-            // the spacing coarser as part size grows. Endpoints and analytic
-            // objective-best points remain available even when the budget is
-            // tight, while interior samples preserve concave/interlocking
-            // opportunities.
-            const double boundarySpacing = smallPart
-                ? std::clamp(
-                    options.smallPartBoundarySpacingMm,
-                    0.25,
-                    10.0
-                )
-                : std::clamp(
-                    std::max(4.0, characteristicSize * 0.08),
-                    4.0,
-                    20.0
-                );
-
-            const std::size_t boundaryBudget = smallPart
-                ? std::max<std::size_t>(
-                    128,
-                    std::min<std::size_t>(
-                        options.smallPartCandidateBudget,
-                        2048
-                    )
-                )
-                : (part.size() > 256
-                    ? 72
-                    : (part.size() > 128 ? 96 : 128));
-
-            for (const auto& point :
-                 nfp::pointsOnFeasibilityBoundary(
-                     region,
-                     boundarySpacing,
-                     boundaryBudget,
-                     true
-                 )) {
-                result.push_back({
-                    point.x,
-                    point.y,
-                    point.y,
-                    point.x
-                });
+            for (const auto& point : search.points) {
+                result.push_back({point.x, point.y, point.y, point.x});
             }
         }
 
