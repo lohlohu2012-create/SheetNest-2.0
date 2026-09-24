@@ -1876,38 +1876,178 @@ NfpValidationReport validateNfp(
     NfpValidationReport report;
     report.loops = polygons.size();
 
+    // Validation is intentionally independent from NFP generation. A malformed
+    // cached/generated result must be rejected even if every individual ring
+    // looks numerically valid.
+    auto edgeKey = [](Point a, Point b) {
+        const auto q = [](Point p) {
+            return std::to_string(quantize(p.x)) + "," + std::to_string(quantize(p.y));
+        };
+        std::string ka = q(a), kb = q(b);
+        if (kb < ka) std::swap(ka, kb);
+        return ka + "|" + kb;
+    };
+
+    std::unordered_map<std::string, std::size_t> edgeUse;
+    std::vector<Polygon> validLoops;
+    validLoops.reserve(polygons.size());
+
     for (const auto& polygon : polygons) {
+        bool finite = true;
         for (const auto& point : polygon) {
             if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+                finite = false;
                 ++report.nonFiniteVertices;
             }
         }
 
-        if (polygon.size() < 3 || std::abs(signedArea(polygon)) <= kEps) {
+        const Polygon cleaned = cleanPolygon(polygon);
+        if (!finite || cleaned.size() < 3 ||
+            std::abs(signedArea(cleaned)) <= kEps) {
             ++report.degenerateLoops;
             continue;
         }
 
-        if (selfIntersects(polygon)) {
+        if (selfIntersects(cleaned)) {
             ++report.selfIntersectingLoops;
+            continue;
+        }
+
+        if (cleaned.size() > kMaxValidationVertices) {
+            ++report.invalidTopologyLoops;
+            continue;
+        }
+
+        for (std::size_t i = 0; i < cleaned.size(); ++i) {
+            const Point a = cleaned[i];
+            const Point b = cleaned[(i + 1) % cleaned.size()];
+            if (samePoint(a, b)) {
+                ++report.openBoundarySegments;
+                continue;
+            }
+            ++edgeUse[edgeKey(a, b)];
+        }
+
+        validLoops.push_back(cleaned);
+    }
+
+    // A polygon ring is implicitly closed. Open-boundary detection therefore
+    // checks malformed endpoint/edge topology rather than requiring an
+    // explicit repeated first vertex. Repeated undirected edges are invalid
+    // because they mean two boundary traversals occupy the same segment.
+    for (const auto& [key, count] : edgeUse) {
+        if (count > 2) {
+            report.invalidTopologyLoops += count - 2;
+        } else if (count == 2) {
+            // Two equal edges are only legitimate when they belong to a
+            // genuine shared boundary. NFP output must not contain duplicate
+            // coincident loops, so the pair is rejected below as well.
         }
     }
 
-    for (std::size_t i = 0; i < polygons.size(); ++i) {
-        if (polygons[i].size() < 3) continue;
-        const Point probe = polygons[i].front();
+    auto sameRing = [](const Polygon& a, const Polygon& b) {
+        if (a.size() != b.size()) return false;
+        const std::size_t n = a.size();
+        for (std::size_t offset = 0; offset < n; ++offset) {
+            bool forward = true;
+            for (std::size_t i = 0; i < n; ++i) {
+                if (!samePoint(a[i], b[(offset + i) % n])) {
+                    forward = false;
+                    break;
+                }
+            }
+            if (forward) return true;
+            bool reverse = true;
+            for (std::size_t i = 0; i < n; ++i) {
+                const std::size_t index =
+                    (offset + n - (i % n)) % n;
+                if (!samePoint(a[i], b[index])) {
+                    reverse = false;
+                    break;
+                }
+            }
+            if (reverse) return true;
+        }
+        return false;
+    };
+
+    for (std::size_t i = 0; i < validLoops.size(); ++i) {
+        const double areaI = signedArea(validLoops[i]);
+        if (!std::isfinite(areaI) || std::abs(areaI) <= kEps) {
+            ++report.degenerateLoops;
+            continue;
+        }
+
+        for (std::size_t j = i + 1; j < validLoops.size(); ++j) {
+            if (sameRing(validLoops[i], validLoops[j])) {
+                ++report.duplicateLoops;
+                continue;
+            }
+
+            // Distinct NFP loops may be nested (outer/hole/island), but their
+            // boundaries may not cross or partially overlap.
+            bool boundariesIntersect = false;
+            for (std::size_t a = 0; a < validLoops[i].size() && !boundariesIntersect; ++a) {
+                const Point a0 = validLoops[i][a];
+                const Point a1 = validLoops[i][(a + 1) % validLoops[i].size()];
+                for (std::size_t b = 0; b < validLoops[j].size(); ++b) {
+                    const Point b0 = validLoops[j][b];
+                    const Point b1 = validLoops[j][(b + 1) % validLoops[j].size()];
+                    if (segmentsProperOrTouch(a0, a1, b0, b1)) {
+                        boundariesIntersect = true;
+                        break;
+                    }
+                }
+            }
+            if (boundariesIntersect) ++report.intersectingLoops;
+        }
+    }
+
+    // Classify containment by nesting depth. Even depth = outer/island,
+    // odd depth = hole. Orientation must agree with that topology.
+    for (std::size_t i = 0; i < validLoops.size(); ++i) {
+        const Point probe = interiorProbeLocal(validLoops[i]);
         std::size_t depth = 0;
-        for (std::size_t j = 0; j < polygons.size(); ++j) {
-            if (i == j || polygons[j].size() < 3) continue;
-            if (pointInPolygonInclusive(probe, polygons[j])) ++depth;
+        std::size_t containingParents = 0;
+
+        for (std::size_t j = 0; j < validLoops.size(); ++j) {
+            if (i == j) continue;
+            if (pointInPolygonInclusive(probe, validLoops[j])) {
+                ++depth;
+                ++containingParents;
+            }
         }
-        if ((depth % 2) == 1) ++report.holes;
+
+        const bool hole = (depth % 2) == 1;
+        const double area = signedArea(validLoops[i]);
+        if ((!hole && area < 0.0) || (hole && area > 0.0)) {
+            ++report.invalidOrientationLoops;
+        }
+        if (hole && containingParents == 0) {
+            ++report.invalidTopologyLoops;
+        }
+        if (depth > validLoops.size()) {
+            ++report.invalidTopologyLoops;
+        }
+
+        if (hole) ++report.holes;
     }
 
+    // A valid NFP result must contain at least one finite, non-degenerate
+    // closed boundary. Empty results are valid only for the caller's explicit
+    // "no geometry" case; validateNfp is a structural validator, so empty
+    // geometry is rejected here.
     report.valid =
+        !validLoops.empty() &&
         report.degenerateLoops == 0 &&
         report.selfIntersectingLoops == 0 &&
-        report.nonFiniteVertices == 0;
+        report.nonFiniteVertices == 0 &&
+        report.openBoundarySegments == 0 &&
+        report.intersectingLoops == 0 &&
+        report.invalidTopologyLoops == 0 &&
+        report.invalidOrientationLoops == 0 &&
+        report.duplicateLoops == 0;
+
     return report;
 }
 
