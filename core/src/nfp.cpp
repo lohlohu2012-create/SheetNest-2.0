@@ -460,19 +460,21 @@ bool validCachedNfp(const std::vector<Polygon>& polygons) {
 
     for (const auto& polygon : polygons) {
         if (polygon.size() < 3) return false;
-
-        double area = 0.0;
         for (const auto& point : polygon) {
             if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
                 return false;
             }
         }
-        area = signedArea(polygon);
+        const double area = signedArea(polygon);
         if (!std::isfinite(area) || std::abs(area) <= kEps) {
             return false;
         }
     }
-    return true;
+
+    // Cache validation must use the same topology validator as fresh NFP
+    // results. Numeric validity alone is insufficient: a self-intersecting,
+    // duplicated or wrongly oriented cached loop is unsafe to reuse.
+    return validateNfp(polygons).valid;
 }
 
 long long quantize(double value) {
@@ -959,7 +961,9 @@ std::vector<Polygon> computeUnionNfp(
         return conservativeNfpFallback(fixed, moving, 0);
     }
     auto unionResult = unionPolygons(pairwise, control);
-    if (!unionResult.empty()) return unionResult;
+    if (!unionResult.empty() && validateNfp(unionResult).valid) {
+        return unionResult;
+    }
 
     // Last-resort conservative NFP. This keeps the placement pipeline alive
     // for numerically pathological contours instead of returning an empty
@@ -1936,12 +1940,11 @@ NfpValidationReport validateNfp(
     // explicit repeated first vertex. Repeated undirected edges are invalid
     // because they mean two boundary traversals occupy the same segment.
     for (const auto& [key, count] : edgeUse) {
-        if (count > 2) {
-            report.invalidTopologyLoops += count - 2;
-        } else if (count == 2) {
-            // Two equal edges are only legitimate when they belong to a
-            // genuine shared boundary. NFP output must not contain duplicate
-            // coincident loops, so the pair is rejected below as well.
+        if (count >= 2) {
+            // Distinct NFP loops must never reuse the same undirected edge.
+            // A count of two is already a coincident duplicate boundary;
+            // larger counts are non-manifold topology.
+            report.invalidTopologyLoops += count - 1;
         }
     }
 
@@ -2006,7 +2009,11 @@ NfpValidationReport validateNfp(
     // Classify containment by nesting depth. Even depth = outer/island,
     // odd depth = hole. Orientation must agree with that topology.
     for (std::size_t i = 0; i < validLoops.size(); ++i) {
-        const Point probe = interiorProbeLocal(validLoops[i]);
+        // Once boundary intersections have been rejected above, any vertex
+        // of this ring is strictly inside a containing ring. Using the first
+        // vertex avoids centroid/near-edge probe ambiguity on highly concave
+        // contours.
+        const Point probe = validLoops[i].front();
         std::size_t depth = 0;
         std::size_t containingParents = 0;
 
