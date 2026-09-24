@@ -45,6 +45,9 @@ struct Candidate {
     double scoreY{};
     double scoreX{};
     double scoreContact{};
+    double scoreResidual{};
+    double scoreCompactness{};
+    double scoreRotation{};
 };
 
 double signedArea(const Polygon& p) {
@@ -212,6 +215,94 @@ bool materialOverlap(const PlacedShape& a, const PlacedShape& b) {
 }
 
 double boundsDistance(const Bounds& a, const Bounds& b);
+
+double residualSpaceScore(
+    const PlacedShape& shape,
+    const SheetState& state,
+    const Sheet& sheet,
+    double gap
+) {
+    const double requiredGap = std::max(0.0, gap);
+    const double minDim = std::max(
+        0.5,
+        std::min(shape.outerBounds.width(), shape.outerBounds.height())
+    );
+    const double horizon = std::clamp(minDim * 2.0, 4.0, 80.0);
+    double score = 0.0;
+
+    auto rewardGap = [&](double distance) {
+        if (distance < requiredGap - kEps ||
+            distance > requiredGap + horizon + kEps) {
+            return;
+        }
+        const double residual = std::max(0.0, distance - requiredGap);
+        const double normalized =
+            1.0 - std::clamp(residual / horizon, 0.0, 1.0);
+        score += normalized * normalized;
+    };
+
+    const double edgeDistances[] = {
+        shape.outerBounds.minX - sheet.edgeMarginMm,
+        shape.outerBounds.minY - sheet.edgeMarginMm,
+        sheet.width - sheet.edgeMarginMm - shape.outerBounds.maxX,
+        sheet.height - sheet.edgeMarginMm - shape.outerBounds.maxY
+    };
+    for (const double d : edgeDistances) rewardGap(d);
+
+    const auto nearby = state.spatialIndex.query(
+        shape.outerBounds,
+        requiredGap + horizon
+    );
+    for (const auto index : nearby) {
+        if (index >= state.shapes.size()) continue;
+        const auto& other = state.shapes[index];
+
+        const double dx =
+            (shape.outerBounds.maxX < other.outerBounds.minX)
+                ? other.outerBounds.minX - shape.outerBounds.maxX
+                : (other.outerBounds.maxX < shape.outerBounds.minX)
+                    ? shape.outerBounds.minX - other.outerBounds.maxX
+                    : 0.0;
+        const double dy =
+            (shape.outerBounds.maxY < other.outerBounds.minY)
+                ? other.outerBounds.minY - shape.outerBounds.maxY
+                : (other.outerBounds.maxY < shape.outerBounds.minY)
+                    ? shape.outerBounds.minY - other.outerBounds.maxY
+                    : 0.0;
+
+        // Reward closing a residual strip only when the perpendicular
+        // projection overlaps. This avoids rewarding diagonal separation.
+        const bool xAligned =
+            shape.outerBounds.maxY >= other.outerBounds.minY - kEps &&
+            other.outerBounds.maxY >= shape.outerBounds.minY - kEps;
+        const bool yAligned =
+            shape.outerBounds.maxX >= other.outerBounds.minX - kEps &&
+            other.outerBounds.maxX >= shape.outerBounds.minX - kEps;
+
+        if (xAligned) rewardGap(dx);
+        if (yAligned) rewardGap(dy);
+    }
+
+    return score;
+}
+
+double compactnessScore(
+    const PlacedShape& shape,
+    const SheetState& state
+) {
+    if (state.shapes.empty()) return 0.0;
+
+    const auto& b = shape.outerBounds;
+    double score = 0.0;
+    const auto nearby = state.spatialIndex.query(b, 20.0);
+    for (const auto index : nearby) {
+        if (index >= state.shapes.size()) continue;
+        const auto& other = state.shapes[index];
+        const double distance = boundsDistance(b, other.outerBounds);
+        score += 1.0 / (1.0 + distance);
+    }
+    return score;
+}
 
 double narrowSpaceScore(
     const PlacedShape& shape,
@@ -717,8 +808,19 @@ std::vector<Candidate> candidatesFor(
 }
 
 bool betterCandidate(const Candidate& a, const Candidate& b) {
-    if (a.scoreContact > b.scoreContact + kEps) return true;
-    if (b.scoreContact > a.scoreContact + kEps) return false;
+    const double aScore =
+        a.scoreContact + a.scoreResidual + a.scoreCompactness +
+        a.scoreRotation;
+    const double bScore =
+        b.scoreContact + b.scoreResidual + b.scoreCompactness +
+        b.scoreRotation;
+
+    if (aScore > bScore + kEps) return true;
+    if (bScore > aScore + kEps) return false;
+
+    if (a.scoreResidual > b.scoreResidual + kEps) return true;
+    if (b.scoreResidual > a.scoreResidual + kEps) return false;
+
     return std::tie(a.scoreY, a.scoreX) < std::tie(b.scoreY, b.scoreX);
 }
 
@@ -869,13 +971,16 @@ bool placeOnSheet(
             Candidate score = candidate;
             score.scoreY = merged.maxY;
             score.scoreX = merged.maxX;
-            if (options.enableSmallPartOptimization &&
+            const smallPartForScore =
+                options.enableSmallPartOptimization &&
                 materialArea(instance.part) <=
                     std::max(
                         1.0,
                         sheet.width * sheet.height *
                         std::clamp(options.smallPartAreaRatio, 0.001, 0.25)
-                    )) {
+                    );
+
+            if (smallPartForScore) {
                 score.scoreContact = narrowSpaceScore(
                     shape,
                     state,
@@ -883,6 +988,29 @@ bool placeOnSheet(
                     options.gapMm
                 );
             }
+
+            score.scoreResidual =
+                options.candidateResidualWeight *
+                residualSpaceScore(
+                    shape,
+                    state,
+                    sheet,
+                    options.gapMm
+                );
+            score.scoreCompactness =
+                options.candidateCompactnessWeight *
+                compactnessScore(shape, state);
+
+            // Prefer rotations that expose the smaller bounding dimension
+            // toward the tighter residual axis. This is only a tie-breaker;
+            // exact feasibility remains authoritative.
+            const double w = shape.outerBounds.width();
+            const double h = shape.outerBounds.height();
+            const double longAxis = std::max(w, h);
+            const double shortAxis = std::max(0.001, std::min(w, h));
+            score.scoreRotation =
+                options.candidateRotationWeight *
+                (longAxis / shortAxis);
 
             if (!found || betterCandidate(score, best)) {
                 found = true;
@@ -2540,6 +2668,62 @@ Result runAttempt(
     // This is deliberately separate from the residual-space refill so it can
     // never create an unbounded sheet-generation loop.
     if (!result.unplaced.empty() && !shouldStop(options)) {
+        // Bounded residual retry is applied to every residual part, not only
+        // small parts. This closes the common false-failure case where a
+        // greedy ordering misses a valid position on an already created sheet.
+        // Each pass is transactional at the sheet level and never bypasses
+        // exact true-shape validation.
+        const std::size_t retryPasses =
+            std::clamp<std::size_t>(options.residualRetryPasses, 1, 6);
+        for (std::size_t pass = 0; pass < retryPasses && !result.unplaced.empty(); ++pass) {
+            if (shouldStop(options)) break;
+
+            std::vector<std::string> next;
+            next.reserve(result.unplaced.size());
+
+            for (const auto& id : result.unplaced) {
+                const auto* instance = findInstance(instances, id);
+                if (!instance || shouldStop(options)) {
+                    next.push_back(id);
+                    continue;
+                }
+
+                bool recoveredOnExisting = false;
+                // Try every existing sheet in a different order on each pass.
+                // This deliberately revisits sheets rejected by the initial
+                // greedy ordering.
+                const std::size_t count = states.size();
+                if (count > 0) {
+                    std::vector<std::size_t> sheetOrder(count);
+                    std::iota(sheetOrder.begin(), sheetOrder.end(), 0);
+                    if (pass % 2 == 1) std::reverse(sheetOrder.begin(), sheetOrder.end());
+
+                    for (const auto sheetIndex : sheetOrder) {
+                        if (shouldStop(options)) break;
+                        SheetState trial = states[sheetIndex];
+                        if (!placeOnSheet(
+                                *instance,
+                                sheet,
+                                options,
+                                trial,
+                                effectiveRotations(options),
+                                &stats
+                            )) {
+                            continue;
+                        }
+                        states[sheetIndex] = std::move(trial);
+                        recoveredOnExisting = true;
+                        ++stats.refillMoves;
+                        break;
+                    }
+                }
+
+                if (!recoveredOnExisting) next.push_back(id);
+            }
+
+            result.unplaced = std::move(next);
+        }
+
         std::vector<std::string> recovered;
         recovered.reserve(result.unplaced.size());
 
@@ -2772,6 +2956,13 @@ Result nest(
 
         if (best.utilization < 0.0 || betterResult(candidate, best)) {
             best = std::move(candidate);
+        }
+
+        // A complete placement is authoritative: never allow a later
+        // heuristic attempt with more unplaced parts to replace it merely
+        // because its utilization happens to be higher.
+        if (best.unplaced.empty() && !candidate.unplaced.empty()) {
+            // Keep the complete result already selected.
         }
 
         // A feasible single-sheet result with every requested instance is a
