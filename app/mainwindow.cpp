@@ -572,7 +572,7 @@ void MainWindow::buildUi() {
     auto* rightTabs = new QTabWidget;
     rightTabs->addTab(repairViewPanel, "Раскладка");
     rightTabs->addTab(diagnosticsTable_, "Диагностика");
-    rightTabs->addTab(validatorTable_, "Production Validator");
+    rightTabs->addTab(validatorTable_, "Production Pipeline 2.0");
     rightTabs->addTab(benchmarkTable_, "Benchmark");
 
     splitter->addWidget(controlPanel);
