@@ -60,6 +60,92 @@ Point interiorProbeLocal(const Polygon& p) {
 
 namespace sheetnest::nfp {
 
+PolygonWithHoles normalizePolygonWithHoles(const Polygon& outer,
+                                           const std::vector<Polygon>& holes) {
+    PolygonWithHoles out;
+    out.outer = outer;
+    if (signedAreaLocal(out.outer) < 0.0) std::reverse(out.outer.begin(), out.outer.end());
+    for (auto h : holes) {
+        if (h.size() >= 3 && std::abs(signedAreaLocal(h)) > 1e-10) {
+            if (signedAreaLocal(h) > 0.0) std::reverse(h.begin(), h.end());
+            out.holes.push_back(std::move(h));
+        }
+    }
+    return out;
+}
+
+bool validatePolygonWithHoles(const PolygonWithHoles& region) {
+    if (region.outer.size() < 3) return false;
+    for (const auto& p : region.outer) if (!finiteLocal(p)) return false;
+    if (std::abs(signedAreaLocal(region.outer)) <= 1e-10) return false;
+    for (const auto& h : region.holes) {
+        if (h.size() < 3) return false;
+        for (const auto& p : h) if (!finiteLocal(p)) return false;
+        if (std::abs(signedAreaLocal(h)) <= 1e-10) return false;
+        if (!pointInInclusiveLocal(interiorProbeLocal(h), region.outer)) return false;
+        if (signedAreaLocal(h) >= 0.0) return false;
+    }
+    if (signedAreaLocal(region.outer) <= 0.0) return false;
+    return true;
+}
+
+bool pointInPolygonWithHoles(const Point& p, const PolygonWithHoles& region) {
+    if (!validatePolygonWithHoles(region)) return false;
+    if (!pointInInclusiveLocal(p, region.outer)) return false;
+    for (const auto& h : region.holes) {
+        if (pointInInclusiveLocal(p, h)) return false;
+    }
+    return true;
+}
+
+std::vector<PolygonWithHoles> classifyPolygonLoops(const std::vector<Polygon>& loops) {
+    std::vector<PolygonWithHoles> result;
+    struct Loop { Polygon p; int depth{}; };
+    std::vector<Loop> valid;
+    for (const auto& src : loops) {
+        Polygon p;
+        for (const auto& q : src) {
+            if (!finiteLocal(q)) continue;
+            if (p.empty() || std::hypot(p.back().x-q.x,p.back().y-q.y)>1e-9) p.push_back(q);
+        }
+        if (p.size() >= 3 && std::abs(signedAreaLocal(p)) > 1e-10) valid.push_back({std::move(p),0});
+    }
+    for (auto& a : valid) {
+        const Point probe = interiorProbeLocal(a.p);
+        for (const auto& b : valid) {
+            if (&a == &b) continue;
+            if (std::abs(signedAreaLocal(b.p)) > std::abs(signedAreaLocal(a.p)) &&
+                pointInInclusiveLocal(probe,b.p)) ++a.depth;
+        }
+    }
+    std::vector<int> owner(valid.size(),-1);
+    for (std::size_t i=0;i<valid.size();++i) {
+        if ((valid[i].depth & 1)==0) {
+            PolygonWithHoles r;
+            r.outer=valid[i].p;
+            if (signedAreaLocal(r.outer)<0) std::reverse(r.outer.begin(),r.outer.end());
+            owner[i]=static_cast<int>(result.size());
+            result.push_back(std::move(r));
+        }
+    }
+    for (std::size_t i=0;i<valid.size();++i) if (valid[i].depth&1) {
+        std::size_t parent=valid.size(); double area=std::numeric_limits<double>::infinity();
+        Point probe=interiorProbeLocal(valid[i].p);
+        for (std::size_t j=0;j<valid.size();++j) if ((valid[j].depth&1)==0 &&
+            pointInInclusiveLocal(probe,valid[j].p)) {
+            const double a=std::abs(signedAreaLocal(valid[j].p));
+            if(a<area){area=a;parent=j;}
+        }
+        if(parent<valid.size() && owner[parent]>=0){
+            Polygon h=valid[i].p;
+            if(signedAreaLocal(h)>0) std::reverse(h.begin(),h.end());
+            result[owner[parent]].holes.push_back(std::move(h));
+        }
+    }
+    return result;
+}
+
+
 struct PolygonWithHoles {
     Polygon outer;
     std::vector<Polygon> holes;
