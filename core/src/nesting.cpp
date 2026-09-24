@@ -235,7 +235,8 @@ std::vector<Candidate> candidatesFor(
     const SheetState& sheet,
     const Sheet& sheetSize,
     double gap,
-    double margin
+    double margin,
+    const Options& options
 ) {
     const Polygon rotatedPart = rotate(part, rotation);
     const auto pb = bounds(rotatedPart);
@@ -389,9 +390,9 @@ std::vector<Candidate> candidatesFor(
             obstacleRegion.sheetBoundary.clear();
 
             nfp::SearchOptions searchOptions;
-            searchOptions.budgetMs = 250.0;
+            searchOptions.budgetMs = options.nfpSearchBudgetMs;
             searchOptions.segmentSpacingMm = boundarySpacing;
-            searchOptions.maxCandidates = boundaryBudget;
+            searchOptions.maxCandidates = std::min(boundaryBudget, std::max<std::size_t>(1, options.candidateBudget));
             searchOptions.includeSheetBoundary = false;
 
             const auto search = nfp::searchFeasibilityRegion(
