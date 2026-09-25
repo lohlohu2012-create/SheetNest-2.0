@@ -18,6 +18,19 @@
 
 namespace sheetnest {
 
+const char* nestingRecoveryStageName(NestingRecoveryStage stage) {
+    switch (stage) {
+        case NestingRecoveryStage::None: return "None";
+        case NestingRecoveryStage::InitialPlacement: return "InitialPlacement";
+        case NestingRecoveryStage::SmallPartRefill: return "SmallPartRefill";
+        case NestingRecoveryStage::ResidualRetry: return "ResidualRetry";
+        case NestingRecoveryStage::FreshSheetRecovery: return "FreshSheetRecovery";
+        case NestingRecoveryStage::Optimizer: return "Optimizer";
+        case NestingRecoveryStage::AdaptiveRepair: return "AdaptiveRepair";
+    }
+    return "None";
+}
+
 const char* nestingTelemetryStageName(NestingTelemetryStage stage) {
     switch (stage) {
         case NestingTelemetryStage::None: return "None";
@@ -2407,6 +2420,7 @@ Result runAttempt(
             instance.id,
             instance.unitId.empty() ? instance.id + ":unit-1" : instance.unitId,
             NestingFailureReason::None,
+            NestingRecoveryStage::None, // recoveryStage
             0, // candidateChecks
             0, // collisionChecks
             0, // nfpChecks
