@@ -2670,6 +2670,19 @@ Result runAttempt(
                     continue;
                 }
 
+                const auto refillStatsBefore = stats;
+                const auto telemetryIt = std::find_if(
+                    result.instanceTelemetry.begin(),
+                    result.instanceTelemetry.end(),
+                    [&](const InstanceNestingTelemetry& t) {
+                        return t.instanceId == id;
+                    }
+                );
+                if (telemetryIt != result.instanceTelemetry.end()) {
+                    telemetryIt->stage = NestingTelemetryStage::SmallPartRefill;
+                    telemetryIt->stageAttempts++;
+                }
+
                 if (tryPlaceOnExistingSheets(
                         *instance,
                         states,
@@ -2681,6 +2694,25 @@ Result runAttempt(
                     ++stats.refillMoves;
                 } else {
                     nextRemaining.push_back(id);
+                }
+
+                if (telemetryIt != result.instanceTelemetry.end()) {
+                    telemetryIt->candidateChecks += stats.candidateChecks - refillStatsBefore.candidateChecks;
+                    telemetryIt->collisionChecks += stats.collisionChecks - refillStatsBefore.collisionChecks;
+                    telemetryIt->nfpChecks += stats.nfpChecks - refillStatsBefore.nfpChecks;
+                    telemetryIt->nfpAttempts += stats.nfpAttempts - refillStatsBefore.nfpAttempts;
+                    telemetryIt->nfpTimeouts += stats.nfpTimeouts - refillStatsBefore.nfpTimeouts;
+                    telemetryIt->nfpFallbacks += stats.nfpComplexityFallbacks - refillStatsBefore.nfpComplexityFallbacks;
+                    telemetryIt->nfpTimeoutFallbacks += stats.nfpTimeoutFallbacks - refillStatsBefore.nfpTimeoutFallbacks;
+                    telemetryIt->nfpCacheHits += stats.nfpCacheHits - refillStatsBefore.nfpCacheHits;
+                    telemetryIt->nfpCacheMisses += stats.nfpCacheMisses - refillStatsBefore.nfpCacheMisses;
+                    telemetryIt->boundsRejections += stats.boundsRejections - refillStatsBefore.boundsRejections;
+                    telemetryIt->collisionRejections += stats.collisionRejections - refillStatsBefore.collisionRejections;
+                    telemetryIt->feasibleCandidates += stats.feasibleCandidates - refillStatsBefore.feasibleCandidates;
+                    telemetryIt->lastSheetIndex = states.empty() ? static_cast<std::size_t>(-1) : states.size() - 1;
+                    if (telemetryIt->placed) {
+                        telemetryIt->reason = NestingFailureReason::None;
+                    }
                 }
             }
 
@@ -2717,6 +2749,18 @@ Result runAttempt(
                 }
 
                 bool recoveredOnExisting = false;
+                const auto retryStatsBefore = stats;
+                const auto retryTelemetryIt = std::find_if(
+                    result.instanceTelemetry.begin(),
+                    result.instanceTelemetry.end(),
+                    [&](const InstanceNestingTelemetry& t) {
+                        return t.instanceId == id;
+                    }
+                );
+                if (retryTelemetryIt != result.instanceTelemetry.end()) {
+                    retryTelemetryIt->stage = NestingTelemetryStage::ResidualRetry;
+                    retryTelemetryIt->stageAttempts++;
+                }
                 // Try every existing sheet in a different order on each pass.
                 // This deliberately revisits sheets rejected by the initial
                 // greedy ordering.
@@ -2747,6 +2791,23 @@ Result runAttempt(
                 }
 
                 if (!recoveredOnExisting) next.push_back(id);
+
+                if (retryTelemetryIt != result.instanceTelemetry.end()) {
+                    retryTelemetryIt->candidateChecks += stats.candidateChecks - retryStatsBefore.candidateChecks;
+                    retryTelemetryIt->collisionChecks += stats.collisionChecks - retryStatsBefore.collisionChecks;
+                    retryTelemetryIt->nfpChecks += stats.nfpChecks - retryStatsBefore.nfpChecks;
+                    retryTelemetryIt->nfpAttempts += stats.nfpAttempts - retryStatsBefore.nfpAttempts;
+                    retryTelemetryIt->nfpTimeouts += stats.nfpTimeouts - retryStatsBefore.nfpTimeouts;
+                    retryTelemetryIt->nfpFallbacks += stats.nfpComplexityFallbacks - retryStatsBefore.nfpComplexityFallbacks;
+                    retryTelemetryIt->nfpTimeoutFallbacks += stats.nfpTimeoutFallbacks - retryStatsBefore.nfpTimeoutFallbacks;
+                    retryTelemetryIt->nfpCacheHits += stats.nfpCacheHits - retryStatsBefore.nfpCacheHits;
+                    retryTelemetryIt->nfpCacheMisses += stats.nfpCacheMisses - retryStatsBefore.nfpCacheMisses;
+                    retryTelemetryIt->boundsRejections += stats.boundsRejections - retryStatsBefore.boundsRejections;
+                    retryTelemetryIt->collisionRejections += stats.collisionRejections - retryStatsBefore.collisionRejections;
+                    retryTelemetryIt->feasibleCandidates += stats.feasibleCandidates - retryStatsBefore.feasibleCandidates;
+                    retryTelemetryIt->lastSheetIndex = states.empty() ? static_cast<std::size_t>(-1) : states.size() - 1;
+                    if (!recoveredOnExisting) ++retryTelemetryIt->stageFailures;
+                }
             }
 
             result.unplaced = std::move(next);
@@ -2763,6 +2824,11 @@ Result runAttempt(
 
             SheetState recoveryState;
             const auto before = stats;
+            if (telemetryIt != result.instanceTelemetry.end()) {
+                telemetryIt->stage = NestingTelemetryStage::FreshSheetRecovery;
+                telemetryIt->stageAttempts++;
+                telemetryIt->lastSheetIndex = states.size();
+            }
             const bool placed = placeOnSheet(
                 *instance,
                 sheet,
@@ -2787,6 +2853,8 @@ Result runAttempt(
                     stats.collisionChecks - before.collisionChecks;
                 telemetryIt->nfpChecks +=
                     stats.nfpChecks - before.nfpChecks;
+                telemetryIt->nfpAttempts +=
+                    stats.nfpAttempts - before.nfpAttempts;
                 telemetryIt->nfpTimeouts +=
                     stats.nfpTimeouts - before.nfpTimeouts;
                 telemetryIt->nfpFallbacks +=
@@ -2813,6 +2881,9 @@ Result runAttempt(
                 if (telemetryIt != result.instanceTelemetry.end()) {
                     telemetryIt->placed = true;
                     telemetryIt->reason = NestingFailureReason::None;
+                    telemetryIt->stage = NestingTelemetryStage::FreshSheetRecovery;
+                } else {
+                    ++telemetryIt->stageFailures;
                 }
             }
         }
