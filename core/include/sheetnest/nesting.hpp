@@ -66,6 +66,18 @@ enum class NestingFailureReason {
     Cancelled
 };
 
+enum class NestingRecoveryStage {
+    None,
+    InitialPlacement,
+    SmallPartRefill,
+    ResidualRetry,
+    FreshSheetRecovery,
+    Optimizer,
+    AdaptiveRepair
+};
+
+const char* nestingRecoveryStageName(NestingRecoveryStage stage);
+
 enum class NestingTelemetryStage {
     None,
     ExistingSheetSearch,
@@ -84,6 +96,7 @@ struct InstanceNestingTelemetry {
     std::string instanceId;
     std::string unitId;
     NestingFailureReason reason{NestingFailureReason::None};
+    NestingRecoveryStage recoveryStage{NestingRecoveryStage::None};
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
     std::size_t nfpChecks{};
