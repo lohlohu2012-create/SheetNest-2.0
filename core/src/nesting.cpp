@@ -17,6 +17,22 @@
 #include <vector>
 
 namespace sheetnest {
+
+const char* nestingTelemetryStageName(NestingTelemetryStage stage) {
+    switch (stage) {
+        case NestingTelemetryStage::None: return "None";
+        case NestingTelemetryStage::ExistingSheetSearch: return "ExistingSheetSearch";
+        case NestingTelemetryStage::NewSheetSearch: return "NewSheetSearch";
+        case NestingTelemetryStage::SmallPartRefill: return "SmallPartRefill";
+        case NestingTelemetryStage::ResidualRetry: return "ResidualRetry";
+        case NestingTelemetryStage::FreshSheetRecovery: return "FreshSheetRecovery";
+        case NestingTelemetryStage::AdaptiveRepair: return "AdaptiveRepair";
+        case NestingTelemetryStage::Optimizer: return "Optimizer";
+        case NestingTelemetryStage::Finalization: return "Finalization";
+    }
+    return "None";
+}
+
 namespace {
 
 constexpr double kEps = 1e-7;
@@ -649,7 +665,7 @@ std::vector<Candidate> candidatesFor(
 
         if (nfpDomainIntersects) {
             if (control && control->shouldStop()) break;
-            if (stats) ++stats->nfpChecks;
+            if (stats) { ++stats->nfpChecks; ++stats->nfpAttempts; }
 
             const double characteristicSize = std::sqrt(std::max(1.0, partArea));
             const double boundarySpacing = smallPart
@@ -2394,6 +2410,7 @@ Result runAttempt(
             0, // candidateChecks
             0, // collisionChecks
             0, // nfpChecks
+            0, // nfpAttempts
             0, // nfpTimeouts
             0, // nfpFallbacks
             0, // nfpCacheHits
@@ -2402,6 +2419,10 @@ Result runAttempt(
             0, // collisionRejections
             0, // feasibleCandidates
             0, // elapsedMs
+            static_cast<std::size_t>(-1), // lastSheetIndex
+            NestingTelemetryStage::None, // stage
+            0, // stageAttempts
+            0, // stageFailures
             0, // repairRounds
             0, // repairConflictRounds
             false, // repairExtracted
@@ -2499,6 +2520,12 @@ Result runAttempt(
         }
 
         bool placed = false;
+        auto& telemetry = result.instanceTelemetry[telemetryIndex];
+        telemetry.stage = foundExisting
+            ? NestingTelemetryStage::ExistingSheetSearch
+            : NestingTelemetryStage::NewSheetSearch;
+        telemetry.stageAttempts++;
+        telemetry.lastSheetIndex = foundExisting ? bestSheet : states.size();
         if (foundExisting) {
             auto& state = states[bestSheet];
             state.shapes.push_back(std::move(bestShape));
@@ -2525,10 +2552,10 @@ Result runAttempt(
             );
             if (placed) states.push_back(std::move(state));
         }
-        auto& telemetry = result.instanceTelemetry[telemetryIndex];
         telemetry.candidateChecks += stats.candidateChecks - statsBeforeInstance.candidateChecks;
         telemetry.collisionChecks += stats.collisionChecks - statsBeforeInstance.collisionChecks;
         telemetry.nfpChecks += stats.nfpChecks - statsBeforeInstance.nfpChecks;
+        telemetry.nfpAttempts += stats.nfpAttempts - statsBeforeInstance.nfpAttempts;
         telemetry.nfpTimeouts += stats.nfpTimeouts - statsBeforeInstance.nfpTimeouts;
         telemetry.nfpFallbacks += stats.nfpComplexityFallbacks - statsBeforeInstance.nfpComplexityFallbacks;
         telemetry.nfpTimeoutFallbacks += stats.nfpTimeoutFallbacks - statsBeforeInstance.nfpTimeoutFallbacks;
@@ -2543,6 +2570,7 @@ Result runAttempt(
             ).count()
         );
         telemetry.placed = placed;
+        if (!placed) ++telemetry.stageFailures;
 
         if (!placed) {
             if (options.control && options.control->cancelRequested.load(std::memory_order_relaxed)) {
