@@ -4033,6 +4033,64 @@ void testNesting20NewSheetRecovery() {
     assert(result.sheets.size() == 2);
 }
 
+void testPerInstanceProductionNestingTelemetry() {
+    std::vector<Instance> parts{
+        {"telemetry-a", Part{"telemetry", rectangle(30.0, 30.0), {}}, "telemetry:unit-1"},
+        {"telemetry-b", Part{"telemetry", rectangle(30.0, 30.0), {}}, "telemetry:unit-2"}
+    };
+
+    Sheet sheet{70.0, 70.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 1;
+    options.gapMm = 2.0;
+    options.enableOptimizer = false;
+    options.enableSmallPartOptimization = false;
+    options.residualRetryPasses = 1;
+
+    const auto result = nest(parts, sheet, options);
+    assert(result.unplaced.empty());
+    assert(result.instanceTelemetry.size() == parts.size());
+
+    const auto& first = result.instanceTelemetry[0];
+    const auto& second = result.instanceTelemetry[1];
+
+    assert(first.instanceId == "telemetry-a");
+    assert(first.unitId == "telemetry:unit-1");
+    assert(first.placed);
+    assert(first.reason == NestingFailureReason::None);
+    assert(first.stage != NestingTelemetryStage::None);
+
+    assert(second.instanceId == "telemetry-b");
+    assert(second.unitId == "telemetry:unit-2");
+    assert(second.placed);
+    assert(second.reason == NestingFailureReason::None);
+    assert(second.nfpAttempts > 0);
+    assert(second.candidateChecks > 0);
+    assert(second.feasibleCandidates > 0);
+    assert(second.stageAttempts > 0);
+    assert(second.lastSheetIndex < result.sheets.size());
+    assert(std::string(nestingTelemetryStageName(second.stage)) != "None");
+
+    std::vector<Instance> impossible{
+        {"telemetry-fail", Part{"telemetry-fail", rectangle(120.0, 120.0), {}}, "telemetry:unit-fail"}
+    };
+
+    const auto failed = nest(impossible, sheet, options);
+    assert(failed.unplaced.size() == 1);
+    assert(failed.instanceTelemetry.size() == 1);
+
+    const auto& failure = failed.instanceTelemetry.front();
+    assert(failure.instanceId == "telemetry-fail");
+    assert(failure.unitId == "telemetry:unit-fail");
+    assert(!failure.placed);
+    assert(failure.reason == NestingFailureReason::NoFeasiblePosition);
+    assert(failure.stage == NestingTelemetryStage::NewSheetSearch);
+    assert(failure.lastSheetIndex == 0);
+    assert(failure.boundsRejections > 0);
+    assert(failure.stageFailures > 0);
+}
+
 void testNesting20OptimizerDoesNotDropPlacedInstances() {
     std::vector<Instance> parts;
     for (int i = 0; i < 16; ++i) {
@@ -4438,6 +4496,7 @@ testAdaptiveRepairConflictGraph();
     testAutomaticProductionRepair();
     testNesting20DenseResidualPacking();
     testNesting20NewSheetRecovery();
+    testPerInstanceProductionNestingTelemetry();
     testNesting20OptimizerDoesNotDropPlacedInstances();
 
 
