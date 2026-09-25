@@ -2824,6 +2824,13 @@ Result runAttempt(
 
             SheetState recoveryState;
             const auto before = stats;
+            const auto telemetryIt = std::find_if(
+                result.instanceTelemetry.begin(),
+                result.instanceTelemetry.end(),
+                [&](const InstanceNestingTelemetry& telemetry) {
+                    return telemetry.instanceId == id;
+                }
+            );
             if (telemetryIt != result.instanceTelemetry.end()) {
                 telemetryIt->stage = NestingTelemetryStage::FreshSheetRecovery;
                 telemetryIt->stageAttempts++;
