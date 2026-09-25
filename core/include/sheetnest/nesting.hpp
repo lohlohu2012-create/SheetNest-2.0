@@ -42,6 +42,7 @@ struct NestingStats {
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
     std::size_t nfpChecks{};
+    std::size_t nfpAttempts{};
     std::size_t refillMoves{};
     std::size_t exchangeAttempts{};
     std::size_t sheetsEliminated{};
@@ -65,6 +66,20 @@ enum class NestingFailureReason {
     Cancelled
 };
 
+enum class NestingTelemetryStage {
+    None,
+    ExistingSheetSearch,
+    NewSheetSearch,
+    SmallPartRefill,
+    ResidualRetry,
+    FreshSheetRecovery,
+    AdaptiveRepair,
+    Optimizer,
+    Finalization
+};
+
+const char* nestingTelemetryStageName(NestingTelemetryStage stage);
+
 struct InstanceNestingTelemetry {
     std::string instanceId;
     std::string unitId;
@@ -72,6 +87,7 @@ struct InstanceNestingTelemetry {
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
     std::size_t nfpChecks{};
+    std::size_t nfpAttempts{};
     std::size_t nfpTimeouts{};
     std::size_t nfpFallbacks{};
     std::size_t nfpTimeoutFallbacks{};
@@ -81,6 +97,10 @@ struct InstanceNestingTelemetry {
     std::size_t collisionRejections{};
     std::size_t feasibleCandidates{};
     std::uint64_t elapsedMs{};
+    std::size_t lastSheetIndex{static_cast<std::size_t>(-1)};
+    NestingTelemetryStage stage{NestingTelemetryStage::None};
+    std::size_t stageAttempts{};
+    std::size_t stageFailures{};
     std::size_t repairRounds{};
     std::size_t repairConflictRounds{};
     bool repairExtracted{};
