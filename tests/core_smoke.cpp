@@ -4122,6 +4122,95 @@ void testNesting20OptimizerDoesNotDropPlacedInstances() {
 }
 
 
+
+void testNestingBenchmarkProductionMetrics() {
+    std::vector<Instance> parts;
+    for (int i = 0; i < 10; ++i) {
+        parts.push_back({
+            "benchmark-" + std::to_string(i),
+            Part{"benchmark", rectangle(18.0, 9.0), {}},
+            "benchmark:unit-" + std::to_string(i + 1)
+        });
+    }
+
+    Sheet sheet{60.0, 60.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 6;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.enableSmallPartOptimization = true;
+    options.smallPartCandidateBudget = 512;
+    options.smallPartRefillPasses = 2;
+    options.residualRetryPasses = 2;
+
+    const auto benchmark = benchmarkNest(parts, sheet, options);
+
+    assert(benchmark.baseline.placed +
+               benchmark.baseline.skipped ==
+           parts.size());
+    assert(benchmark.optimized.placed +
+               benchmark.optimized.skipped ==
+           parts.size());
+
+    assert(benchmark.baseline.nfpAttempts ==
+           benchmark.baseline.nfpChecks);
+    assert(benchmark.optimized.nfpAttempts ==
+           benchmark.optimized.nfpChecks);
+
+    assert(benchmark.optimized.instanceTelemetry.size() ==
+           parts.size());
+
+    for (const auto& telemetry :
+         benchmark.optimized.instanceTelemetry) {
+        assert(!telemetry.instanceId.empty());
+        assert(!telemetry.unitId.empty());
+        if (telemetry.placed) {
+            assert(telemetry.reason == NestingFailureReason::None);
+        }
+    }
+
+    assert(
+        benchmark.delta.placed ==
+        static_cast<std::ptrdiff_t>(benchmark.optimized.placed) -
+        static_cast<std::ptrdiff_t>(benchmark.baseline.placed)
+    );
+
+    assert(
+        benchmark.delta.sheets ==
+        static_cast<std::ptrdiff_t>(benchmark.optimized.sheets) -
+        static_cast<std::ptrdiff_t>(benchmark.baseline.sheets)
+    );
+
+    assert(
+        std::abs(
+            benchmark.delta.utilizationPercentagePoints -
+            (benchmark.optimized.utilization -
+             benchmark.baseline.utilization) * 100.0
+        ) < 1e-9
+    );
+
+    assert(
+        benchmark.delta.utilizationImprovementPercentagePoints ==
+        benchmark.delta.utilizationPercentagePoints
+    );
+
+    // The benchmark must never manufacture an instance: every final
+    // placement belongs to the input set and skipped IDs are real IDs.
+    std::unordered_set<std::string> inputIds;
+    for (const auto& instance : parts) {
+        inputIds.insert(instance.id);
+    }
+
+    for (const auto& id : benchmark.optimized.placedInstanceIds) {
+        assert(inputIds.contains(id));
+    }
+    for (const auto& id : benchmark.optimized.skippedInstanceIds) {
+        assert(inputIds.contains(id));
+    }
+}
+
+
 void testDxfMalformedInputDiagnostics() {
     const auto empty = importDxf("");
     assert(!empty.valid());
@@ -4497,6 +4586,7 @@ testAdaptiveRepairConflictGraph();
     testNesting20DenseResidualPacking();
     testNesting20NewSheetRecovery();
     testPerInstanceProductionNestingTelemetry();
+    testNestingBenchmarkProductionMetrics();
     testNesting20OptimizerDoesNotDropPlacedInstances();
 
 
