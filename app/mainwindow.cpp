@@ -2112,6 +2112,18 @@ void MainWindow::exportBenchmarkResults() {
         object["placed"] = static_cast<qint64>(b.placed);
         object["skipped"] = static_cast<qint64>(b.skipped);
         object["utilization"] = b.utilization;
+        object["nfpCacheHitRate"] = b.nfpCacheHitRate;
+        object["nfpAttemptsPerPlaced"] = b.nfpAttemptsPerPlaced;
+        object["millisecondsPerPlaced"] = b.millisecondsPerPlaced;
+        object["nfpAttempts"] = static_cast<qint64>(b.nfpAttempts);
+        object["nfpTimeouts"] = static_cast<qint64>(b.nfpTimeouts);
+        object["initiallyPlaced"] = static_cast<qint64>(b.initiallyPlaced);
+        object["recoveredBySmallPart"] = static_cast<qint64>(b.recoveredBySmallPart);
+        object["recoveredByResidualRetry"] = static_cast<qint64>(b.recoveredByResidualRetry);
+        object["recoveredOnNewSheet"] = static_cast<qint64>(b.recoveredOnNewSheet);
+        object["recoveredByOptimizer"] = static_cast<qint64>(b.recoveredByOptimizer);
+        object["recoveredByAdaptiveRepair"] = static_cast<qint64>(b.recoveredByAdaptiveRepair);
+        object["finallyUnplaced"] = static_cast<qint64>(b.finallyUnplaced);
         object["candidateChecks"] = static_cast<qint64>(b.candidateChecks);
         object["collisionChecks"] = static_cast<qint64>(b.collisionChecks);
         object["nfpChecks"] = static_cast<qint64>(b.nfpChecks);
@@ -2176,13 +2188,23 @@ void MainWindow::exportBenchmarkResults() {
             QDateTime::currentDateTime().toString(Qt::ISODate);
         root["baseline"] = benchmarkObject(lastBenchmarkResult_.baseline);
         root["optimized"] = benchmarkObject(lastBenchmarkResult_.optimized);
+        root["optimizedPlacementSafetyPassed"] =
+            lastBenchmarkResult_.delta.optimizedPlacementSafetyPassed;
+        root["elapsedImprovementPercent"] =
+            lastBenchmarkResult_.delta.elapsedImprovementPercent;
+        root["sheetReductionPercent"] =
+            lastBenchmarkResult_.delta.sheetReductionPercent;
+        root["utilizationImprovementPercentagePoints"] =
+            lastBenchmarkResult_.delta.utilizationImprovementPercentagePoints;
+        root["nfpCacheHitRatePercentagePoints"] =
+            lastBenchmarkResult_.delta.nfpCacheHitRatePercentagePoints;
 
         const QByteArray data =
             QJsonDocument(root).toJson(QJsonDocument::Indented);
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,candidateChecks,collisionChecks,nfpChecks,refillMoves,exchangeAttempts,sheetsEliminated,optimizerPasses,nfpTimeouts,nfpFallbacks,nfpCacheHits,nfpCacheMisses,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,nfpAttempts,nfpChecks,nfpCacheHitRate,nfpCacheHits,nfpCacheMisses,nfpTimeouts,millisecondsPerPlaced,refillMoves,exchangeAttempts,optimizerPasses,initiallyPlaced,recoveredBySmallPart,recoveredByResidualRetry,recoveredOnNewSheet,recoveredByOptimizer,recoveredByAdaptiveRepair,finallyUnplaced,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -2198,6 +2220,23 @@ void MainWindow::exportBenchmarkResults() {
                 QString::number(static_cast<qulonglong>(b.placed)),
                 QString::number(static_cast<qulonglong>(b.skipped)),
                 QString::number(b.utilization * 100.0, 'f', 4),
+                QString::number(static_cast<qulonglong>(b.nfpAttempts)),
+                QString::number(static_cast<qulonglong>(b.nfpChecks)),
+                QString::number(b.nfpCacheHitRate, 'f', 6),
+                QString::number(static_cast<qulonglong>(b.nfpCacheHits)),
+                QString::number(static_cast<qulonglong>(b.nfpCacheMisses)),
+                QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+                QString::number(b.millisecondsPerPlaced, 'f', 4),
+                QString::number(static_cast<qulonglong>(b.refillMoves)),
+                QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
+                QString::number(static_cast<qulonglong>(b.optimizerPasses)),
+                QString::number(static_cast<qulonglong>(b.initiallyPlaced)),
+                QString::number(static_cast<qulonglong>(b.recoveredBySmallPart)),
+                QString::number(static_cast<qulonglong>(b.recoveredByResidualRetry)),
+                QString::number(static_cast<qulonglong>(b.recoveredOnNewSheet)),
+                QString::number(static_cast<qulonglong>(b.recoveredByOptimizer)),
+                QString::number(static_cast<qulonglong>(b.recoveredByAdaptiveRepair)),
+                QString::number(static_cast<qulonglong>(b.finallyUnplaced)),
                 QString::number(static_cast<qulonglong>(b.candidateChecks)),
                 QString::number(static_cast<qulonglong>(b.collisionChecks)),
                 QString::number(static_cast<qulonglong>(b.nfpChecks)),
