@@ -14,6 +14,7 @@
 #include "sheetnest/parallel_nesting.hpp"
 #include "sheetnest/production_validation.hpp"
 #include "sheetnest/spatial_index.hpp"
+#include "sheetnest/runtime_tuning.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -4562,6 +4563,50 @@ void testNfpPolygonWithHolesModel() {
     assert(nfp::pointInPolygonWithHoles({20,30},region) == false);
 }
 
+void testAdaptiveRuntimeTuningMassComplex() {
+    std::vector<Instance> instances;
+    for (std::size_t i = 0; i < 64; ++i) {
+        instances.push_back({"runtime-" + std::to_string(i + 1),
+            Part{"runtime-part", rectangle(20.0 + (i % 5), 10.0 + (i % 3)), {}, "runtime", "0"},
+            "runtime-unit-" + std::to_string(i + 1)});
+    }
+    Options options;
+    const auto report = tuneNestingOptions(instances, Sheet{500, 500, 5}, options);
+    assert(report.tuned);
+    assert(report.profile == "Mass-Nesting");
+    assert(report.options.nfpCandidateBudget <= 384);
+    assert(report.options.candidateVariantBudget <= 6);
+    assert(!report.reason.empty());
+}
+
+void testMassDxfStressPipeline() {
+    std::string dxf = "0\nSECTION\n2\nENTITIES\n";
+    for (int i = 0; i < 96; ++i) {
+        const int x = (i % 12) * 30, y = (i / 12) * 20;
+        dxf += "0\nLWPOLYLINE\n8\nSTRESS\n70\n1\n";
+        dxf += "10\n" + std::to_string(x) + "\n20\n" + std::to_string(y) + "\n";
+        dxf += "10\n" + std::to_string(x + 20) + "\n20\n" + std::to_string(y) + "\n";
+        dxf += "10\n" + std::to_string(x + 20) + "\n20\n" + std::to_string(y + 12) + "\n";
+        dxf += "10\n" + std::to_string(x) + "\n20\n" + std::to_string(y + 12) + "\n";
+    }
+    dxf += "ENDSEC\n0\nEOF\n";
+    const auto doc = importDxf(dxf, 0.05);
+    assert(doc.valid());
+    assert(doc.contours.size() == 96);
+    const auto instances = instancesFromDxf(doc, 1);
+    assert(instances.size() == 96);
+    Options options;
+    options.iterations = 2;
+    options.enableOptimizer = false;
+    auto control = std::make_shared<NestingRunControl>();
+    control->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    options.control = control;
+    const auto result = nest(instances, Sheet{400, 300, 5}, options);
+    std::size_t placed = 0;
+    for (const auto& placements : result.sheets) placed += placements.size();
+    assert(placed + result.unplaced.size() == instances.size());
+}
+
 void testNfpTopologyComponentsAndIslands() {
     Polygon a{{0,0},{100,0},{100,100},{0,100}};
     Polygon h{{20,20},{20,80},{80,80},{80,20}};
@@ -4748,6 +4793,8 @@ testAdaptiveRepairConflictGraph();
     testNestingBenchmarkSelector();
     testNestingBenchmarkMatrix();
     testNesting20OptimizerDoesNotDropPlacedInstances();
+    testAdaptiveRuntimeTuningMassComplex();
+    testMassDxfStressPipeline();
 
 
     std::cout << "[PASS] NFP tests" << std::endl;
