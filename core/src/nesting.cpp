@@ -2068,7 +2068,7 @@ bool localRepack(
             bool success = true;
 
             for (const auto& id : ids) {
-                if (shouldStop(activeOptions)) {
+                if (shouldStop(options)) {
                     success = false;
                     break;
                 }
