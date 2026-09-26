@@ -555,7 +555,7 @@ void MainWindow::buildUi() {
         "Refill", "Exchange", "Optimizer passes",
         "Первично", "Small-part", "Residual", "Новый лист",
         "Optimizer rescue", "Adaptive repair", "Итогово пропущено",
-        "Placed IDs", "Skipped IDs", "Без потерь", "Recovery telemetry"
+        "Placed IDs", "Skipped IDs", "Без потерь", "Recovery telemetry", "Анализ"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1607,7 +1607,7 @@ void MainWindow::populateProductionValidation() {
 
 void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
     if (!benchmarkTable_) return;
-    benchmarkTable_->setColumnCount(27);
+    benchmarkTable_->setColumnCount(28);
     benchmarkTable_->setRowCount(3);
     const auto signedNumber = [](std::ptrdiff_t v) {
         return QString::number(static_cast<qlonglong>(v));
@@ -1659,6 +1659,11 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
         };
         for (int column = 0; column < 27; ++column)
             benchmarkTable_->setItem(row, column, new QTableWidgetItem(values[column]));
+        benchmarkTable_->setItem(row, 27, new QTableWidgetItem(
+            row == 1
+                ? QString::fromStdString(benchmarkResult.analysis.summary)
+                : QString()
+        ));
     }
     const auto& d = benchmarkResult.delta;
     const QString delta[] = {
@@ -1681,6 +1686,11 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
     };
     for (int column = 0; column < 27; ++column)
         benchmarkTable_->setItem(2, column, new QTableWidgetItem(delta[column]));
+    benchmarkTable_->setItem(2, 27, new QTableWidgetItem(
+        QString("%1: %2")
+            .arg(QString::fromStdString(benchmarkResult.analysis.bottleneckName))
+            .arg(QString::fromStdString(benchmarkResult.analysis.summary))
+    ));
     benchmarkTable_->resizeColumnsToContents();
 }
 void MainWindow::calculate() {
@@ -2198,6 +2208,14 @@ void MainWindow::exportBenchmarkResults() {
             lastBenchmarkResult_.delta.utilizationImprovementPercentagePoints;
         root["nfpCacheHitRatePercentagePoints"] =
             lastBenchmarkResult_.delta.nfpCacheHitRatePercentagePoints;
+        root["analysisBottleneck"] =
+            QString::fromStdString(lastBenchmarkResult_.analysis.bottleneckName);
+        root["analysisSummary"] =
+            QString::fromStdString(lastBenchmarkResult_.analysis.summary);
+        root["analysisPlacementSafetyPassed"] =
+            lastBenchmarkResult_.analysis.placementSafetyPassed;
+        root["analysisLossFree"] =
+            lastBenchmarkResult_.analysis.lossFree;
 
         const QByteArray data =
             QJsonDocument(root).toJson(QJsonDocument::Indented);
