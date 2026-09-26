@@ -140,12 +140,22 @@ struct BenchmarkMatrixEntry {
     bool placementSafetyPassed{};
 };
 
+struct BenchmarkSelection {
+    std::string profile;
+    std::string reason;
+    Options options{};
+    BenchmarkCase result;
+    bool placementSafetyPassed{};
+    std::size_t evaluatedCandidates{};
+};
+
 struct BenchmarkResult {
     BenchmarkCase baseline;
     BenchmarkCase optimized;
     BenchmarkDelta delta;
     BenchmarkAnalysis analysis;
     std::vector<BenchmarkMatrixEntry> matrix;
+    BenchmarkSelection selection{};
 };
 
 BenchmarkAnalysis analyzeBenchmark(const BenchmarkResult& result);
@@ -154,6 +164,12 @@ std::vector<BenchmarkMatrixEntry> benchmarkMatrix(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
     const Options& optimizedOptions
+);
+
+BenchmarkSelection selectBenchmarkConfiguration(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& baseOptions
 );
 
 BenchmarkResult benchmarkNest(
