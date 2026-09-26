@@ -488,6 +488,7 @@ BenchmarkResult benchmarkNest(
         result.optimized
     );
     result.analysis = analyzeBenchmark(result);
+    result.matrix = benchmarkMatrix(instances, sheet, optimizedOptions);
 
     return result;
 }
