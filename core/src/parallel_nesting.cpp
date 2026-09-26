@@ -1,5 +1,6 @@
 #include "sheetnest/parallel_nesting.hpp"
 #include "sheetnest/production_validation.hpp"
+#include "sheetnest/runtime_tuning.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -148,7 +149,16 @@ Result ParallelNestingController::run(
     const auto control = impl_->control;
     const auto started = Clock::now();
 
-    Options optimizerOptions = nestingOptions;
+    // Tune once for the whole parallel run. Workers must share the same
+    // bounded NFP/candidate profile; otherwise a complex DXF could make each
+    // worker independently select a different hot-path budget and defeat the
+    // global runtime guard.
+    const auto tuning =
+        tuneNestingOptions(instances, sheet, nestingOptions);
+    Options activeNestingOptions = tuning.options;
+    activeNestingOptions.control = control;
+
+    Options optimizerOptions = activeNestingOptions;
     optimizerOptions.iterations = 1;
     optimizerOptions.enableOptimizer = true;
     optimizerOptions.control = control;
@@ -257,7 +267,7 @@ Result ParallelNestingController::run(
                     std::to_string(iteration + 1)
             });
 
-            Options iterationOptions = nestingOptions;
+            Options iterationOptions = activeNestingOptions;
             iterationOptions.iterations = 1;
             iterationOptions.seed =
                 options.seed +
@@ -500,12 +510,12 @@ Result ParallelNestingController::run(
     auto validation = validateProductionResult(
         instances,
         sheet,
-        nestingOptions,
+        activeNestingOptions,
         best
     );
 
     if (!validation.valid &&
-        nestingOptions.enableAutoRepair &&
+        activeNestingOptions.enableAutoRepair &&
         !control->shouldStop()) {
         publish({
             NestingProgressPhase::ProductionValidation,
@@ -525,12 +535,12 @@ Result ParallelNestingController::run(
                 std::to_string(
                     std::max<std::size_t>(
                         1,
-                        nestingOptions.autoRepairAttempts
+                        activeNestingOptions.autoRepairAttempts
                     )
                 ) +
                 " попыток, бюджет " +
                 std::to_string(
-                    nestingOptions.autoRepairTimeBudgetMs
+                    activeNestingOptions.autoRepairTimeBudgetMs
                 ) +
                 " мс; выбирается лучший валидный кандидат"
         });
@@ -541,7 +551,7 @@ Result ParallelNestingController::run(
         const bool repairedOk = repairProductionResult(
             instances,
             sheet,
-            nestingOptions,
+            activeNestingOptions,
             repaired,
             &repairedReport
         );
