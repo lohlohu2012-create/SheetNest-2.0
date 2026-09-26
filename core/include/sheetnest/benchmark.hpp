@@ -42,6 +42,14 @@ struct BenchmarkCase {
     std::size_t telemetryRepairExtracted{};
     std::size_t telemetryRepairMoved{};
 
+    std::size_t initiallyPlaced{};
+    std::size_t recoveredBySmallPart{};
+    std::size_t recoveredByResidualRetry{};
+    std::size_t recoveredOnNewSheet{};
+    std::size_t recoveredByOptimizer{};
+    std::size_t recoveredByAdaptiveRepair{};
+    std::size_t finallyUnplaced{};
+
     std::vector<std::string> placedInstanceIds;
     std::vector<std::string> skippedInstanceIds;
     std::vector<InstanceNestingTelemetry> instanceTelemetry;
@@ -79,6 +87,14 @@ struct BenchmarkDelta {
     std::ptrdiff_t telemetryRepairRounds{};
     std::ptrdiff_t telemetryRepairExtracted{};
     std::ptrdiff_t telemetryRepairMoved{};
+
+    std::ptrdiff_t initiallyPlaced{};
+    std::ptrdiff_t recoveredBySmallPart{};
+    std::ptrdiff_t recoveredByResidualRetry{};
+    std::ptrdiff_t recoveredOnNewSheet{};
+    std::ptrdiff_t recoveredByOptimizer{};
+    std::ptrdiff_t recoveredByAdaptiveRepair{};
+    std::ptrdiff_t finallyUnplaced{};
 
     double elapsedImprovementPercent{};
     double sheetReductionPercent{};
