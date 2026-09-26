@@ -686,8 +686,20 @@ std::vector<Candidate> candidatesFor(
                 ? std::clamp(options.smallPartBoundarySpacingMm, 0.25, 10.0)
                 : std::clamp(std::max(4.0, characteristicSize * 0.08), 4.0, 20.0);
             const std::size_t boundaryBudget = smallPart
-                ? std::max<std::size_t>(128, std::min<std::size_t>(options.smallPartCandidateBudget, 2048))
-                : (part.size() > 256 ? 72 : (part.size() > 128 ? 96 : 128));
+                ? std::max<std::size_t>(
+                    64,
+                    std::min<std::size_t>(
+                        std::min<std::size_t>(options.smallPartCandidateBudget, options.nfpCandidateBudget),
+                        2048
+                    )
+                )
+                : std::max<std::size_t>(
+                    64,
+                    std::min<std::size_t>(
+                        options.nfpCandidateBudget,
+                        part.size() > 256 ? 72 : (part.size() > 128 ? 96 : 128)
+                    )
+                );
 
             nfp::SearchOptions searchOptions;
             searchOptions.boundarySpacingMm = boundarySpacing;
