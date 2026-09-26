@@ -45,6 +45,7 @@ struct InstanceDiagnostic {
     bool repairExtracted{};
     bool repairMoved{};
     std::string failureReason;
+    std::string recoveryStage;
     std::string finalStatus;
 };
 
