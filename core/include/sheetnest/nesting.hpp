@@ -198,6 +198,15 @@ struct Options {
     double candidateRotationWeight{0.15};
     std::size_t candidateVariantBudget{8};
     std::size_t residualRetryPasses{3};
+    bool enableAdaptiveRuntimeTuning{true};
+    std::size_t nfpMaxInputVertices{512};
+    std::size_t nfpMaxConvexPieces{128};
+    std::size_t nfpMaxPairwisePolygons{4096};
+    std::size_t nfpMaxUnionSegments{20000};
+    std::size_t nfpCandidateBudget{512};
+    std::size_t nfpCandidateBudgetComplex{192};
+    double nfpComplexityVertexThreshold{320.0};
+    double nfpComplexityPartCountThreshold{48.0};
 
     std::shared_ptr<NestingRunControl> control{};
 };
