@@ -37,6 +37,20 @@ BenchmarkCase runCase(
             ? instances.size() - benchmark.skipped
             : 0;
     benchmark.utilization = result.utilization;
+    benchmark.nfpCacheHitRate =
+        (benchmark.nfpCacheHits + benchmark.nfpCacheMisses) > 0
+            ? static_cast<double>(benchmark.nfpCacheHits) /
+              static_cast<double>(benchmark.nfpCacheHits + benchmark.nfpCacheMisses)
+            : 0.0;
+    benchmark.nfpAttemptsPerPlaced =
+        benchmark.placed > 0
+            ? static_cast<double>(benchmark.nfpAttempts) /
+              static_cast<double>(benchmark.placed)
+            : 0.0;
+    benchmark.millisecondsPerPlaced =
+        benchmark.placed > 0
+            ? benchmark.milliseconds / static_cast<double>(benchmark.placed)
+            : benchmark.milliseconds;
 
     benchmark.candidateChecks = result.stats.candidateChecks;
     benchmark.collisionChecks = result.stats.collisionChecks;
@@ -258,6 +272,14 @@ BenchmarkDelta makeDelta(
 
     delta.utilizationImprovementPercentagePoints =
         delta.utilizationPercentagePoints;
+    delta.nfpCacheHitRatePercentagePoints =
+        (optimized.nfpCacheHitRate - baseline.nfpCacheHitRate) * 100.0;
+    delta.nfpAttemptsPerPlacedDelta =
+        optimized.nfpAttemptsPerPlaced - baseline.nfpAttemptsPerPlaced;
+    delta.millisecondsPerPlacedDelta =
+        optimized.millisecondsPerPlaced - baseline.millisecondsPerPlaced;
+    delta.optimizedPlacementSafetyPassed =
+        optimized.placed >= baseline.placed;
 
     return delta;
 }
