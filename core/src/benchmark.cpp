@@ -1,7 +1,9 @@
 #include "sheetnest/benchmark.hpp"
 #include "sheetnest/nfp.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <limits>
 #include <unordered_set>
 
 namespace sheetnest {
@@ -444,6 +446,197 @@ std::vector<BenchmarkMatrixEntry> benchmarkMatrix(
     }
 
     return matrix;
+}
+
+BenchmarkSelection selectBenchmarkConfiguration(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& baseOptions
+) {
+    BenchmarkSelection selection;
+    selection.profile = "Balanced";
+    selection.options = baseOptions;
+
+    Options baseline = baseOptions;
+    baseline.iterations = 1;
+    baseline.enableOptimizer = false;
+    baseline.enableProductionValidation = false;
+    baseline.enableAutoRepair = false;
+    baseline.enableAdaptiveDestroyRepair = false;
+    baseline.enableSmallPartOptimization = false;
+    baseline.autoRepairAttempts = 0;
+    baseline.autoRepairTimeBudgetMs = 0;
+    baseline.adaptiveRepairAttempts = 0;
+    baseline.adaptiveRepairMaxNeighbors = 0;
+    baseline.adaptiveRepairRounds = 0;
+    baseline.smallPartRefillPasses = 1;
+    baseline.residualRetryPasses = 1;
+
+    const BenchmarkCase baselineResult =
+        runCase("Selector baseline", instances, sheet, baseline);
+
+    struct Candidate {
+        std::string name;
+        Options options;
+    };
+
+    const auto boundedAdd = [](std::size_t value, std::size_t delta) {
+        return std::min<std::size_t>(
+            128,
+            value + delta
+        );
+    };
+    const auto boundedMul = [](std::size_t value, double factor, std::size_t minValue) {
+        const auto scaled = static_cast<std::size_t>(
+            static_cast<double>(value) * factor
+        );
+        return std::min<std::size_t>(
+            128,
+            std::max(minValue, scaled)
+        );
+    };
+
+    std::vector<Candidate> candidates;
+    candidates.push_back({"Balanced", baseOptions});
+
+    Options fast = baseOptions;
+    fast.iterations = std::max<std::size_t>(
+        1, baseOptions.iterations / 2
+    );
+    fast.candidateVariantBudget = std::max<std::size_t>(
+        4, baseOptions.candidateVariantBudget / 2
+    );
+    fast.smallPartCandidateBudget = std::max<std::size_t>(
+        256, baseOptions.smallPartCandidateBudget / 2
+    );
+    fast.smallPartRefillPasses = std::max<std::size_t>(
+        1, baseOptions.smallPartRefillPasses / 2
+    );
+    fast.residualRetryPasses = std::max<std::size_t>(
+        1, baseOptions.residualRetryPasses / 2
+    );
+    fast.autoRepairAttempts = std::max<std::size_t>(
+        1, baseOptions.autoRepairAttempts / 2
+    );
+    fast.adaptiveRepairAttempts = std::max<std::size_t>(
+        1, baseOptions.adaptiveRepairAttempts / 2
+    );
+    candidates.push_back({"Fast", fast});
+
+    Options deep = baseOptions;
+    deep.iterations = boundedMul(baseOptions.iterations, 1.5, 2);
+    deep.candidateVariantBudget = boundedMul(
+        baseOptions.candidateVariantBudget, 2.0, 4
+    );
+    deep.smallPartCandidateBudget = std::min<std::size_t>(
+        8192,
+        boundedMul(baseOptions.smallPartCandidateBudget, 1.5, 256)
+    );
+    deep.smallPartRefillPasses = boundedAdd(
+        baseOptions.smallPartRefillPasses, 2
+    );
+    deep.residualRetryPasses = boundedAdd(
+        baseOptions.residualRetryPasses, 2
+    );
+    deep.adaptiveRepairAttempts = boundedAdd(
+        baseOptions.adaptiveRepairAttempts, 2
+    );
+    deep.adaptiveRepairRounds = boundedAdd(
+        baseOptions.adaptiveRepairRounds, 1
+    );
+    candidates.push_back({"Deep NFP", deep});
+
+    Options recovery = baseOptions;
+    recovery.enableSmallPartOptimization = true;
+    recovery.smallPartRefillPasses = boundedAdd(
+        baseOptions.smallPartRefillPasses, 2
+    );
+    recovery.residualRetryPasses = boundedAdd(
+        baseOptions.residualRetryPasses, 2
+    );
+    recovery.enableAutoRepair = true;
+    recovery.autoRepairAttempts = boundedAdd(
+        baseOptions.autoRepairAttempts, 4
+    );
+    recovery.enableAdaptiveDestroyRepair = true;
+    recovery.adaptiveRepairAttempts = boundedAdd(
+        baseOptions.adaptiveRepairAttempts, 2
+    );
+    recovery.adaptiveRepairRounds = boundedAdd(
+        baseOptions.adaptiveRepairRounds, 1
+    );
+    candidates.push_back({"Recovery-focused", recovery});
+
+    bool foundSafe = false;
+    std::size_t safeCount = 0;
+    BenchmarkCase best;
+    Options bestOptions = baseOptions;
+    std::string bestProfile = "Balanced";
+
+    const auto better = [](const BenchmarkCase& lhs, const BenchmarkCase& rhs) {
+        if (lhs.placed != rhs.placed) {
+            return lhs.placed > rhs.placed;
+        }
+        if (lhs.sheets != rhs.sheets) {
+            return lhs.sheets < rhs.sheets;
+        }
+        if (lhs.utilization != rhs.utilization) {
+            return lhs.utilization > rhs.utilization;
+        }
+        return lhs.milliseconds < rhs.milliseconds;
+    };
+
+    for (const auto& candidate : candidates) {
+        const auto current =
+            runCase("Selector: " + candidate.name, instances, sheet, candidate.options);
+        const bool safe = current.placed >= baselineResult.placed;
+        if (!safe) {
+            continue;
+        }
+
+        ++safeCount;
+        if (!foundSafe || better(current, best)) {
+            foundSafe = true;
+            best = current;
+            bestOptions = candidate.options;
+            bestProfile = candidate.name;
+        }
+    }
+
+    if (!foundSafe) {
+        best = runCase(
+            "Selector fallback: Balanced",
+            instances,
+            sheet,
+            baseOptions
+        );
+        bestOptions = baseOptions;
+        bestProfile = "Balanced";
+        selection.reason =
+            "Ни один профиль не превысил базовый уровень размещения; "
+            "оставлена исходная конфигурация.";
+    } else if (bestProfile == "Balanced") {
+        selection.reason =
+            "Базовый профиль сохранил безопасность размещения и не уступил "
+            "остальным безопасным профилям по целевым метрикам.";
+    } else {
+        selection.reason =
+            "Выбран безопасный профиль с приоритетом: размещено → листы → "
+            "использование → время.";
+    }
+
+    selection.profile = bestProfile;
+    selection.options = bestOptions;
+    selection.result = best;
+    selection.placementSafetyPassed =
+        best.placed >= baselineResult.placed;
+    selection.evaluatedCandidates = candidates.size();
+
+    if (safeCount == 0) {
+        selection.placementSafetyPassed = false;
+    }
+
+    return selection;
 }
 
 BenchmarkResult benchmarkNest(
