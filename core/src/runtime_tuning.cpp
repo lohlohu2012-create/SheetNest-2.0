@@ -1,5 +1,6 @@
 #include "sheetnest/runtime_tuning.hpp"
 #include <algorithm>
+#include <cstdint>
 namespace sheetnest {
 RuntimeTuningReport tuneNestingOptions(
     const std::vector<Instance>& instances,
@@ -42,6 +43,7 @@ RuntimeTuningReport tuneNestingOptions(
         report.options.nfpMaxPairwisePolygons = std::min(report.options.nfpMaxPairwisePolygons, static_cast<std::size_t>(2048));
         report.options.nfpMaxUnionSegments = std::min(report.options.nfpMaxUnionSegments, static_cast<std::size_t>(12000));
         report.options.nfpCandidateBudget = std::min(report.options.nfpCandidateBudget, report.options.nfpCandidateBudgetComplex);
+        report.options.nfpTimeBudgetMs = std::min<std::uint64_t>(report.options.nfpTimeBudgetMs, 180);
         report.options.candidateVariantBudget = std::min(report.options.candidateVariantBudget, static_cast<std::size_t>(6));
         report.options.smallPartCandidateBudget = std::min(report.options.smallPartCandidateBudget, static_cast<std::size_t>(768));
         report.options.residualRetryPasses = std::min(report.options.residualRetryPasses, static_cast<std::size_t>(2));
@@ -49,6 +51,7 @@ RuntimeTuningReport tuneNestingOptions(
     } else {
         report.profile = "Mass-Nesting";
         report.options.nfpCandidateBudget = std::min(report.options.nfpCandidateBudget, static_cast<std::size_t>(384));
+        report.options.nfpTimeBudgetMs = std::min<std::uint64_t>(report.options.nfpTimeBudgetMs, 220);
         report.options.candidateVariantBudget = std::min(report.options.candidateVariantBudget, static_cast<std::size_t>(6));
         report.options.smallPartCandidateBudget = std::min(report.options.smallPartCandidateBudget, static_cast<std::size_t>(1024));
         report.options.residualRetryPasses = std::min(report.options.residualRetryPasses, static_cast<std::size_t>(2));
