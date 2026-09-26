@@ -2573,6 +2573,29 @@ void testNestingBenchmark() {
         benchmark.optimized.nfpComplexityFallbacks ==
         optimizedDirect.stats.nfpComplexityFallbacks
     );
+
+    assert(benchmark.baseline.nfpCacheHitRate >= 0.0);
+    assert(benchmark.baseline.nfpCacheHitRate <= 1.0);
+    assert(benchmark.optimized.nfpCacheHitRate >= 0.0);
+    assert(benchmark.optimized.nfpCacheHitRate <= 1.0);
+    assert(benchmark.baseline.nfpAttemptsPerPlaced >= 0.0);
+    assert(benchmark.optimized.nfpAttemptsPerPlaced >= 0.0);
+    assert(benchmark.baseline.millisecondsPerPlaced >= 0.0);
+    assert(benchmark.optimized.millisecondsPerPlaced >= 0.0);
+    assert(
+        benchmark.delta.optimizedPlacementSafetyPassed ==
+        (benchmark.optimized.placed >= benchmark.baseline.placed)
+    );
+    assert(
+        benchmark.optimized.initiallyPlaced +
+        benchmark.optimized.recoveredBySmallPart +
+        benchmark.optimized.recoveredByResidualRetry +
+        benchmark.optimized.recoveredOnNewSheet +
+        benchmark.optimized.recoveredByOptimizer +
+        benchmark.optimized.recoveredByAdaptiveRepair +
+        benchmark.optimized.finallyUnplaced ==
+        instances.size()
+    );
 }
 
 void testSpatialIndexBroadPhase() {
