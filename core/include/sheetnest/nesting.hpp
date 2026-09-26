@@ -205,6 +205,7 @@ struct Options {
     std::size_t nfpMaxUnionSegments{20000};
     std::size_t nfpCandidateBudget{512};
     std::size_t nfpCandidateBudgetComplex{192};
+    std::uint64_t nfpTimeBudgetMs{250};
     double nfpComplexityVertexThreshold{320.0};
     double nfpComplexityPartCountThreshold{48.0};
 
