@@ -213,6 +213,28 @@ BenchmarkDelta makeDelta(
             baseline.telemetryRepairMoved
         );
 
+    delta.initiallyPlaced =
+        static_cast<std::ptrdiff_t>(optimized.initiallyPlaced) -
+        static_cast<std::ptrdiff_t>(baseline.initiallyPlaced);
+    delta.recoveredBySmallPart =
+        static_cast<std::ptrdiff_t>(optimized.recoveredBySmallPart) -
+        static_cast<std::ptrdiff_t>(baseline.recoveredBySmallPart);
+    delta.recoveredByResidualRetry =
+        static_cast<std::ptrdiff_t>(optimized.recoveredByResidualRetry) -
+        static_cast<std::ptrdiff_t>(baseline.recoveredByResidualRetry);
+    delta.recoveredOnNewSheet =
+        static_cast<std::ptrdiff_t>(optimized.recoveredOnNewSheet) -
+        static_cast<std::ptrdiff_t>(baseline.recoveredOnNewSheet);
+    delta.recoveredByOptimizer =
+        static_cast<std::ptrdiff_t>(optimized.recoveredByOptimizer) -
+        static_cast<std::ptrdiff_t>(baseline.recoveredByOptimizer);
+    delta.recoveredByAdaptiveRepair =
+        static_cast<std::ptrdiff_t>(optimized.recoveredByAdaptiveRepair) -
+        static_cast<std::ptrdiff_t>(baseline.recoveredByAdaptiveRepair);
+    delta.finallyUnplaced =
+        static_cast<std::ptrdiff_t>(optimized.finallyUnplaced) -
+        static_cast<std::ptrdiff_t>(baseline.finallyUnplaced);
+
     if (baseline.milliseconds > 0.0) {
         delta.elapsedImprovementPercent =
             (baseline.milliseconds - optimized.milliseconds) /
