@@ -130,6 +130,7 @@ void enrichDiagnostics(
                 diagnostic.repairExtracted = telemetry.repairExtracted;
                 diagnostic.repairMoved = telemetry.repairMoved;
                 diagnostic.failureReason = failureReasonCode(telemetry.reason);
+                diagnostic.recoveryStage = nestingRecoveryStageName(telemetry.recoveryStage);
                 break;
             }
         }
