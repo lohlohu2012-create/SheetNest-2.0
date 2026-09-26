@@ -15,6 +15,9 @@ struct BenchmarkCase {
     std::size_t placed{};
     std::size_t skipped{};
     double utilization{};
+    double nfpCacheHitRate{};
+    double nfpAttemptsPerPlaced{};
+    double millisecondsPerPlaced{};
 
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
@@ -99,6 +102,10 @@ struct BenchmarkDelta {
     double elapsedImprovementPercent{};
     double sheetReductionPercent{};
     double utilizationImprovementPercentagePoints{};
+    double nfpCacheHitRatePercentagePoints{};
+    double nfpAttemptsPerPlacedDelta{};
+    double millisecondsPerPlacedDelta{};
+    bool optimizedPlacementSafetyPassed{};
 };
 
 struct BenchmarkResult {
