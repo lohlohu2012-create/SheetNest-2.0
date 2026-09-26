@@ -2222,7 +2222,7 @@ void MainWindow::exportBenchmarkResults() {
         file.write(data);
     } else {
         QString csv;
-        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,nfpAttempts,nfpChecks,nfpCacheHitRate,nfpCacheHits,nfpCacheMisses,nfpTimeouts,millisecondsPerPlaced,refillMoves,exchangeAttempts,optimizerPasses,initiallyPlaced,recoveredBySmallPart,recoveredByResidualRetry,recoveredOnNewSheet,recoveredByOptimizer,recoveredByAdaptiveRepair,finallyUnplaced,placedInstanceIds,skippedInstanceIds,instanceTelemetry\n";
+        csv += "mode,time_ms,sheets,placed,skipped,utilization_percent,nfpAttempts,nfpChecks,nfpCacheHitRate,nfpCacheHits,nfpCacheMisses,nfpTimeouts,millisecondsPerPlaced,refillMoves,exchangeAttempts,optimizerPasses,initiallyPlaced,recoveredBySmallPart,recoveredByResidualRetry,recoveredOnNewSheet,recoveredByOptimizer,recoveredByAdaptiveRepair,finallyUnplaced,candidateChecks,collisionChecks,nfpChecksTotal,refillMovesTotal,exchangeAttemptsTotal,sheetsEliminated,optimizerPassesTotal,nfpTimeoutsTotal,nfpComplexityFallbacks,nfpCacheHitsTotal,nfpCacheMissesTotal,placedInstanceIds,skippedInstanceIds,instanceTelemetry,analysis_bottleneck,analysis_summary\n";
 
         const BenchmarkCase rows[] = {
             lastBenchmarkResult_.baseline,
@@ -2304,10 +2304,16 @@ void MainWindow::exportBenchmarkResults() {
                     return QString::fromUtf8(
                         QJsonDocument(telemetry).toJson(QJsonDocument::Compact)
                     );
-                }()
+                }(),
+                (&b == &rows[1])
+                    ? QString::fromStdString(lastBenchmarkResult_.analysis.bottleneckName)
+                    : QString(),
+                (&b == &rows[1])
+                    ? QString::fromStdString(lastBenchmarkResult_.analysis.summary)
+                    : QString()
             };
 
-            for (int i = 0; i < 20; ++i) {
+            for (int i = 0; i < 37; ++i) {
                 if (i > 0) row += ',';
                 appendCsvField(row, values[i]);
             }
