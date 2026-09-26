@@ -133,14 +133,28 @@ struct BenchmarkAnalysis {
     bool nfpLoadReduced{};
 };
 
+struct BenchmarkMatrixEntry {
+    std::string mode;
+    BenchmarkCase result;
+    BenchmarkAnalysis analysis;
+    bool placementSafetyPassed{};
+};
+
 struct BenchmarkResult {
     BenchmarkCase baseline;
     BenchmarkCase optimized;
     BenchmarkDelta delta;
     BenchmarkAnalysis analysis;
+    std::vector<BenchmarkMatrixEntry> matrix;
 };
 
 BenchmarkAnalysis analyzeBenchmark(const BenchmarkResult& result);
+
+std::vector<BenchmarkMatrixEntry> benchmarkMatrix(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& optimizedOptions
+);
 
 BenchmarkResult benchmarkNest(
     const std::vector<Instance>& instances,
