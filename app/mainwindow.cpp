@@ -547,12 +547,15 @@ void MainWindow::buildUi() {
     );
     diagnosticsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    benchmarkTable_ = new QTableWidget(0, 18);
+    benchmarkTable_ = new QTableWidget(0, 27);
     benchmarkTable_->setHorizontalHeaderLabels({
         "Режим", "Время, мс", "Листов", "Размещено", "Пропущено",
-        "Использование", "Кандидаты", "Collision checks", "NFP checks",
-        "Refill moves", "Exchange attempts", "Sheets eliminated",
-        "Optimizer passes", "NFP timeouts", "NFP complexity fallbacks", "NFP timeout fallbacks", "Placed IDs", "Skipped IDs"
+        "Использование", "NFP attempts", "NFP checks", "Cache hit %",
+        "Cache hits", "Cache misses", "NFP timeouts", "Время/деталь, мс",
+        "Refill", "Exchange", "Optimizer passes",
+        "Первично", "Small-part", "Residual", "Новый лист",
+        "Optimizer rescue", "Adaptive repair", "Итогово пропущено",
+        "Placed IDs", "Skipped IDs", "Без потерь", "Recovery telemetry"
     });
     benchmarkTable_->horizontalHeader()->setStretchLastSection(true);
     benchmarkTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1602,66 +1605,84 @@ void MainWindow::populateProductionValidation() {
     validatorTable_->resizeRowsToContents();
 }
 
-void MainWindow::populateBenchmark(
-    const BenchmarkResult& benchmarkResult
-) {
+void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
     if (!benchmarkTable_) return;
-
-    benchmarkTable_->setRowCount(2);
-
-    const BenchmarkCase rows[] = {
-        benchmarkResult.baseline,
-        benchmarkResult.optimized
+    benchmarkTable_->setColumnCount(27);
+    benchmarkTable_->setRowCount(3);
+    const auto signedNumber = [](std::ptrdiff_t v) {
+        return QString::number(static_cast<qlonglong>(v));
     };
-
+    const auto ids = [](const std::vector<std::string>& values) {
+        return QString::fromStdString(std::accumulate(
+            values.begin(), values.end(), std::string{},
+            [](std::string a, const std::string& id) {
+                return a.empty() ? id : a + ";" + id;
+            }));
+    };
+    const BenchmarkCase cases[] = {benchmarkResult.baseline, benchmarkResult.optimized};
     for (int row = 0; row < 2; ++row) {
-        const auto& b = rows[row];
-
+        const auto& b = cases[row];
         const QString values[] = {
             QString::fromStdString(b.name),
-            QString::number(b.milliseconds, 'f', 1),
+            QString::number(b.milliseconds, "f"[0], 1),
             QString::number(static_cast<qulonglong>(b.sheets)),
             QString::number(static_cast<qulonglong>(b.placed)),
             QString::number(static_cast<qulonglong>(b.skipped)),
-            QString("%1%").arg(b.utilization * 100.0, 0, 'f', 2),
-            QString::number(static_cast<qulonglong>(b.candidateChecks)),
-            QString::number(static_cast<qulonglong>(b.collisionChecks)),
+            QString("%1%").arg(b.utilization * 100.0, 0, "f"[0], 2),
+            QString::number(static_cast<qulonglong>(b.nfpAttempts)),
             QString::number(static_cast<qulonglong>(b.nfpChecks)),
+            QString("%1%").arg(b.nfpCacheHitRate * 100.0, 0, "f"[0], 1),
+            QString::number(static_cast<qulonglong>(b.nfpCacheHits)),
+            QString::number(static_cast<qulonglong>(b.nfpCacheMisses)),
+            QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
+            QString::number(b.millisecondsPerPlaced, "f"[0], 2),
             QString::number(static_cast<qulonglong>(b.refillMoves)),
             QString::number(static_cast<qulonglong>(b.exchangeAttempts)),
-            QString::number(static_cast<qulonglong>(b.sheetsEliminated)),
             QString::number(static_cast<qulonglong>(b.optimizerPasses)),
-            QString::number(static_cast<qulonglong>(b.nfpTimeouts)),
-            QString::number(static_cast<qulonglong>(b.nfpComplexityFallbacks)),
-            QString::number(static_cast<qulonglong>(b.nfpTimeoutFallbacks)),
-            QString::fromStdString(std::accumulate(
-                b.placedInstanceIds.begin(), b.placedInstanceIds.end(),
-                std::string{},
-                [](std::string a, const std::string& id) {
-                    return a.empty() ? id : a + ";" + id;
-                }
-            )),
-            QString::fromStdString(std::accumulate(
-                b.skippedInstanceIds.begin(), b.skippedInstanceIds.end(),
-                std::string{},
-                [](std::string a, const std::string& id) {
-                    return a.empty() ? id : a + ";" + id;
-                }
-            ))
+            QString::number(static_cast<qulonglong>(b.initiallyPlaced)),
+            QString::number(static_cast<qulonglong>(b.recoveredBySmallPart)),
+            QString::number(static_cast<qulonglong>(b.recoveredByResidualRetry)),
+            QString::number(static_cast<qulonglong>(b.recoveredOnNewSheet)),
+            QString::number(static_cast<qulonglong>(b.recoveredByOptimizer)),
+            QString::number(static_cast<qulonglong>(b.recoveredByAdaptiveRepair)),
+            QString::number(static_cast<qulonglong>(b.finallyUnplaced)),
+            ids(b.placedInstanceIds), ids(b.skippedInstanceIds),
+            row == 0 ? "reference" : (benchmarkResult.delta.optimizedPlacementSafetyPassed ? "PASS" : "FAIL"),
+            QString("%1/%2/%3/%4/%5/%6/%7")
+                .arg(static_cast<qulonglong>(b.initiallyPlaced))
+                .arg(static_cast<qulonglong>(b.recoveredBySmallPart))
+                .arg(static_cast<qulonglong>(b.recoveredByResidualRetry))
+                .arg(static_cast<qulonglong>(b.recoveredOnNewSheet))
+                .arg(static_cast<qulonglong>(b.recoveredByOptimizer))
+                .arg(static_cast<qulonglong>(b.recoveredByAdaptiveRepair))
+                .arg(static_cast<qulonglong>(b.finallyUnplaced))
         };
-
-        for (int column = 0; column < 18; ++column) {
-            benchmarkTable_->setItem(
-                row,
-                column,
-                new QTableWidgetItem(values[column])
-            );
-        }
+        for (int column = 0; column < 27; ++column)
+            benchmarkTable_->setItem(row, column, new QTableWidgetItem(values[column]));
     }
-
+    const auto& d = benchmarkResult.delta;
+    const QString delta[] = {
+        "DELTA optimized-baseline", QString::number(d.milliseconds, "f"[0], 1),
+        signedNumber(d.sheets), signedNumber(d.placed), signedNumber(d.skipped),
+        QString("%1 p.p.").arg(d.utilizationPercentagePoints, 0, "f"[0], 2),
+        signedNumber(d.nfpAttempts), signedNumber(d.nfpChecks),
+        QString("%1 p.p.").arg(d.nfpCacheHitRatePercentagePoints, 0, "f"[0], 2),
+        signedNumber(d.nfpCacheHits), signedNumber(d.nfpCacheMisses), signedNumber(d.nfpTimeouts),
+        QString::number(d.millisecondsPerPlacedDelta, "f"[0], 2),
+        signedNumber(d.refillMoves), signedNumber(d.exchangeAttempts), signedNumber(d.optimizerPasses),
+        signedNumber(d.initiallyPlaced), signedNumber(d.recoveredBySmallPart),
+        signedNumber(d.recoveredByResidualRetry), signedNumber(d.recoveredOnNewSheet),
+        signedNumber(d.recoveredByOptimizer), signedNumber(d.recoveredByAdaptiveRepair), signedNumber(d.finallyUnplaced),
+        "see above", "see above", d.optimizedPlacementSafetyPassed ? "PASS" : "FAIL",
+        QString("time %1%; sheets %2%; utilization %3 p.p.")
+            .arg(d.elapsedImprovementPercent, 0, "f"[0], 1)
+            .arg(d.sheetReductionPercent, 0, "f"[0], 1)
+            .arg(d.utilizationImprovementPercentagePoints, 0, "f"[0], 2)
+    };
+    for (int column = 0; column < 27; ++column)
+        benchmarkTable_->setItem(2, column, new QTableWidgetItem(delta[column]));
     benchmarkTable_->resizeColumnsToContents();
 }
-
 void MainWindow::calculate() {
     if (instances_.empty()) {
         QMessageBox::information(
