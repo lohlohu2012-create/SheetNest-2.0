@@ -641,10 +641,10 @@ std::vector<Candidate> candidatesFor(
     nfpControl.shouldStop = [control]() {
         return control && control->shouldStop();
     };
-    nfpControl.maxInputVertices = 512;
-    nfpControl.maxConvexPieces = 128;
-    nfpControl.maxPairwisePolygons = 4096;
-    nfpControl.maxUnionSegments = 20000;
+    nfpControl.maxInputVertices = options.nfpMaxInputVertices;
+    nfpControl.maxConvexPieces = options.nfpMaxConvexPieces;
+    nfpControl.maxPairwisePolygons = options.nfpMaxPairwisePolygons;
+    nfpControl.maxUnionSegments = options.nfpMaxUnionSegments;
     if (stats) {
         nfpControl.timeoutCount = &stats->nfpTimeouts;
         nfpControl.complexityFallbackCount = &stats->nfpComplexityFallbacks;
@@ -2046,7 +2046,7 @@ bool localRepack(
             bool success = true;
 
             for (const auto& id : ids) {
-                if (shouldStop(options)) {
+                if (shouldStop(activeOptions)) {
                     success = false;
                     break;
                 }
@@ -3011,6 +3011,9 @@ Result nest(
     const Sheet& sheet,
     const Options& options
 ) {
+    const auto tuning = tuneNestingOptions(instances, sheet, options);
+    const Options activeOptions = tuning.options;
+
     Result best;
     best.unplaced.reserve(instances.size());
     for (const auto& instance : instances) {
@@ -3043,8 +3046,8 @@ Result nest(
                std::max(bb.width(), bb.height());
     });
 
-    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(options.iterations, 128u));
-    std::mt19937 rng(options.seed);
+    const std::size_t iterations = std::max<std::size_t>(1, std::min<std::size_t>(activeOptions.iterations, 128u));
+    std::mt19937 rng(activeOptions.seed);
 
     for (std::size_t attempt = 0; attempt < iterations; ++attempt) {
         if (shouldStop(options)) break;
@@ -3117,7 +3120,7 @@ Result nest(
         auto candidate = runAttempt(
             instances,
             sheet,
-            options,
+            activeOptions,
             std::move(attemptOrder),
             rng,
             attemptStats
@@ -3144,7 +3147,7 @@ Result nest(
         }
     }
 
-    if (options.enableProductionValidation) {
+    if (activeOptions.enableProductionValidation) {
         const auto validation = validateProductionResult(
             instances,
             sheet,
