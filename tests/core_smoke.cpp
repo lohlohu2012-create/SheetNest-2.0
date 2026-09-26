@@ -4060,6 +4060,7 @@ void testPerInstanceProductionNestingTelemetry() {
     assert(first.placed);
     assert(first.reason == NestingFailureReason::None);
     assert(first.stage != NestingTelemetryStage::None);
+    assert(first.recoveryStage == NestingRecoveryStage::InitialPlacement);
 
     assert(second.instanceId == "telemetry-b");
     assert(second.unitId == "telemetry:unit-2");
@@ -4071,6 +4072,14 @@ void testPerInstanceProductionNestingTelemetry() {
     assert(second.stageAttempts > 0);
     assert(second.lastSheetIndex < result.sheets.size());
     assert(std::string(nestingTelemetryStageName(second.stage)) != "None");
+    assert(second.recoveryStage == NestingRecoveryStage::InitialPlacement);
+    assert(result.recovery.initiallyPlaced == parts.size());
+    assert(result.recovery.recoveredBySmallPart == 0);
+    assert(result.recovery.recoveredByResidualRetry == 0);
+    assert(result.recovery.recoveredOnNewSheet == 0);
+    assert(result.recovery.recoveredByOptimizer == 0);
+    assert(result.recovery.recoveredByAdaptiveRepair == 0);
+    assert(result.recovery.finallyUnplaced == 0);
 
     std::vector<Instance> impossible{
         {"telemetry-fail", Part{"telemetry-fail", rectangle(120.0, 120.0), {}}, "telemetry:unit-fail"}
@@ -4089,6 +4098,9 @@ void testPerInstanceProductionNestingTelemetry() {
     assert(failure.lastSheetIndex == 0);
     assert(failure.boundsRejections > 0);
     assert(failure.stageFailures > 0);
+    assert(failure.recoveryStage == NestingRecoveryStage::None);
+    assert(failed.recovery.finallyUnplaced == 1);
+    assert(failed.recovery.initiallyPlaced == 0);
 }
 
 void testNesting20OptimizerDoesNotDropPlacedInstances() {
@@ -4160,6 +4172,19 @@ void testNestingBenchmarkProductionMetrics() {
 
     assert(benchmark.optimized.instanceTelemetry.size() ==
            parts.size());
+
+    const auto& recovery = benchmark.optimized;
+    assert(recovery.initiallyPlaced +
+               recovery.recoveredBySmallPart +
+               recovery.recoveredByResidualRetry +
+               recovery.recoveredOnNewSheet +
+               recovery.recoveredByOptimizer +
+               recovery.recoveredByAdaptiveRepair +
+               recovery.finallyUnplaced ==
+           parts.size());
+    assert(benchmark.delta.finallyUnplaced ==
+           static_cast<std::ptrdiff_t>(benchmark.optimized.finallyUnplaced) -
+           static_cast<std::ptrdiff_t>(benchmark.baseline.finallyUnplaced));
 
     for (const auto& telemetry :
          benchmark.optimized.instanceTelemetry) {
