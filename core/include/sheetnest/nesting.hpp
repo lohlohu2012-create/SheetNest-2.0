@@ -38,6 +38,16 @@ struct Placement {
     int rotation{};
 };
 
+struct NestingRecoveryStats {
+    std::size_t initiallyPlaced{};
+    std::size_t recoveredBySmallPart{};
+    std::size_t recoveredByResidualRetry{};
+    std::size_t recoveredOnNewSheet{};
+    std::size_t recoveredByOptimizer{};
+    std::size_t recoveredByAdaptiveRepair{};
+    std::size_t finallyUnplaced{};
+};
+
 struct NestingStats {
     std::size_t candidateChecks{};
     std::size_t collisionChecks{};
@@ -55,6 +65,7 @@ struct NestingStats {
     std::size_t boundsRejections{};
     std::size_t collisionRejections{};
     std::size_t feasibleCandidates{};
+    NestingRecoveryStats recovery{};
 };
 
 enum class NestingFailureReason {
@@ -130,6 +141,7 @@ struct Result {
     bool productionValidated{};
     bool productionValid{};
     std::size_t productionIssueCount{};
+    NestingRecoveryStats recovery{};
 };
 
 struct NestingRunControl {
