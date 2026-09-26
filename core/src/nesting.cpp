@@ -1885,6 +1885,40 @@ bool refillExistingSheets(
     return changed;
 }
 
+void finalizeRecoveryAttribution(Result& result, NestingStats& stats) {
+    stats.recovery = {};
+    for (const auto& telemetry : result.instanceTelemetry) {
+        if (!telemetry.placed) {
+            ++stats.recovery.finallyUnplaced;
+            continue;
+        }
+        switch (telemetry.recoveryStage) {
+            case NestingRecoveryStage::InitialPlacement:
+                ++stats.recovery.initiallyPlaced;
+                break;
+            case NestingRecoveryStage::SmallPartRefill:
+                ++stats.recovery.recoveredBySmallPart;
+                break;
+            case NestingRecoveryStage::ResidualRetry:
+                ++stats.recovery.recoveredByResidualRetry;
+                break;
+            case NestingRecoveryStage::FreshSheetRecovery:
+                ++stats.recovery.recoveredOnNewSheet;
+                break;
+            case NestingRecoveryStage::Optimizer:
+                ++stats.recovery.recoveredByOptimizer;
+                break;
+            case NestingRecoveryStage::AdaptiveRepair:
+                ++stats.recovery.recoveredByAdaptiveRepair;
+                break;
+            case NestingRecoveryStage::None:
+                ++stats.recovery.finallyUnplaced;
+                break;
+        }
+    }
+    result.recovery = stats.recovery;
+}
+
 double sheetEnvelopeScore(const SheetState& state) {
     if (state.shapes.empty()) {
         return 0.0;
@@ -2554,6 +2588,7 @@ Result runAttempt(
                 state.shapes.back().outerBounds
             );
             placed = true;
+            telemetry.recoveryStage = NestingRecoveryStage::InitialPlacement;
         } else {
             SheetState state;
             placed = placeOnSheet(
@@ -2564,7 +2599,10 @@ Result runAttempt(
                 rotations,
                 &stats
             );
-            if (placed) states.push_back(std::move(state));
+            if (placed) {
+                states.push_back(std::move(state));
+                telemetry.recoveryStage = NestingRecoveryStage::InitialPlacement;
+            }
         }
         telemetry.candidateChecks += stats.candidateChecks - statsBeforeInstance.candidateChecks;
         telemetry.collisionChecks += stats.collisionChecks - statsBeforeInstance.collisionChecks;
@@ -2697,15 +2735,19 @@ Result runAttempt(
                     telemetryIt->stageAttempts++;
                 }
 
-                if (tryPlaceOnExistingSheets(
+                const bool refillPlaced = tryPlaceOnExistingSheets(
                         *instance,
                         states,
                         states.size(),
                         sheet,
                         options,
                         &stats
-                    )) {
+                    );
+                if (refillPlaced) {
                     ++stats.refillMoves;
+                    telemetryIt->recoveryStage = NestingRecoveryStage::SmallPartRefill;
+                    telemetryIt->placed = true;
+                    telemetryIt->reason = NestingFailureReason::None;
                 } else {
                     nextRemaining.push_back(id);
                 }
@@ -2800,6 +2842,9 @@ Result runAttempt(
                         states[sheetIndex] = std::move(trial);
                         recoveredOnExisting = true;
                         ++stats.refillMoves;
+                        retryTelemetryIt->recoveryStage = NestingRecoveryStage::ResidualRetry;
+                        retryTelemetryIt->placed = true;
+                        retryTelemetryIt->reason = NestingFailureReason::None;
                         break;
                     }
                 }
@@ -2903,8 +2948,7 @@ Result runAttempt(
                     telemetryIt->placed = true;
                     telemetryIt->reason = NestingFailureReason::None;
                     telemetryIt->stage = NestingTelemetryStage::FreshSheetRecovery;
-                } else {
-                    ++telemetryIt->stageFailures;
+                    telemetryIt->recoveryStage = NestingRecoveryStage::FreshSheetRecovery;
                 }
             }
         }
@@ -2972,6 +3016,7 @@ Result runAttempt(
         );
     }
 
+    finalizeRecoveryAttribution(result, stats);
     result.stats = stats;
     return result;
 }
