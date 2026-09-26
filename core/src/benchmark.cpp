@@ -286,6 +286,96 @@ BenchmarkDelta makeDelta(
 
 } // namespace
 
+const char* benchmarkBottleneckName(BenchmarkBottleneck bottleneck) {
+    switch (bottleneck) {
+        case BenchmarkBottleneck::None: return "None";
+        case BenchmarkBottleneck::PlacementSafety: return "PlacementSafety";
+        case BenchmarkBottleneck::InvalidGeometry: return "InvalidGeometry";
+        case BenchmarkBottleneck::NfpTimeout: return "NfpTimeout";
+        case BenchmarkBottleneck::NoFeasiblePosition: return "NoFeasiblePosition";
+        case BenchmarkBottleneck::CandidateSearch: return "CandidateSearch";
+        case BenchmarkBottleneck::SheetCapacity: return "SheetCapacity";
+        case BenchmarkBottleneck::RecoveryPressure: return "RecoveryPressure";
+    }
+    return "None";
+}
+
+BenchmarkAnalysis analyzeBenchmark(const BenchmarkResult& result) {
+    BenchmarkAnalysis analysis;
+    const auto& b = result.baseline;
+    const auto& o = result.optimized;
+    const auto& d = result.delta;
+
+    analysis.placementSafetyPassed = d.optimizedPlacementSafetyPassed;
+    analysis.lossFree = o.finallyUnplaced == 0 && o.skipped == 0;
+    analysis.timeImproved = o.milliseconds < b.milliseconds;
+    analysis.sheetsReduced = o.sheets < b.sheets;
+    analysis.utilizationImproved =
+        o.utilization > b.utilization + 1e-12;
+    analysis.nfpLoadReduced =
+        o.nfpAttemptsPerPlaced + 1e-12 < b.nfpAttemptsPerPlaced;
+
+    // Safety and geometry diagnostics have priority over performance
+    // classifications: a faster run that loses instances is not a
+    // successful production benchmark.
+    if (!analysis.placementSafetyPassed) {
+        analysis.bottleneck = BenchmarkBottleneck::PlacementSafety;
+        analysis.summary = "Оптимизация снизила число размещённых деталей.";
+    } else if (o.telemetryInvalidGeometry > b.telemetryInvalidGeometry) {
+        analysis.bottleneck = BenchmarkBottleneck::InvalidGeometry;
+        analysis.summary = "Рост отказов связан с некорректной геометрией.";
+    } else {
+        const double timeoutBase =
+            b.nfpAttempts > 0
+                ? static_cast<double>(b.nfpTimeouts) /
+                  static_cast<double>(b.nfpAttempts)
+                : 0.0;
+        const double timeoutOptimized =
+            o.nfpAttempts > 0
+                ? static_cast<double>(o.nfpTimeouts) /
+                  static_cast<double>(o.nfpAttempts)
+                : 0.0;
+
+        if (o.nfpTimeouts > b.nfpTimeouts &&
+            timeoutOptimized > timeoutBase + 0.01) {
+            analysis.bottleneck = BenchmarkBottleneck::NfpTimeout;
+            analysis.summary = "Основное узкое место: тайм-ауты NFP.";
+        } else if (
+            o.nfpAttemptsPerPlaced >
+                std::max(10.0, b.nfpAttemptsPerPlaced * 1.25) ||
+            o.candidateChecks >
+                std::max<std::size_t>(
+                    1000,
+                    b.candidateChecks +
+                        b.candidateChecks / 4
+                )
+        ) {
+            analysis.bottleneck = BenchmarkBottleneck::CandidateSearch;
+            analysis.summary = "Основное узкое место: избыточный поиск кандидатов.";
+        } else if (
+            o.telemetryNoFeasiblePosition > b.telemetryNoFeasiblePosition
+        ) {
+            analysis.bottleneck = BenchmarkBottleneck::NoFeasiblePosition;
+            analysis.summary = "Основное узкое место: отсутствие допустимой позиции.";
+        } else if (
+            o.sheets > b.sheets &&
+            o.utilization + 0.01 < b.utilization
+        ) {
+            analysis.bottleneck = BenchmarkBottleneck::SheetCapacity;
+            analysis.summary = "Основное узкое место: ёмкость листа и остаточное пространство.";
+        } else if (o.finallyUnplaced > 0) {
+            analysis.bottleneck = BenchmarkBottleneck::RecoveryPressure;
+            analysis.summary = "Остались неразмещённые детали после recovery.";
+        } else {
+            analysis.bottleneck = BenchmarkBottleneck::None;
+            analysis.summary = "Явного узкого места по текущей телеметрии не выявлено.";
+        }
+    }
+
+    analysis.bottleneckName = benchmarkBottleneckName(analysis.bottleneck);
+    return analysis;
+}
+
 BenchmarkResult benchmarkNest(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
@@ -327,6 +417,7 @@ BenchmarkResult benchmarkNest(
         result.baseline,
         result.optimized
     );
+    result.analysis = analyzeBenchmark(result);
 
     return result;
 }
