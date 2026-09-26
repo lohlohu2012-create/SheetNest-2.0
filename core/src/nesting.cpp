@@ -639,8 +639,11 @@ std::vector<Candidate> candidatesFor(
     };
 
     nfp::NfpRunControl nfpControl;
-    nfpControl.shouldStop = [control]() {
-        return control && control->shouldStop();
+    auto nfpPairDeadline = std::chrono::steady_clock::time_point::max();
+    nfpControl.shouldStop = [control, &nfpPairDeadline]() {
+        if (control && control->shouldStop()) return true;
+        if (std::chrono::steady_clock::now() >= nfpPairDeadline) return true;
+        return false;
     };
     nfpControl.maxInputVertices = options.nfpMaxInputVertices;
     nfpControl.maxConvexPieces = options.nfpMaxConvexPieces;
@@ -707,6 +710,12 @@ std::vector<Candidate> candidatesFor(
             searchOptions.includeSheetBoundary = true;
             searchOptions.includeNfpVertices = true;
             searchOptions.includeBoundaryMidpoints = true;
+
+            nfpPairDeadline = options.nfpTimeBudgetMs == 0
+                ? std::chrono::steady_clock::time_point::max()
+                : std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(options.nfpTimeBudgetMs);
+            nfpControl.timeoutRecorded = false;
 
             const auto search = nfp::searchFeasibleBoundary(
                 placed.outer,
