@@ -2,6 +2,7 @@
 #include "sheetnest/nfp.hpp"
 #include "sheetnest/production_validation.hpp"
 #include "sheetnest/spatial_index.hpp"
+#include "sheetnest/runtime_tuning.hpp"
 
 #include <algorithm>
 #include <cmath>
