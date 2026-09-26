@@ -2450,33 +2450,16 @@ Result runAttempt(
 
     result.instanceTelemetry.reserve(instances.size());
     for (const auto& instance : instances) {
-        result.instanceTelemetry.push_back({
-            instance.id,
-            instance.unitId.empty() ? instance.id + ":unit-1" : instance.unitId,
-            NestingFailureReason::None,
-            NestingRecoveryStage::None, // recoveryStage
-            0, // candidateChecks
-            0, // collisionChecks
-            0, // nfpChecks
-            0, // nfpAttempts
-            0, // nfpTimeouts
-            0, // nfpFallbacks
-            0, // nfpCacheHits
-            0, // nfpCacheMisses
-            0, // boundsRejections
-            0, // collisionRejections
-            0, // feasibleCandidates
-            0, // elapsedMs
-            static_cast<std::size_t>(-1), // lastSheetIndex
-            NestingTelemetryStage::None, // stage
-            0, // stageAttempts
-            0, // stageFailures
-            0, // repairRounds
-            0, // repairConflictRounds
-            false, // repairExtracted
-            false, // repairMoved
-            false  // placed
-        });
+        InstanceNestingTelemetry telemetry;
+        telemetry.instanceId = instance.id;
+        telemetry.unitId = instance.unitId.empty()
+            ? instance.id + ":unit-1"
+            : instance.unitId;
+        telemetry.reason = NestingFailureReason::None;
+        telemetry.recoveryStage = NestingRecoveryStage::None;
+        telemetry.lastSheetIndex = static_cast<std::size_t>(-1);
+        telemetry.stage = NestingTelemetryStage::None;
+        result.instanceTelemetry.push_back(std::move(telemetry));
     }
 
     if (order.empty()) return result;
@@ -2904,7 +2887,7 @@ Result runAttempt(
                 &stats
             );
 
-            const auto telemetryIt = std::find_if(
+            const auto recoveryTelemetryIt = std::find_if(
                 result.instanceTelemetry.begin(),
                 result.instanceTelemetry.end(),
                 [&](const InstanceNestingTelemetry& telemetry) {
@@ -2912,30 +2895,30 @@ Result runAttempt(
                 }
             );
 
-            if (telemetryIt != result.instanceTelemetry.end()) {
-                telemetryIt->candidateChecks +=
+            if (recoveryTelemetryIt != result.instanceTelemetry.end()) {
+                recoveryTelemetryIt->candidateChecks +=
                     stats.candidateChecks - before.candidateChecks;
-                telemetryIt->collisionChecks +=
+                recoveryTelemetryIt->collisionChecks +=
                     stats.collisionChecks - before.collisionChecks;
-                telemetryIt->nfpChecks +=
+                recoveryTelemetryIt->nfpChecks +=
                     stats.nfpChecks - before.nfpChecks;
-                telemetryIt->nfpAttempts +=
+                recoveryTelemetryIt->nfpAttempts +=
                     stats.nfpAttempts - before.nfpAttempts;
-                telemetryIt->nfpTimeouts +=
+                recoveryTelemetryIt->nfpTimeouts +=
                     stats.nfpTimeouts - before.nfpTimeouts;
-                telemetryIt->nfpFallbacks +=
+                recoveryTelemetryIt->nfpFallbacks +=
                     stats.nfpComplexityFallbacks -
                     before.nfpComplexityFallbacks;
-                telemetryIt->nfpCacheHits +=
+                recoveryTelemetryIt->nfpCacheHits +=
                     stats.nfpCacheHits - before.nfpCacheHits;
-                telemetryIt->nfpCacheMisses +=
+                recoveryTelemetryIt->nfpCacheMisses +=
                     stats.nfpCacheMisses - before.nfpCacheMisses;
-                telemetryIt->boundsRejections +=
+                recoveryTelemetryIt->boundsRejections +=
                     stats.boundsRejections - before.boundsRejections;
-                telemetryIt->collisionRejections +=
+                recoveryTelemetryIt->collisionRejections +=
                     stats.collisionRejections -
                     before.collisionRejections;
-                telemetryIt->feasibleCandidates +=
+                recoveryTelemetryIt->feasibleCandidates +=
                     stats.feasibleCandidates -
                     before.feasibleCandidates;
             }
