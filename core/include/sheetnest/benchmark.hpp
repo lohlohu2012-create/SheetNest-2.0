@@ -108,11 +108,39 @@ struct BenchmarkDelta {
     bool optimizedPlacementSafetyPassed{};
 };
 
+enum class BenchmarkBottleneck {
+    None,
+    PlacementSafety,
+    InvalidGeometry,
+    NfpTimeout,
+    NoFeasiblePosition,
+    CandidateSearch,
+    SheetCapacity,
+    RecoveryPressure
+};
+
+const char* benchmarkBottleneckName(BenchmarkBottleneck bottleneck);
+
+struct BenchmarkAnalysis {
+    BenchmarkBottleneck bottleneck{BenchmarkBottleneck::None};
+    std::string bottleneckName;
+    std::string summary;
+    bool placementSafetyPassed{};
+    bool lossFree{};
+    bool timeImproved{};
+    bool sheetsReduced{};
+    bool utilizationImproved{};
+    bool nfpLoadReduced{};
+};
+
 struct BenchmarkResult {
     BenchmarkCase baseline;
     BenchmarkCase optimized;
     BenchmarkDelta delta;
+    BenchmarkAnalysis analysis;
 };
+
+BenchmarkAnalysis analyzeBenchmark(const BenchmarkResult& result);
 
 BenchmarkResult benchmarkNest(
     const std::vector<Instance>& instances,
