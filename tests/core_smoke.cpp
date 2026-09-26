@@ -4158,6 +4158,53 @@ void testNesting20OptimizerDoesNotDropPlacedInstances() {
 
 
 
+void testNestingBenchmarkMatrix() {
+    std::vector<Instance> parts;
+    for (int i = 0; i < 8; ++i) {
+        parts.push_back({
+            "matrix-" + std::to_string(i),
+            Part{"matrix", rectangle(16.0, 8.0), {}},
+            "matrix:unit-" + std::to_string(i + 1)
+        });
+    }
+
+    Sheet sheet{60.0, 50.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 8;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.enableSmallPartOptimization = true;
+    options.smallPartCandidateBudget = 256;
+    options.smallPartRefillPasses = 2;
+    options.residualRetryPasses = 2;
+    options.enableAutoRepair = true;
+    options.autoRepairAttempts = 2;
+
+    const auto matrix = benchmarkMatrix(parts, sheet, options);
+
+    assert(matrix.size() == 5);
+    assert(matrix.front().mode == "Greedy");
+    assert(matrix.back().mode == "Full optimized");
+
+    for (const auto& entry : matrix) {
+        assert(entry.result.placed + entry.result.skipped == parts.size());
+        assert(entry.result.instanceTelemetry.size() == parts.size());
+        assert(!entry.analysis.bottleneckName.empty());
+        assert(entry.placementSafetyPassed ==
+               (entry.result.placed >= matrix.front().result.placed));
+
+        std::unordered_set<std::string> ids;
+        for (const auto& instance : parts) ids.insert(instance.id);
+        for (const auto& id : entry.result.placedInstanceIds) {
+            assert(ids.contains(id));
+        }
+        for (const auto& id : entry.result.skippedInstanceIds) {
+            assert(ids.contains(id));
+        }
+    }
+}
+
 void testNestingBenchmarkProductionMetrics() {
     std::vector<Instance> parts;
     for (int i = 0; i < 10; ++i) {
@@ -4645,6 +4692,7 @@ testAdaptiveRepairConflictGraph();
     testNesting20NewSheetRecovery();
     testPerInstanceProductionNestingTelemetry();
     testNestingBenchmarkProductionMetrics();
+    testNestingBenchmarkMatrix();
     testNesting20OptimizerDoesNotDropPlacedInstances();
 
 
