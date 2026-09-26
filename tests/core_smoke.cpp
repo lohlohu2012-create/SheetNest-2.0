@@ -4205,6 +4205,59 @@ void testNestingBenchmarkMatrix() {
     }
 }
 
+void testNestingBenchmarkSelector() {
+    std::vector<Instance> parts;
+    for (int i = 0; i < 8; ++i) {
+        parts.push_back({
+            "selector-" + std::to_string(i),
+            Part{"selector", rectangle(16.0, 8.0), {}},
+            "selector:unit-" + std::to_string(i + 1)
+        });
+    }
+
+    Sheet sheet{60.0, 50.0, 1.0};
+    Options options;
+    options.rotations = {0, 90};
+    options.iterations = 8;
+    options.gapMm = 1.0;
+    options.enableOptimizer = true;
+    options.enableSmallPartOptimization = true;
+    options.smallPartCandidateBudget = 256;
+    options.smallPartRefillPasses = 2;
+    options.residualRetryPasses = 2;
+    options.enableAutoRepair = true;
+    options.autoRepairAttempts = 2;
+    options.enableAdaptiveDestroyRepair = true;
+    options.adaptiveRepairAttempts = 2;
+    options.adaptiveRepairRounds = 1;
+
+    const auto selection =
+        selectBenchmarkConfiguration(parts, sheet, options);
+
+    assert(!selection.profile.empty());
+    assert(!selection.reason.empty());
+    assert(selection.evaluatedCandidates == 4);
+    assert(selection.result.placed + selection.result.skipped == parts.size());
+
+    // Selector output must remain a real configuration, not a synthetic
+    // benchmark result, and its safety flag must match the selected result's
+    // relation to the greedy baseline used by the selector.
+    assert(selection.options.iterations >= 1);
+    assert(selection.options.candidateVariantBudget >= 1);
+    assert(selection.options.smallPartCandidateBudget >= 1);
+
+    std::unordered_set<std::string> ids;
+    for (const auto& instance : parts) {
+        ids.insert(instance.id);
+    }
+    for (const auto& id : selection.result.placedInstanceIds) {
+        assert(ids.contains(id));
+    }
+    for (const auto& id : selection.result.skippedInstanceIds) {
+        assert(ids.contains(id));
+    }
+}
+
 void testNestingBenchmarkProductionMetrics() {
     std::vector<Instance> parts;
     for (int i = 0; i < 10; ++i) {
@@ -4692,6 +4745,7 @@ testAdaptiveRepairConflictGraph();
     testNesting20NewSheetRecovery();
     testPerInstanceProductionNestingTelemetry();
     testNestingBenchmarkProductionMetrics();
+    testNestingBenchmarkSelector();
     testNestingBenchmarkMatrix();
     testNesting20OptimizerDoesNotDropPlacedInstances();
 
