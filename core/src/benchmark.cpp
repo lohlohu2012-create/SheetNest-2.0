@@ -59,6 +59,14 @@ BenchmarkCase runCase(
     benchmark.nfpCacheHits = result.stats.nfpCacheHits;
     benchmark.nfpCacheMisses = result.stats.nfpCacheMisses;
 
+    benchmark.initiallyPlaced = result.stats.recovery.initiallyPlaced;
+    benchmark.recoveredBySmallPart = result.stats.recovery.recoveredBySmallPart;
+    benchmark.recoveredByResidualRetry = result.stats.recovery.recoveredByResidualRetry;
+    benchmark.recoveredOnNewSheet = result.stats.recovery.recoveredOnNewSheet;
+    benchmark.recoveredByOptimizer = result.stats.recovery.recoveredByOptimizer;
+    benchmark.recoveredByAdaptiveRepair = result.stats.recovery.recoveredByAdaptiveRepair;
+    benchmark.finallyUnplaced = result.stats.recovery.finallyUnplaced;
+
     std::unordered_set<std::string> skipped(
         result.unplaced.begin(),
         result.unplaced.end()
