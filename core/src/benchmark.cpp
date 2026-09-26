@@ -37,21 +37,6 @@ BenchmarkCase runCase(
             ? instances.size() - benchmark.skipped
             : 0;
     benchmark.utilization = result.utilization;
-    benchmark.nfpCacheHitRate =
-        (benchmark.nfpCacheHits + benchmark.nfpCacheMisses) > 0
-            ? static_cast<double>(benchmark.nfpCacheHits) /
-              static_cast<double>(benchmark.nfpCacheHits + benchmark.nfpCacheMisses)
-            : 0.0;
-    benchmark.nfpAttemptsPerPlaced =
-        benchmark.placed > 0
-            ? static_cast<double>(benchmark.nfpAttempts) /
-              static_cast<double>(benchmark.placed)
-            : 0.0;
-    benchmark.millisecondsPerPlaced =
-        benchmark.placed > 0
-            ? benchmark.milliseconds / static_cast<double>(benchmark.placed)
-            : benchmark.milliseconds;
-
     benchmark.candidateChecks = result.stats.candidateChecks;
     benchmark.collisionChecks = result.stats.collisionChecks;
     benchmark.nfpChecks = result.stats.nfpChecks;
@@ -72,6 +57,21 @@ BenchmarkCase runCase(
         result.stats.nfpTimeoutFallbacks;
     benchmark.nfpCacheHits = result.stats.nfpCacheHits;
     benchmark.nfpCacheMisses = result.stats.nfpCacheMisses;
+
+    benchmark.nfpCacheHitRate =
+        (benchmark.nfpCacheHits + benchmark.nfpCacheMisses) > 0
+            ? static_cast<double>(benchmark.nfpCacheHits) /
+              static_cast<double>(benchmark.nfpCacheHits + benchmark.nfpCacheMisses)
+            : 0.0;
+    benchmark.nfpAttemptsPerPlaced =
+        benchmark.placed > 0
+            ? static_cast<double>(benchmark.nfpAttempts) /
+              static_cast<double>(benchmark.placed)
+            : 0.0;
+    benchmark.millisecondsPerPlaced =
+        benchmark.placed > 0
+            ? benchmark.milliseconds / static_cast<double>(benchmark.placed)
+            : benchmark.milliseconds;
 
     benchmark.initiallyPlaced = result.stats.recovery.initiallyPlaced;
     benchmark.recoveredBySmallPart = result.stats.recovery.recoveredBySmallPart;
