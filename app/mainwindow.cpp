@@ -1608,7 +1608,7 @@ void MainWindow::populateProductionValidation() {
 void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
     if (!benchmarkTable_) return;
     benchmarkTable_->setColumnCount(28);
-    benchmarkTable_->setRowCount(3);
+    benchmarkTable_->setRowCount(static_cast<int>(benchmarkResult.matrix.size()) + 1);
     const auto signedNumber = [](std::ptrdiff_t v) {
         return QString::number(static_cast<qlonglong>(v));
     };
@@ -1619,9 +1619,9 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
                 return a.empty() ? id : a + ";" + id;
             }));
     };
-    const BenchmarkCase cases[] = {benchmarkResult.baseline, benchmarkResult.optimized};
-    for (int row = 0; row < 2; ++row) {
-        const auto& b = cases[row];
+    for (int row = 0; row < static_cast<int>(benchmarkResult.matrix.size()); ++row) {
+        const auto& entry = benchmarkResult.matrix[static_cast<std::size_t>(row)];
+        const auto& b = entry.result;
         const QString values[] = {
             QString::fromStdString(b.name),
             QString::number(b.milliseconds, "f"[0], 1),
@@ -1647,7 +1647,7 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
             QString::number(static_cast<qulonglong>(b.recoveredByAdaptiveRepair)),
             QString::number(static_cast<qulonglong>(b.finallyUnplaced)),
             ids(b.placedInstanceIds), ids(b.skippedInstanceIds),
-            row == 0 ? "reference" : (benchmarkResult.delta.optimizedPlacementSafetyPassed ? "PASS" : "FAIL"),
+            entry.placementSafetyPassed ? "PASS" : "FAIL",
             QString("%1/%2/%3/%4/%5/%6/%7")
                 .arg(static_cast<qulonglong>(b.initiallyPlaced))
                 .arg(static_cast<qulonglong>(b.recoveredBySmallPart))
@@ -1660,9 +1660,9 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
         for (int column = 0; column < 27; ++column)
             benchmarkTable_->setItem(row, column, new QTableWidgetItem(values[column]));
         benchmarkTable_->setItem(row, 27, new QTableWidgetItem(
-            row == 1
-                ? QString::fromStdString(benchmarkResult.analysis.summary)
-                : QString()
+            QString("%1: %2")
+                .arg(QString::fromStdString(entry.analysis.bottleneckName))
+                .arg(QString::fromStdString(entry.analysis.summary))
         ));
     }
     const auto& d = benchmarkResult.delta;
@@ -1684,9 +1684,10 @@ void MainWindow::populateBenchmark(const BenchmarkResult& benchmarkResult) {
             .arg(d.sheetReductionPercent, 0, "f"[0], 1)
             .arg(d.utilizationImprovementPercentagePoints, 0, "f"[0], 2)
     };
+    const int deltaRow = static_cast<int>(benchmarkResult.matrix.size());
     for (int column = 0; column < 27; ++column)
-        benchmarkTable_->setItem(2, column, new QTableWidgetItem(delta[column]));
-    benchmarkTable_->setItem(2, 27, new QTableWidgetItem(
+        benchmarkTable_->setItem(deltaRow, column, new QTableWidgetItem(delta[column]));
+    benchmarkTable_->setItem(deltaRow, 27, new QTableWidgetItem(
         QString("%1: %2")
             .arg(QString::fromStdString(benchmarkResult.analysis.bottleneckName))
             .arg(QString::fromStdString(benchmarkResult.analysis.summary))
