@@ -376,6 +376,76 @@ BenchmarkAnalysis analyzeBenchmark(const BenchmarkResult& result) {
     return analysis;
 }
 
+std::vector<BenchmarkMatrixEntry> benchmarkMatrix(
+    const std::vector<Instance>& instances,
+    const Sheet& sheet,
+    const Options& optimizedOptions
+) {
+    std::vector<BenchmarkMatrixEntry> matrix;
+
+    auto addCase = [&](const std::string& mode, Options options) {
+        BenchmarkMatrixEntry entry;
+        entry.mode = mode;
+        entry.result = runCase(mode, instances, sheet, options);
+        entry.placementSafetyPassed =
+            entry.result.placed >= instances.size();
+        matrix.push_back(std::move(entry));
+    };
+
+    Options greedy = optimizedOptions;
+    greedy.iterations = 1;
+    greedy.enableOptimizer = false;
+    greedy.enableProductionValidation = false;
+    greedy.enableAutoRepair = false;
+    greedy.enableAdaptiveDestroyRepair = false;
+    greedy.enableSmallPartOptimization = false;
+    greedy.autoRepairAttempts = 0;
+    greedy.adaptiveRepairAttempts = 0;
+    greedy.adaptiveRepairMaxNeighbors = 0;
+    greedy.adaptiveRepairRounds = 0;
+    addCase("Greedy", greedy);
+
+    Options search = optimizedOptions;
+    search.enableOptimizer = false;
+    search.enableProductionValidation = false;
+    search.enableAutoRepair = false;
+    search.enableAdaptiveDestroyRepair = false;
+    search.autoRepairAttempts = 0;
+    search.adaptiveRepairAttempts = 0;
+    search.adaptiveRepairMaxNeighbors = 0;
+    search.adaptiveRepairRounds = 0;
+    addCase("Multi-iteration", search);
+
+    Options refill = search;
+    refill.enableSmallPartOptimization = true;
+    addCase("Small-part refill", refill);
+
+    Options recovery = refill;
+    recovery.enableAutoRepair = true;
+    recovery.autoRepairAttempts = std::max<std::size_t>(
+        1, optimizedOptions.autoRepairAttempts
+    );
+    addCase("Recovery", recovery);
+
+    Options full = optimizedOptions;
+    addCase("Full optimized", full);
+
+    // Analyze every mode against the same greedy reference.
+    const BenchmarkCase& reference = matrix.front().result;
+    for (auto& entry : matrix) {
+        BenchmarkResult pair;
+        pair.baseline = reference;
+        pair.optimized = entry.result;
+        pair.delta = makeDelta(reference, entry.result);
+        pair.analysis = analyzeBenchmark(pair);
+        entry.analysis = pair.analysis;
+        entry.placementSafetyPassed =
+            pair.delta.optimizedPlacementSafetyPassed;
+    }
+
+    return matrix;
+}
+
 BenchmarkResult benchmarkNest(
     const std::vector<Instance>& instances,
     const Sheet& sheet,
