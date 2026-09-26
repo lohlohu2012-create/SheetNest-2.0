@@ -4563,6 +4563,39 @@ void testNfpPolygonWithHolesModel() {
     assert(nfp::pointInPolygonWithHoles({20,30},region) == false);
 }
 
+void testFullProductionRoundTripPipeline() {
+    const auto doc = importDxf(kRectangleWithHoleDxf, 0.05);
+    assert(doc.valid());
+    const auto instances = instancesFromDxf(doc, 1);
+    Sheet sheet{200, 200, 5};
+    Options options;
+    options.rotations = {0};
+    options.iterations = 2;
+    options.enableOptimizer = false;
+    const auto result = nest(instances, sheet, options);
+    assert(result.unplaced.empty());
+
+    CuttingParameters cuttingParameters;
+    cuttingParameters.speedMMin = 5.0;
+    PathOptions pathOptions;
+    const auto pipeline = validateProductionPipeline(
+        doc,
+        instances,
+        sheet,
+        options,
+        result,
+        cuttingParameters,
+        pathOptions
+    );
+    assert(pipeline.valid);
+    assert(pipeline.failedStage == ProductionPipelineStage::Complete);
+    assert(pipeline.roundTripValid);
+    assert(pipeline.camValidation.valid);
+    assert(pipeline.camOperationCount > 0);
+    assert(pipeline.exportedBytes > 0);
+    assert(pipeline.roundTripPreflight.valid);
+}
+
 void testAdaptiveRuntimeTuningMassComplex() {
     std::vector<Instance> instances;
     for (std::size_t i = 0; i < 64; ++i) {
@@ -4795,6 +4828,7 @@ testAdaptiveRepairConflictGraph();
     testNesting20OptimizerDoesNotDropPlacedInstances();
     testAdaptiveRuntimeTuningMassComplex();
     testMassDxfStressPipeline();
+    testFullProductionRoundTripPipeline();
 
 
     std::cout << "[PASS] NFP tests" << std::endl;
