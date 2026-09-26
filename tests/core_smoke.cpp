@@ -4209,6 +4209,16 @@ void testNestingBenchmarkProductionMetrics() {
            static_cast<std::ptrdiff_t>(benchmark.optimized.finallyUnplaced) -
            static_cast<std::ptrdiff_t>(benchmark.baseline.finallyUnplaced));
 
+    assert(!benchmark.analysis.bottleneckName.empty());
+    assert(benchmark.analysis.placementSafetyPassed ==
+           benchmark.delta.optimizedPlacementSafetyPassed);
+    assert(benchmark.analysis.lossFree ==
+           (benchmark.optimized.finallyUnplaced == 0 &&
+            benchmark.optimized.skipped == 0));
+    assert(std::string(benchmarkBottleneckName(
+               benchmark.analysis.bottleneck)) ==
+           benchmark.analysis.bottleneckName);
+
     for (const auto& telemetry :
          benchmark.optimized.instanceTelemetry) {
         assert(!telemetry.instanceId.empty());
