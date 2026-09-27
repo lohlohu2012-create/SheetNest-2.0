@@ -56,6 +56,9 @@ struct BenchmarkCase {
     std::vector<std::string> placedInstanceIds;
     std::vector<std::string> skippedInstanceIds;
     std::vector<InstanceNestingTelemetry> instanceTelemetry;
+    bool runtimeTuned{};
+    std::string runtimeProfile;
+    std::string runtimeReason;
 };
 
 struct BenchmarkDelta {
