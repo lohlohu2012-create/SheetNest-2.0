@@ -90,6 +90,9 @@ BenchmarkCase runCase(
 
     benchmark.skippedInstanceIds = result.unplaced;
     benchmark.instanceTelemetry = result.instanceTelemetry;
+    benchmark.runtimeTuned = result.runtimeTuned;
+    benchmark.runtimeProfile = result.runtimeProfile;
+    benchmark.runtimeReason = result.runtimeReason;
 
     benchmark.placedInstanceIds.reserve(benchmark.placed);
     for (const auto& instance : instances) {
