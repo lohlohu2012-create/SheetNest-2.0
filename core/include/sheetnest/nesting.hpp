@@ -142,6 +142,15 @@ struct Result {
     bool productionValid{};
     std::size_t productionIssueCount{};
     NestingRecoveryStats recovery{};
+
+    // Runtime tuning is part of the result contract so diagnostics/UI can
+    // explain which bounded search profile was actually used.
+    bool runtimeTuned{};
+    std::string runtimeProfile;
+    std::string runtimeReason;
+    std::size_t runtimeInstanceCount{};
+    std::size_t runtimeTotalVertices{};
+    std::size_t runtimeMaxPartVertices{};
 };
 
 struct NestingRunControl {
