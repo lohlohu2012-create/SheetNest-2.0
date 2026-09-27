@@ -2467,6 +2467,14 @@ Result runAttempt(
     NestingStats& stats
 ) {
     Result result;
+    const auto runtimeTuning = tuneNestingOptions(instances, sheet, options);
+    result.runtimeTuned = runtimeTuning.tuned;
+    result.runtimeProfile = runtimeTuning.profile;
+    result.runtimeReason = runtimeTuning.reason;
+    result.runtimeInstanceCount = runtimeTuning.instanceCount;
+    result.runtimeTotalVertices = runtimeTuning.totalVertices;
+    result.runtimeMaxPartVertices = runtimeTuning.maxPartVertices;
+
     std::vector<SheetState> states;
     states.reserve(16);
 
